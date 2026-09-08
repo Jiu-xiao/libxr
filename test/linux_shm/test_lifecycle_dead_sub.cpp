@@ -11,6 +11,7 @@
  * recover.
  */
 #include "linux_shm_topic_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxShmTopicTest
 {
@@ -29,15 +30,15 @@ void RunLifecycleDeadSubscriberScenario()
     config.queue_num = 4;
 
     SharedTopic publisher(topic_name, config);
-    ASSERT(publisher.Valid());
+    TEST_ASSERT(publisher.Valid());
 
     int ack_pipe[2] = {-1, -1};
     int cmd_pipe[2] = {-1, -1};
-    ASSERT(pipe(ack_pipe) == 0);
-    ASSERT(pipe(cmd_pipe) == 0);
+    TEST_ASSERT(pipe(ack_pipe) == 0);
+    TEST_ASSERT(pipe(cmd_pipe) == 0);
 
     pid_t child = fork();
-    ASSERT(child >= 0);
+    TEST_ASSERT(child >= 0);
 
     if (child == 0)
     {
@@ -78,27 +79,29 @@ void RunLifecycleDeadSubscriberScenario()
 
     IPCFrame frame = {};
     FillFrame(frame, 401);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
     uint8_t ack = 0;
-    ASSERT(read(ack_pipe[0], &ack, sizeof(ack)) == static_cast<ssize_t>(sizeof(ack)));
+    TEST_ASSERT(read(ack_pipe[0], &ack, sizeof(ack)) ==
+                static_cast<ssize_t>(sizeof(ack)));
 
     FillFrame(frame, 402);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
     uint8_t cmd = 0x5A;
-    ASSERT(write(cmd_pipe[1], &cmd, sizeof(cmd)) == static_cast<ssize_t>(sizeof(cmd)));
+    TEST_ASSERT(write(cmd_pipe[1], &cmd, sizeof(cmd)) ==
+                static_cast<ssize_t>(sizeof(cmd)));
 
     ExpectChildExit(child);
-    ASSERT(publisher.GetSubscriberNum() == 1);
+    TEST_ASSERT(publisher.GetSubscriberNum() == 1);
 
     SharedData data0;
     SharedData data1;
     SharedData data2;
-    ASSERT(publisher.CreateData(data0) == LibXR::ErrorCode::OK);
-    ASSERT(publisher.GetSubscriberNum() == 0);
-    ASSERT(publisher.CreateData(data1) == LibXR::ErrorCode::OK);
-    ASSERT(publisher.CreateData(data2) == LibXR::ErrorCode::FULL);
+    TEST_ASSERT(publisher.CreateData(data0) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.GetSubscriberNum() == 0);
+    TEST_ASSERT(publisher.CreateData(data1) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.CreateData(data2) == LibXR::ErrorCode::FULL);
 
     close(ack_pipe[0]);
     close(cmd_pipe[1]);

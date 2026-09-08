@@ -3,6 +3,7 @@
  * @brief Pipe 读写顺序与分批传输测试 / Pipe ordering and chunked transfer tests.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 验证后续写入完成挂起读 / Verify that a later write completes a pending read.
@@ -22,12 +23,12 @@ void test_pipe_basic()
   WriteOperation wop;
 
   ErrorCode ec = r(RawData{rx, sizeof(rx)}, rop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
-  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
+  TEST_ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
 /**
@@ -49,12 +50,12 @@ void test_pipe_write_then_read()
   WriteOperation wop;
 
   ErrorCode ec = w(ConstRawData{TX, sizeof(TX)}, wop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   ec = r(RawData{rx, sizeof(rx)}, rop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
-  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
+  TEST_ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
 }
 
 /**
@@ -78,15 +79,15 @@ void test_pipe_chunked_rw()
   WriteOperation w2;
 
   ErrorCode ec = r(RawData{rx, sizeof(rx)}, rop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   ec = w(ConstRawData{TX1, sizeof(TX1)}, w1);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
   ec = w(ConstRawData{TX2, sizeof(TX2)}, w2);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   static const uint8_t EXPECT[] = {'H', 'e', 'l', 'l', 'o', ' ', 'X', 'R'};
-  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  TEST_ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
 /**
@@ -106,17 +107,17 @@ void test_pipe_stream_api()
 
   ReadOperation rop;
   ErrorCode ec = r(RawData{rx, sizeof(rx)}, rop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   WritePort::Stream ws(&w, wop);
   static const uint8_t A[] = {0xAA, 0xBB, 0xCC};
   static const uint8_t B[] = {0x11, 0x22, 0x33, 0x44, 0x55};
   ws << ConstRawData{A, sizeof(A)} << ConstRawData{B, sizeof(B)};
   ec = ws.Commit();
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   static const uint8_t EXPECT[] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 0x44, 0x55};
-  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  TEST_ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
 /**

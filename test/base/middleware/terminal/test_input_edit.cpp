@@ -10,6 +10,7 @@
  *          2. The final command name after inline editing executes as expected.
  */
 #include "terminal_session_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -40,9 +41,9 @@ void TestMidLineInputEditing()
 
   fixture.SendText("abd");
   auto cursor_moves = fixture.SendRaw(KEY_LEFT_LEFT, sizeof(KEY_LEFT_LEFT) - 1);
-  ASSERT(CountSubstring(cursor_moves, "\033[D") == 2);
+  TEST_ASSERT(CountSubstring(cursor_moves, "\033[D") == 2);
   fixture.SendText("c\n");
-  ASSERT(acbd_count == 1);
+  TEST_ASSERT(acbd_count == 1);
 }
 
 }  // namespace

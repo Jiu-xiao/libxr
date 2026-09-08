@@ -24,6 +24,7 @@
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "test.hpp"  // 提供 ASSERT 宏
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_double_buffer`。 Test entry function `test_double_buffer`.
@@ -40,63 +41,65 @@ void test_double_buffer()
 
   LibXR::DoubleBuffer init_later;
   init_later.Init(raw);
-  ASSERT(init_later.Size() == 64);
-  ASSERT((reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) ==
-         0U);
-  ASSERT((reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) ==
-         0U);
+  TEST_ASSERT(init_later.Size() == 64);
+  TEST_ASSERT(
+      (reinterpret_cast<uintptr_t>(init_later.ActiveBuffer()) % alignof(size_t)) == 0U);
+  TEST_ASSERT(
+      (reinterpret_cast<uintptr_t>(init_later.PendingBuffer()) % alignof(size_t)) == 0U);
 
   LibXR::DoubleBuffer empty_buffer;
   LibXR::RawData empty_raw(nullptr, 0);
   empty_buffer.Init(empty_raw);
-  ASSERT(empty_buffer.Size() == 0);
-  ASSERT(empty_buffer.ActiveBuffer() == nullptr);
-  ASSERT(empty_buffer.PendingBuffer() == nullptr);
-  ASSERT(empty_buffer.HasPending() == false);
-  ASSERT(empty_buffer.FillPending(nullptr, 0) == true);
-  ASSERT(empty_buffer.HasPending() == true);
-  ASSERT(empty_buffer.GetPendingLength() == 0);
+  TEST_ASSERT(empty_buffer.Size() == 0);
+  TEST_ASSERT(empty_buffer.ActiveBuffer() == nullptr);
+  TEST_ASSERT(empty_buffer.PendingBuffer() == nullptr);
+  TEST_ASSERT(empty_buffer.HasPending() == false);
+  TEST_ASSERT(empty_buffer.FillPending(nullptr, 0) == true);
+  TEST_ASSERT(empty_buffer.HasPending() == true);
+  TEST_ASSERT(empty_buffer.GetPendingLength() == 0);
   empty_buffer.Switch();
-  ASSERT(empty_buffer.ActiveBuffer() == nullptr);
-  ASSERT(empty_buffer.FillActive(nullptr, 0) == true);
+  TEST_ASSERT(empty_buffer.ActiveBuffer() == nullptr);
+  TEST_ASSERT(empty_buffer.FillActive(nullptr, 0) == true);
 
   LibXR::DoubleBuffer buffer(raw);
 
-  ASSERT(buffer.Size() == 64);  // 被平分成两块
-  ASSERT((reinterpret_cast<uintptr_t>(buffer.ActiveBuffer()) % alignof(size_t)) == 0U);
-  ASSERT((reinterpret_cast<uintptr_t>(buffer.PendingBuffer()) % alignof(size_t)) == 0U);
+  TEST_ASSERT(buffer.Size() == 64);  // 被平分成两块
+  TEST_ASSERT((reinterpret_cast<uintptr_t>(buffer.ActiveBuffer()) % alignof(size_t)) ==
+              0U);
+  TEST_ASSERT((reinterpret_cast<uintptr_t>(buffer.PendingBuffer()) % alignof(size_t)) ==
+              0U);
 
   // 1. 检查初始状态
-  ASSERT(buffer.HasPending() == false);
+  TEST_ASSERT(buffer.HasPending() == false);
 
   // 2. 写入 pending buffer
   uint8_t test_data[16];
   for (int i = 0; i < 16; ++i) test_data[i] = i;
 
-  ASSERT(buffer.FillPending(test_data, 16) == true);
-  ASSERT(buffer.HasPending() == true);
-  ASSERT(buffer.GetPendingLength() == 16);
-  ASSERT(std::memcmp(buffer.PendingBuffer(), test_data, 16) == 0);
+  TEST_ASSERT(buffer.FillPending(test_data, 16) == true);
+  TEST_ASSERT(buffer.HasPending() == true);
+  TEST_ASSERT(buffer.GetPendingLength() == 16);
+  TEST_ASSERT(std::memcmp(buffer.PendingBuffer(), test_data, 16) == 0);
 
   // 3. 禁止重复填充未发送的 buffer
-  ASSERT(buffer.FillPending(test_data, 8) == false);
+  TEST_ASSERT(buffer.FillPending(test_data, 8) == false);
 
   // 4. 执行 Switch() 切换
   buffer.Switch();
-  ASSERT(buffer.HasPending() == false);
-  ASSERT(buffer.ActiveBuffer() == buff + 64);  // 被切换为另一半
+  TEST_ASSERT(buffer.HasPending() == false);
+  TEST_ASSERT(buffer.ActiveBuffer() == buff + 64);  // 被切换为另一半
 
   // 5. 再次填充
   for (int i = 0; i < 10; ++i) test_data[i] = i + 100;
-  ASSERT(buffer.FillPending(test_data, 10) == true);
-  ASSERT(std::memcmp(buffer.PendingBuffer(), test_data, 10) == 0);
+  TEST_ASSERT(buffer.FillPending(test_data, 10) == true);
+  TEST_ASSERT(std::memcmp(buffer.PendingBuffer(), test_data, 10) == 0);
 
   buffer.Switch();
-  ASSERT(buffer.ActiveBuffer() == buff);  // 又回到了原来的 A 区
+  TEST_ASSERT(buffer.ActiveBuffer() == buff);  // 又回到了原来的 A 区
 
   buffer.FlipActiveBlock();
-  ASSERT(buffer.ActiveBuffer() == buff + 64);
+  TEST_ASSERT(buffer.ActiveBuffer() == buff + 64);
 
   // 6. 不合法长度填充
-  ASSERT(buffer.FillPending(test_data, 80) == false);  // 超过单 buffer 长度
+  TEST_ASSERT(buffer.FillPending(test_data, 80) == false);  // 超过单 buffer 长度
 }

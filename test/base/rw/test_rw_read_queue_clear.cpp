@@ -3,6 +3,7 @@
  * @brief 接收队列清空与空间通知测试 / RX queue clearing and space notification tests.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -20,14 +21,14 @@ void test_rw_read_port_clear_queued_data_clears_idle_queue()
   static const uint8_t TX[] = {0x21, 0x43, 0x65, 0x87};
   {
     auto queue = r.GetReadQueue(false);
-    ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+    TEST_ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
     queue.Publish();
   }
-  ASSERT(r.Size() == sizeof(TX));
+  TEST_ASSERT(r.Size() == sizeof(TX));
 
-  ASSERT(r.ClearQueuedData() == ErrorCode::OK);
-  ASSERT(r.Size() == 0);
-  ASSERT(r.dequeue_count == 1);
+  TEST_ASSERT(r.ClearQueuedData() == ErrorCode::OK);
+  TEST_ASSERT(r.Size() == 0);
+  TEST_ASSERT(r.dequeue_count == 1);
 }
 
 /**
@@ -43,13 +44,13 @@ void test_rw_read_port_clear_queued_data_clears_event_queue()
   static const uint8_t TX[] = {0x12, 0x34, 0x56};
   {
     auto queue = r.GetReadQueue(false);
-    ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
+    TEST_ASSERT(queue.PushBatch(TX, sizeof(TX)) == ErrorCode::OK);
     queue.Publish();
   }
 
-  ASSERT(r.ClearQueuedData() == ErrorCode::OK);
-  ASSERT(r.Size() == 0);
-  ASSERT(r.dequeue_count == 1);
+  TEST_ASSERT(r.ClearQueuedData() == ErrorCode::OK);
+  TEST_ASSERT(r.Size() == 0);
+  TEST_ASSERT(r.dequeue_count == 1);
 }
 
 /**
@@ -64,27 +65,27 @@ void test_rw_read_port_clear_queued_data_busy_pending_read()
   uint8_t queued = 0x5A;
   {
     auto queue = r.GetReadQueue(false);
-    ASSERT(queue.PushBatch(&queued, 1) == ErrorCode::OK);
+    TEST_ASSERT(queue.PushBatch(&queued, 1) == ErrorCode::OK);
     queue.Publish();
   }
 
   uint8_t rx[2] = {0xA1, 0xA2};
   ReadHarness read(TestMode::POLLING);
-  ASSERT(r(RawData{rx, sizeof(rx)}, read.op) == ErrorCode::OK);
+  TEST_ASSERT(r(RawData{rx, sizeof(rx)}, read.op) == ErrorCode::OK);
   read.ExpectPendingSubmitted();
 
-  ASSERT(r.ClearQueuedData() == ErrorCode::BUSY);
-  ASSERT(r.Size() == 1);
-  ASSERT(r.dequeue_count == 0);
+  TEST_ASSERT(r.ClearQueuedData() == ErrorCode::BUSY);
+  TEST_ASSERT(r.Size() == 1);
+  TEST_ASSERT(r.dequeue_count == 0);
 
   const uint8_t completed = 0x6B;
   {
     auto queue = r.GetReadQueue(false);
-    ASSERT(queue.PushBatch(&completed, 1) == ErrorCode::OK);
+    TEST_ASSERT(queue.PushBatch(&completed, 1) == ErrorCode::OK);
     queue.Publish();
   }
   read.ExpectFinal(ErrorCode::OK);
-  ASSERT(r.Size() == 0);
+  TEST_ASSERT(r.Size() == 0);
 }
 
 }  // namespace

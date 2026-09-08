@@ -21,9 +21,9 @@ MPMCQueueBase::MPMCQueueBase(size_t element_size, size_t capacity)
       head_(0),
       tail_(0)
 {
-  REQUIRE(element_size_ > 0);
-  REQUIRE(capacity_ > 1);
-  REQUIRE(capacity_ <= static_cast<size_t>(std::numeric_limits<SequenceDiffType>::max()));
+  ASSERT(element_size_ > 0);
+  ASSERT(capacity_ > 1);
+  ASSERT(capacity_ <= static_cast<size_t>(std::numeric_limits<SequenceDiffType>::max()));
 
   const size_t payload_bytes = MultiplyChecked(payload_stride_, capacity_);
   sequences_ = new (std::align_val_t(alignof(SequenceCell))) SequenceCell[capacity_];
@@ -170,8 +170,8 @@ const void* MPMCQueueBase::PayloadPtr(size_t index) const
  */
 size_t MPMCQueueBase::AlignUpChecked(size_t value, size_t align)
 {
-  REQUIRE(align > 0);
-  REQUIRE(value <= std::numeric_limits<size_t>::max() - (align - 1));
+  ASSERT(align > 0);
+  ASSERT(value <= std::numeric_limits<size_t>::max() - (align - 1));
   return ((value + align - 1) / align) * align;
 }
 
@@ -188,7 +188,7 @@ size_t MPMCQueueBase::MultiplyChecked(size_t lhs, size_t rhs)
     return 0;
   }
 
-  REQUIRE(lhs <= std::numeric_limits<size_t>::max() / rhs);
+  ASSERT(lhs <= std::numeric_limits<size_t>::max() / rhs);
   return lhs * rhs;
 }
 

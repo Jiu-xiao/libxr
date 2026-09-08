@@ -18,6 +18,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_crc`。 Test entry function `test_crc`.
@@ -56,7 +57,7 @@ void test_crc()
   test_crc32.crc =
       LibXR::CRC32::Calculate(&test_crc32, sizeof(test_crc32) - sizeof(uint32_t));
 
-  ASSERT(LibXR::CRC8::Verify(&test_crc8, sizeof(test_crc8)));
-  ASSERT(LibXR::CRC16::Verify(&test_crc16, sizeof(test_crc16)));
-  ASSERT(LibXR::CRC32::Verify(&test_crc32, sizeof(test_crc32)));
+  TEST_ASSERT(LibXR::CRC8::Verify(&test_crc8, sizeof(test_crc8)));
+  TEST_ASSERT(LibXR::CRC16::Verify(&test_crc16, sizeof(test_crc16)));
+  TEST_ASSERT(LibXR::CRC32::Verify(&test_crc32, sizeof(test_crc32)));
 }

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "rw_mode_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -21,7 +22,7 @@ using LibXRTest::WriteHarness;
  */
 inline void JoinThreadIfNeeded(LibXR::Thread& thread)
 {
-  ASSERT(thread.Join() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(thread.Join() == LibXR::ErrorCode::OK);
 }
 
 /**
@@ -29,7 +30,7 @@ inline void JoinThreadIfNeeded(LibXR::Thread& thread)
  */
 inline void ExpectWaitOk(LibXR::Semaphore& sem, uint32_t timeout = ASYNC_TIMEOUT_MS)
 {
-  ASSERT(sem.Wait(timeout) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(sem.Wait(timeout) == LibXR::ErrorCode::OK);
 }
 
 struct ReadQueueCompletionContext
@@ -47,7 +48,7 @@ void CompletePendingReadFromQueue(ReadQueueCompletionContext ctx)
 {
   auto queue = ctx.port->GetReadQueue(false);
   auto ans = queue.PushBatch(ctx.data, ctx.size);
-  ASSERT(ans == LibXR::ErrorCode::OK);
+  TEST_ASSERT(ans == LibXR::ErrorCode::OK);
   queue.Publish();
   ctx.done->Post();
 }
@@ -77,7 +78,7 @@ void FinishPendingWrite(WriteFinishContext ctx)
 
     if (ctx.result == LibXR::ErrorCode::OK)
     {
-      ASSERT(queue.AvailableSize() <= sizeof(sink));
+      TEST_ASSERT(queue.AvailableSize() <= sizeof(sink));
       queue.PopAll(sink);
     }
     else

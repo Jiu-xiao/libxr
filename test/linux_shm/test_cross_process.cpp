@@ -4,6 +4,7 @@
  * cross-process ordering semantics.
  */
 #include "linux_shm_topic_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxShmTopicTest
 {
@@ -30,10 +31,10 @@ void RunCrossProcessScenarios()
     config.queue_num = 64;
 
     SharedTopic publisher(topic_name, config);
-    ASSERT(publisher.Valid());
+    TEST_ASSERT(publisher.Valid());
 
     pid_t child = fork();
-    ASSERT(child >= 0);
+    TEST_ASSERT(child >= 0);
 
     if (child == 0)
     {
@@ -72,9 +73,9 @@ void RunCrossProcessScenarios()
     for (uint32_t seq = 1; seq <= 32; ++seq)
     {
       SharedData data;
-      ASSERT(publisher.CreateData(data) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(publisher.CreateData(data) == LibXR::ErrorCode::OK);
       FillFrame(*data.GetData(), seq);
-      ASSERT(publisher.Publish(data) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(publisher.Publish(data) == LibXR::ErrorCode::OK);
     }
 
     ExpectChildExit(child);

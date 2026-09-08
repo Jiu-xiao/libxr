@@ -13,6 +13,7 @@
  * output.
  */
 #include "string_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -32,40 +33,40 @@ void TestRuntimeStringFormat()
   // Test coverage: verify runtime formatting output, stable storage reuse, and
   // boundary-value paths.
   LibXR::RuntimeStringView<"camera_{}", unsigned int> formatted;
-  ASSERT(formatted.Reformat(7U) == LibXR::ErrorCode::OK);
-  ASSERT(formatted.Status() == LibXR::ErrorCode::OK);
-  ASSERT(!formatted.Empty());
-  ASSERT(formatted.View() == std::string_view("camera_7"));
-  ASSERT(formatted.CStr()[formatted.Size()] == '\0');
+  TEST_ASSERT(formatted.Reformat(7U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(formatted.Status() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(!formatted.Empty());
+  TEST_ASSERT(formatted.View() == std::string_view("camera_7"));
+  TEST_ASSERT(formatted.CStr()[formatted.Size()] == '\0');
 
   LibXR::RuntimeStringView<"frame_%03u", unsigned int> printf_formatted;
-  ASSERT(printf_formatted.Reprintf(5U) == LibXR::ErrorCode::OK);
-  ASSERT(printf_formatted.Status() == LibXR::ErrorCode::OK);
-  ASSERT(!printf_formatted.Empty());
-  ASSERT(printf_formatted.View() == std::string_view("frame_005"));
-  ASSERT(printf_formatted.CStr()[printf_formatted.Size()] == '\0');
+  TEST_ASSERT(printf_formatted.Reprintf(5U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(printf_formatted.Status() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(!printf_formatted.Empty());
+  TEST_ASSERT(printf_formatted.View() == std::string_view("frame_005"));
+  TEST_ASSERT(printf_formatted.CStr()[printf_formatted.Size()] == '\0');
 
   LibXR::RuntimeStringView<"stamp_%u", unsigned int> timestamp;
-  ASSERT(timestamp.Reprintf(1U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(timestamp.Reprintf(1U) == LibXR::ErrorCode::OK);
   const char* timestamp_storage = timestamp.CStr();
-  ASSERT(timestamp.Reprintf(1234567890U) == LibXR::ErrorCode::OK);
-  ASSERT(timestamp.CStr() == timestamp_storage);
-  ASSERT(timestamp.View() == std::string_view("stamp_1234567890"));
+  TEST_ASSERT(timestamp.Reprintf(1234567890U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(timestamp.CStr() == timestamp_storage);
+  TEST_ASSERT(timestamp.View() == std::string_view("stamp_1234567890"));
 
   LibXR::RuntimeStringView<"stamp_{}", std::uint32_t> format_timestamp;
-  ASSERT(format_timestamp.Reformat(std::uint32_t{1}) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(format_timestamp.Reformat(std::uint32_t{1}) == LibXR::ErrorCode::OK);
   const char* format_storage = format_timestamp.CStr();
-  ASSERT(format_timestamp.Reformat(std::numeric_limits<std::uint32_t>::max()) ==
-         LibXR::ErrorCode::OK);
-  ASSERT(format_timestamp.CStr() == format_storage);
-  ASSERT(format_timestamp.View() == std::string_view("stamp_4294967295"));
+  TEST_ASSERT(format_timestamp.Reformat(std::numeric_limits<std::uint32_t>::max()) ==
+              LibXR::ErrorCode::OK);
+  TEST_ASSERT(format_timestamp.CStr() == format_storage);
+  TEST_ASSERT(format_timestamp.View() == std::string_view("stamp_4294967295"));
 
   LibXR::RuntimeStringView<"float_%.0f", float> float_fixed;
-  ASSERT(float_fixed.Reprintf(1.0F) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(float_fixed.Reprintf(1.0F) == LibXR::ErrorCode::OK);
   const char* float_storage = float_fixed.CStr();
-  ASSERT(float_fixed.Reprintf(12345.0F) == LibXR::ErrorCode::OK);
-  ASSERT(float_fixed.CStr() == float_storage);
-  ASSERT(float_fixed.View() == std::string_view("float_12345"));
+  TEST_ASSERT(float_fixed.Reprintf(12345.0F) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(float_fixed.CStr() == float_storage);
+  TEST_ASSERT(float_fixed.View() == std::string_view("float_12345"));
 }
 
 }  // namespace

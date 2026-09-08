@@ -10,6 +10,7 @@
  *          2. Listing scope follows the current directory after changing directories.
  */
 #include "terminal_session_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -50,21 +51,21 @@ void TestLsBuiltin()
   dir1.Add(nested);
 
   auto output = fixture.SendText("ls\n");
-  ASSERT(output.find("d dir1") != std::string::npos);
-  ASSERT(output.find("x run") != std::string::npos);
-  ASSERT(output.find("f file") != std::string::npos);
-  ASSERT(output.find("? custom") != std::string::npos);
-  ASSERT(output.find("ramfs:/$ ") != std::string::npos);
+  TEST_ASSERT(output.find("d dir1") != std::string::npos);
+  TEST_ASSERT(output.find("x run") != std::string::npos);
+  TEST_ASSERT(output.find("f file") != std::string::npos);
+  TEST_ASSERT(output.find("? custom") != std::string::npos);
+  TEST_ASSERT(output.find("ramfs:/$ ") != std::string::npos);
 
   output = fixture.SendText("cd dir1\n");
-  ASSERT(fixture.terminal.current_dir_ == &dir1);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &dir1);
 
   output = fixture.SendText("ls\n");
-  ASSERT(output.find("d nested") != std::string::npos);
-  ASSERT(output.find("x run") == std::string::npos);
-  ASSERT(output.find("f file") == std::string::npos);
-  ASSERT(output.find("? custom") == std::string::npos);
-  ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
+  TEST_ASSERT(output.find("d nested") != std::string::npos);
+  TEST_ASSERT(output.find("x run") == std::string::npos);
+  TEST_ASSERT(output.find("f file") == std::string::npos);
+  TEST_ASSERT(output.find("? custom") == std::string::npos);
+  TEST_ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
 }
 
 }  // namespace

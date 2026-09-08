@@ -3,6 +3,7 @@
  * @brief transform 旋转互操作子测试。 Split test unit for transform rotation
  * interoperability.
  */
+#include "test_assert.hpp"
 #include "transform_test_common.hpp"
 
 /**
@@ -26,8 +27,8 @@ void RunTransformRotationInteropTests()
   quat_new = quat;
   quat_new = quat - quat_new;
   quat_new = quat + quat_new;
-  ASSERT(equal(quat_new(0), quat(0)) && equal(quat_new(1), quat(1)) &&
-         equal(quat_new(2), quat(2)) && equal(quat_new(3), quat(3)));
+  TEST_ASSERT(equal(quat_new(0), quat(0)) && equal(quat_new(1), quat(1)) &&
+              equal(quat_new(2), quat(2)) && equal(quat_new(3), quat(3)));
 
   Eigen::Quaternion<double> eigen_quat =
       LibXR::EulerAngle<double>(LibXR::PI / 8, -LibXR::PI / 9, LibXR::PI / 7)
@@ -35,23 +36,24 @@ void RunTransformRotationInteropTests()
   LibXR::RotationMatrix rot_from_eigen_quat(eigen_quat);
   rot_new = eigen_quat;
   const Eigen::Matrix3d eigen_rot = eigen_quat.toRotationMatrix();
-  ASSERT(equal(rot_from_eigen_quat(0, 0), eigen_rot(0, 0)) &&
-         equal(rot_from_eigen_quat(0, 1), eigen_rot(0, 1)) &&
-         equal(rot_from_eigen_quat(0, 2), eigen_rot(0, 2)) &&
-         equal(rot_from_eigen_quat(1, 0), eigen_rot(1, 0)) &&
-         equal(rot_from_eigen_quat(1, 1), eigen_rot(1, 1)) &&
-         equal(rot_from_eigen_quat(1, 2), eigen_rot(1, 2)) &&
-         equal(rot_from_eigen_quat(2, 0), eigen_rot(2, 0)) &&
-         equal(rot_from_eigen_quat(2, 1), eigen_rot(2, 1)) &&
-         equal(rot_from_eigen_quat(2, 2), eigen_rot(2, 2)));
-  ASSERT(equal(rot_new(0, 0), eigen_rot(0, 0)) && equal(rot_new(0, 1), eigen_rot(0, 1)) &&
-         equal(rot_new(0, 2), eigen_rot(0, 2)) && equal(rot_new(1, 0), eigen_rot(1, 0)) &&
-         equal(rot_new(1, 1), eigen_rot(1, 1)) && equal(rot_new(1, 2), eigen_rot(1, 2)) &&
-         equal(rot_new(2, 0), eigen_rot(2, 0)) && equal(rot_new(2, 1), eigen_rot(2, 1)) &&
-         equal(rot_new(2, 2), eigen_rot(2, 2)));
+  TEST_ASSERT(equal(rot_from_eigen_quat(0, 0), eigen_rot(0, 0)) &&
+              equal(rot_from_eigen_quat(0, 1), eigen_rot(0, 1)) &&
+              equal(rot_from_eigen_quat(0, 2), eigen_rot(0, 2)) &&
+              equal(rot_from_eigen_quat(1, 0), eigen_rot(1, 0)) &&
+              equal(rot_from_eigen_quat(1, 1), eigen_rot(1, 1)) &&
+              equal(rot_from_eigen_quat(1, 2), eigen_rot(1, 2)) &&
+              equal(rot_from_eigen_quat(2, 0), eigen_rot(2, 0)) &&
+              equal(rot_from_eigen_quat(2, 1), eigen_rot(2, 1)) &&
+              equal(rot_from_eigen_quat(2, 2), eigen_rot(2, 2)));
+  TEST_ASSERT(
+      equal(rot_new(0, 0), eigen_rot(0, 0)) && equal(rot_new(0, 1), eigen_rot(0, 1)) &&
+      equal(rot_new(0, 2), eigen_rot(0, 2)) && equal(rot_new(1, 0), eigen_rot(1, 0)) &&
+      equal(rot_new(1, 1), eigen_rot(1, 1)) && equal(rot_new(1, 2), eigen_rot(1, 2)) &&
+      equal(rot_new(2, 0), eigen_rot(2, 0)) && equal(rot_new(2, 1), eigen_rot(2, 1)) &&
+      equal(rot_new(2, 2), eigen_rot(2, 2)));
   quat_new = quat / eigen_quat;
   Eigen::Quaternion<double> eigen_div =
       Eigen::Quaternion<double>(quat) * eigen_quat.conjugate();
-  ASSERT(equal(quat_new.w(), eigen_div.w()) && equal(quat_new.x(), eigen_div.x()) &&
-         equal(quat_new.y(), eigen_div.y()) && equal(quat_new.z(), eigen_div.z()));
+  TEST_ASSERT(equal(quat_new.w(), eigen_div.w()) && equal(quat_new.x(), eigen_div.x()) &&
+              equal(quat_new.y(), eigen_div.y()) && equal(quat_new.z(), eigen_div.z()));
 }

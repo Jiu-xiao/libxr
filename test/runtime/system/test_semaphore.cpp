@@ -16,6 +16,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_semaphore`。 Test entry function `test_semaphore`.
@@ -30,13 +31,13 @@ void test_semaphore()
   LibXR::Semaphore sem(0);
   LibXR::Thread thread;
 
-  ASSERT(sem.Wait(0) == LibXR::ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem.Wait(0) == LibXR::ErrorCode::TIMEOUT);
 
   sem.Post();
   sem.Post();
-  ASSERT(sem.Wait(0) == LibXR::ErrorCode::OK);
-  ASSERT(sem.Wait(0) == LibXR::ErrorCode::OK);
-  ASSERT(sem.Wait(0) == LibXR::ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem.Wait(0) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(sem.Wait(0) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(sem.Wait(0) == LibXR::ErrorCode::TIMEOUT);
 
   thread.Create<LibXR::Semaphore*>(
       &sem,
@@ -48,6 +49,6 @@ void test_semaphore()
       },
       "semaphore_thread", 512, LibXR::Thread::Priority::REALTIME);
 
-  ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
-  ASSERT(thread.Join() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(sem.Wait(200) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(thread.Join() == LibXR::ErrorCode::OK);
 }

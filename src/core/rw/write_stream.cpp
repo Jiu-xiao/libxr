@@ -71,24 +71,24 @@ ErrorCode WritePort::Stream::Write(ConstRawData data)
     return acquire_result;
   }
 
-  REQUIRE(data.addr_ != nullptr);
+  ASSERT(data.addr_ != nullptr);
 
   if (port_->queue_data_ == nullptr || port_->queue_data_->EmptySize() < data.size_)
   {
     return ErrorCode::FULL;
   }
 
-  const ErrorCode result = port_->queue_data_->PushBatch(
+  [[maybe_unused]] const ErrorCode result = port_->queue_data_->PushBatch(
       reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
-  REQUIRE(result == ErrorCode::OK);
+  DEV_ASSERT(result == ErrorCode::OK);
   buffered_size_ += data.size_;
   return ErrorCode::OK;
 }
 
 ErrorCode WritePort::Stream::SubmitBuffered()
 {
-  REQUIRE(owns_port_);
-  REQUIRE(buffered_size_ != 0U);
+  DEV_ASSERT(owns_port_);
+  DEV_ASSERT(buffered_size_ != 0U);
 
   const size_t size = buffered_size_;
   buffered_size_ = 0U;
@@ -103,7 +103,7 @@ void WritePort::Stream::Release()
   {
     return;
   }
-  REQUIRE(buffered_size_ == 0U);
+  DEV_ASSERT(buffered_size_ == 0U);
   owns_port_ = false;
   port_->ReleaseProducer(WritePort::Phase::IDLE, false);
 }

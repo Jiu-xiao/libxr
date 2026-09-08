@@ -3,6 +3,7 @@
  * @brief RW 超时与后台接收入队测试 / RW timeout and background RX production tests.
  */
 #include "rw_runtime_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -24,24 +25,24 @@ void test_rw_block_read_timeout_detaches_pending()
   ReadOperation block_op(sem, 0);
 
   auto ec = r(RawData{timed_out_rx, sizeof(timed_out_rx)}, block_op);
-  ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
 
   static const uint8_t STALE_EXPECT[] = {0xA1, 0xA2, 0xA3, 0xA4};
-  ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
+  TEST_ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
 
   static const uint8_t TX[] = {0x10, 0x20, 0x30, 0x40};
   WriteOperation wop;
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
-  ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
+  TEST_ASSERT(sem.Value() == 0);
 
   uint8_t fresh_rx[sizeof(TX)] = {0};
   ReadOperation rop;
   ec = r(RawData{fresh_rx, sizeof(fresh_rx)}, rop);
-  ASSERT(ec == ErrorCode::OK);
-  ASSERT(std::memcmp(fresh_rx, TX, sizeof(TX)) == 0);
+  TEST_ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(std::memcmp(fresh_rx, TX, sizeof(TX)) == 0);
 }
 
 /**
@@ -65,7 +66,7 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
     StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_zero_ready");
 
     auto ec = r(RawData{&dummy, 0}, read.op);
-    ASSERT(ec == ErrorCode::OK);
+    TEST_ASSERT(ec == ErrorCode::OK);
     ExpectWaitOk(done, SHORT_WAIT_MS);
     JoinThreadIfNeeded(finisher);
 
@@ -74,16 +75,16 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
       read.ExpectFinal(ErrorCode::OK);
     }
 
-    ASSERT(dummy == 0xA0);
-    ASSERT(r.dequeue_count == 0);
-    ASSERT(r.Size() == sizeof(TX));
+    TEST_ASSERT(dummy == 0xA0);
+    TEST_ASSERT(r.dequeue_count == 0);
+    TEST_ASSERT(r.Size() == sizeof(TX));
 
     uint8_t follow_up[sizeof(TX)] = {};
     ReadOperation follow_op;
     ec = r(RawData{follow_up, sizeof(follow_up)}, follow_op);
-    ASSERT(ec == ErrorCode::OK);
-    ASSERT(std::memcmp(follow_up, TX, sizeof(TX)) == 0);
-    ASSERT(r.dequeue_count == 1);
+    TEST_ASSERT(ec == ErrorCode::OK);
+    TEST_ASSERT(std::memcmp(follow_up, TX, sizeof(TX)) == 0);
+    TEST_ASSERT(r.dequeue_count == 1);
   }
 }
 
@@ -104,30 +105,30 @@ void test_rw_block_write_timeout_detaches_waiter()
   Semaphore sem1;
   WriteOperation op1(sem1, 0);
   auto ec = w(ConstRawData{TX1, sizeof(TX1)}, op1);
-  ASSERT(ec == ErrorCode::TIMEOUT);
-  ASSERT(sem1.Value() == 0);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem1.Value() == 0);
 
   static uint8_t sink[sizeof(TX1)] = {};
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     queue.PopAll(sink);
   }
 
   Semaphore sem2;
   WriteOperation op2(sem2, 0);
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::TIMEOUT);
-  ASSERT(sem2.Value() == 0);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem2.Value() == 0);
 
   static uint8_t sink2[sizeof(TX2)] = {};
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     queue.PopAll(sink2);
   }
-  ASSERT(sem1.Value() == 0);
-  ASSERT(sem2.Value() == 0);
+  TEST_ASSERT(sem1.Value() == 0);
+  TEST_ASSERT(sem2.Value() == 0);
 }
 
 /**
@@ -149,11 +150,11 @@ void test_rw_read_port_block_queue_completion_copies_data()
   StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_queue_block");
 
   auto ec = r(RawData{rx, sizeof(rx)}, op);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
-  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 }  // namespace

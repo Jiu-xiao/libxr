@@ -61,12 +61,12 @@ bool WritePort::TryClaimProducer()
   }
 }
 
-void WritePort::ReleaseProducer(Phase next, bool in_isr)
+void WritePort::ReleaseProducer(Phase next, [[maybe_unused]] bool in_isr)
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
   {
-    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::LOCKED, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(GetPhase(observed) == Phase::LOCKED, in_isr);
     const uint32_t desired = WithPhase(observed, next);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -76,14 +76,14 @@ void WritePort::ReleaseProducer(Phase next, bool in_isr)
   }
 }
 
-void WritePort::PublishQueuedRequest(Phase next, bool in_isr)
+void WritePort::PublishQueuedRequest(Phase next, [[maybe_unused]] bool in_isr)
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
   {
-    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::LOCKED, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(GetPhase(observed) == Phase::LOCKED, in_isr);
     const uint32_t released = GetReleasedCount(observed);
-    REQUIRE_FROM_CALLBACK(released < MAX_RELEASED_REQUESTS, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(released < MAX_RELEASED_REQUESTS, in_isr);
     const uint32_t desired = MakeState(next, released + 1U);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -93,12 +93,12 @@ void WritePort::PublishQueuedRequest(Phase next, bool in_isr)
   }
 }
 
-void WritePort::DecrementReleasedRequest(bool in_isr)
+void WritePort::DecrementReleasedRequest([[maybe_unused]] bool in_isr)
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
   {
-    REQUIRE_FROM_CALLBACK(GetReleasedCount(observed) != 0U, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(GetReleasedCount(observed) != 0U, in_isr);
     const uint32_t desired = observed - RELEASED_INCREMENT;
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -118,24 +118,25 @@ void WritePort::NotifyBackend(bool in_isr)
 
 WritePort::WriteQueue WritePort::GetWriteQueue(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
+  ASSERT_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
 
   if (GetReleasedCount(state_.load(std::memory_order_acquire)) == 0U)
   {
-    REQUIRE_FROM_CALLBACK(front_remaining_ == 0U, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(front_remaining_ == 0U, in_isr);
     return WriteQueue(*this, in_isr, 0U);
   }
 
   Request request{};
-  REQUIRE_FROM_CALLBACK(queue_requests_->Peek(request) == ErrorCode::OK, in_isr);
+  [[maybe_unused]] const auto peek_result = queue_requests_->Peek(request);
+  DEV_ASSERT_FROM_CALLBACK(peek_result == ErrorCode::OK, in_isr);
   if (front_remaining_ == 0U)
   {
-    REQUIRE_FROM_CALLBACK(request.size != 0U, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(request.size != 0U, in_isr);
     front_remaining_ = request.size;
   }
   else
   {
-    REQUIRE_FROM_CALLBACK(front_remaining_ <= request.size, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(front_remaining_ <= request.size, in_isr);
   }
 
   return WriteQueue(*this, in_isr, front_remaining_);
@@ -145,8 +146,8 @@ void WritePort::WriteQueue::PopAll(uint8_t* destination)
 {
   BeginAction();
   const size_t remaining = AvailableSize();
-  REQUIRE_FROM_CALLBACK(remaining != 0U, in_isr_);
-  REQUIRE_FROM_CALLBACK(destination != nullptr, in_isr_);
+  ASSERT_FROM_CALLBACK(remaining != 0U, in_isr_);
+  ASSERT_FROM_CALLBACK(destination != nullptr, in_isr_);
 
   size_t offset = 0U;
   const size_t accepted = port_.queue_data_->ConsumeWithReader(
@@ -166,18 +167,18 @@ void WritePort::WriteQueue::PopAll(uint8_t* destination)
         }
         return first_size + second_size;
       });
-  REQUIRE_FROM_CALLBACK(accepted == remaining, in_isr_);
+  DEV_ASSERT_FROM_CALLBACK(accepted == remaining, in_isr_);
   popped_size_ += accepted;
 }
 
 void WritePort::WriteQueue::FailFront(ErrorCode reason)
 {
   BeginAction();
-  REQUIRE_FROM_CALLBACK(reason != ErrorCode::OK, in_isr_);
-  REQUIRE_FROM_CALLBACK(front_size_ != 0U, in_isr_);
+  ASSERT_FROM_CALLBACK(reason != ErrorCode::OK, in_isr_);
+  ASSERT_FROM_CALLBACK(front_size_ != 0U, in_isr_);
 
   const size_t remaining = AvailableSize();
-  REQUIRE_FROM_CALLBACK(remaining != 0U, in_isr_);
+  ASSERT_FROM_CALLBACK(remaining != 0U, in_isr_);
   if (remaining != 0U)
   {
     const size_t accepted = port_.queue_data_->ConsumeWithReader(
@@ -189,7 +190,7 @@ void WritePort::WriteQueue::FailFront(ErrorCode reason)
           UNUSED(second);
           return first_size + second_size;
         });
-    REQUIRE_FROM_CALLBACK(accepted == remaining, in_isr_);
+    DEV_ASSERT_FROM_CALLBACK(accepted == remaining, in_isr_);
     popped_size_ += accepted;
   }
   settlement_result_ = reason;
@@ -207,8 +208,8 @@ void WritePort::SettleWriteQueue(size_t accepted, ErrorCode result, bool in_isr)
     return;
   }
 
-  REQUIRE_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(accepted <= front_remaining_, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(accepted <= front_remaining_, in_isr);
   front_remaining_ -= accepted;
   if (front_remaining_ != 0U)
   {
@@ -216,7 +217,8 @@ void WritePort::SettleWriteQueue(size_t accepted, ErrorCode result, bool in_isr)
   }
 
   Request completed{};
-  REQUIRE_FROM_CALLBACK(queue_requests_->Pop(completed) == ErrorCode::OK, in_isr);
+  [[maybe_unused]] const auto pop_result = queue_requests_->Pop(completed);
+  DEV_ASSERT_FROM_CALLBACK(pop_result == ErrorCode::OK, in_isr);
   DecrementReleasedRequest(in_isr);
   CompleteRequest(completed, result, in_isr);
 }
@@ -269,24 +271,25 @@ void WritePort::CompleteRequest(Request& request, ErrorCode result, bool in_isr)
 
       Semaphore* waiter = admission_waiter_;
       admission_waiter_ = nullptr;
-      REQUIRE_FROM_CALLBACK(waiter != nullptr, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(waiter != nullptr, in_isr);
       waiter->PostFromCallback(in_isr);
       return;
     }
 
-    REQUIRE_FROM_CALLBACK(false, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(false, in_isr);
     return;
   }
 }
 
 ErrorCode WritePort::CommitQueued(size_t size, WriteOperation& op, bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(queue_data_ != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(size != 0U, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(queue_requests_ != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(queue_data_ != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(size != 0U, in_isr);
 
   Request request{size, op};
-  REQUIRE_FROM_CALLBACK(queue_requests_->Push(request) == ErrorCode::OK, in_isr);
+  [[maybe_unused]] const auto push_result = queue_requests_->Push(request);
+  DEV_ASSERT_FROM_CALLBACK(push_result == ErrorCode::OK, in_isr);
   request.op.MarkAsRunning();
 
   PublishQueuedRequest(op.type == WriteOperation::OperationType::BLOCK
@@ -299,10 +302,11 @@ ErrorCode WritePort::CommitQueued(size_t size, WriteOperation& op, bool in_isr)
                                                          : ErrorCode::OK;
 }
 
-ErrorCode WritePort::CommitAdmission(size_t size, WriteOperation& op, bool in_isr)
+ErrorCode WritePort::CommitAdmission([[maybe_unused]] size_t size, WriteOperation& op,
+                                     bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(IsAdmissionMode(), in_isr);
-  REQUIRE_FROM_CALLBACK(size != 0U, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(IsAdmissionMode(), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(size != 0U, in_isr);
 
   WriteOperation completed = op;
   completed.MarkAsRunning();
@@ -318,7 +322,7 @@ ErrorCode WritePort::CommitAdmission(size_t size, WriteOperation& op, bool in_is
 
 bool WritePort::TryRegisterRetirementWait(WriteOperation& op)
 {
-  REQUIRE(op.type == WriteOperation::OperationType::BLOCK);
+  DEV_ASSERT(op.type == WriteOperation::OperationType::BLOCK);
   admission_waiter_ = op.data.sem_info.sem;
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
@@ -352,7 +356,7 @@ ErrorCode WritePort::WaitForRetirement(WriteOperation& op)
   ErrorCode wait_result = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
   if (wait_result == ErrorCode::OK)
   {
-    REQUIRE(LoadPhase() == Phase::LOCKED);
+    DEV_ASSERT(LoadPhase() == Phase::LOCKED);
     return ErrorCode::OK;
   }
 
@@ -372,7 +376,7 @@ ErrorCode WritePort::WaitForRetirement(WriteOperation& op)
       continue;
     }
 
-    REQUIRE(phase == Phase::LOCKED);
+    DEV_ASSERT(phase == Phase::LOCKED);
     break;
   }
 
@@ -390,12 +394,12 @@ ErrorCode WritePort::WaitForBlock(WriteOperation& op)
   ErrorCode wait_result = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
   if (wait_result == ErrorCode::OK)
   {
-    REQUIRE(LoadPhase() == Phase::BLOCK_CLAIMED);
+    DEV_ASSERT(LoadPhase() == Phase::BLOCK_CLAIMED);
     const ErrorCode result = block_result_;
     uint32_t observed = state_.load(std::memory_order_acquire);
     for (;;)
     {
-      REQUIRE(GetPhase(observed) == Phase::BLOCK_CLAIMED);
+      DEV_ASSERT(GetPhase(observed) == Phase::BLOCK_CLAIMED);
       const uint32_t desired = WithPhase(observed, Phase::IDLE);
       if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                        std::memory_order_acquire))
@@ -421,7 +425,7 @@ ErrorCode WritePort::WaitForBlock(WriteOperation& op)
       continue;
     }
 
-    REQUIRE(phase == Phase::BLOCK_CLAIMED);
+    DEV_ASSERT(phase == Phase::BLOCK_CLAIMED);
     break;
   }
 
@@ -434,7 +438,7 @@ ErrorCode WritePort::WaitForBlock(WriteOperation& op)
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
   {
-    REQUIRE(GetPhase(observed) == Phase::BLOCK_CLAIMED);
+    DEV_ASSERT(GetPhase(observed) == Phase::BLOCK_CLAIMED);
     const uint32_t desired = WithPhase(observed, Phase::IDLE);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -478,7 +482,7 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
     }
   }
 
-  REQUIRE_FROM_CALLBACK(data.addr_ != nullptr, in_isr);
+  ASSERT_FROM_CALLBACK(data.addr_ != nullptr, in_isr);
 
   if (queue_data_->EmptySize() < data.size_ ||
       (!IsAdmissionMode() && queue_requests_->EmptySize() < 1U))
@@ -487,10 +491,9 @@ ErrorCode WritePort::operator()(ConstRawData data, WriteOperation& op, bool in_i
     return ErrorCode::FULL;
   }
 
-  REQUIRE_FROM_CALLBACK(
-      queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_) ==
-          ErrorCode::OK,
-      in_isr);
+  [[maybe_unused]] const auto push_batch_result =
+      queue_data_->PushBatch(reinterpret_cast<const uint8_t*>(data.addr_), data.size_);
+  DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
 
   return IsAdmissionMode() ? CommitAdmission(data.size_, op, in_isr)
                            : CommitQueued(data.size_, op, in_isr);

@@ -118,11 +118,11 @@ class GpdmaNvicMaskGuard
 
 STM32GpdmaUartAdapter::STM32GpdmaUartAdapter(UART_HandleTypeDef* uart_handle)
 {
-  REQUIRE(uart_handle != nullptr);
-  REQUIRE((uart_handle->hdmatx == nullptr) ||
-          (IS_GPDMA_INSTANCE(uart_handle->hdmatx->Instance) != 0U));
-  REQUIRE((uart_handle->hdmarx == nullptr) ||
-          (IS_GPDMA_INSTANCE(uart_handle->hdmarx->Instance) != 0U));
+  ASSERT(uart_handle != nullptr);
+  ASSERT((uart_handle->hdmatx == nullptr) ||
+         (IS_GPDMA_INSTANCE(uart_handle->hdmatx->Instance) != 0U));
+  ASSERT((uart_handle->hdmarx == nullptr) ||
+         (IS_GPDMA_INSTANCE(uart_handle->hdmarx->Instance) != 0U));
   state_.uart_handle_ = uart_handle;
 }
 
@@ -131,12 +131,12 @@ HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
                                                               bool in_isr)
 {
   DMA_HandleTypeDef* const dma_handle = state_.uart_handle_->hdmarx;
-  REQUIRE_FROM_CALLBACK(dma_handle != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(buffer != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(total_size >= RX_NODE_COUNT, in_isr);
-  REQUIRE_FROM_CALLBACK((total_size % RX_NODE_COUNT) == 0U, in_isr);
-  REQUIRE_FROM_CALLBACK((total_size / RX_NODE_COUNT) <= UINT16_MAX, in_isr);
-  REQUIRE_FROM_CALLBACK(IS_DMA_BLOCK_SIZE(total_size / RX_NODE_COUNT) != 0U, in_isr);
+  ASSERT_FROM_CALLBACK(dma_handle != nullptr, in_isr);
+  ASSERT_FROM_CALLBACK(buffer != nullptr, in_isr);
+  ASSERT_FROM_CALLBACK(total_size >= RX_NODE_COUNT, in_isr);
+  ASSERT_FROM_CALLBACK((total_size % RX_NODE_COUNT) == 0U, in_isr);
+  ASSERT_FROM_CALLBACK((total_size / RX_NODE_COUNT) <= UINT16_MAX, in_isr);
+  ASSERT_FROM_CALLBACK(IS_DMA_BLOCK_SIZE(total_size / RX_NODE_COUNT) != 0U, in_isr);
   ASSERT_FROM_CALLBACK(dma_handle->Parent == state_.uart_handle_ &&
                            IS_GPDMA_INSTANCE(dma_handle->Instance) != 0U,
                        in_isr);
@@ -152,12 +152,12 @@ HAL_StatusTypeDef STM32GpdmaUartAdapter::StartLinkedListDmaRx(uint8_t* buffer,
   }
   else
   {
-    REQUIRE_FROM_CALLBACK(buffer == state_.rx_buffer_, in_isr);
-    REQUIRE_FROM_CALLBACK(total_size == state_.rx_total_size_, in_isr);
-    REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue_, in_isr);
+    ASSERT_FROM_CALLBACK(buffer == state_.rx_buffer_, in_isr);
+    ASSERT_FROM_CALLBACK(total_size == state_.rx_total_size_, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue_, in_isr);
   }
 
-  REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
   FinalizeStopped(dma_handle, in_isr);
   // 启动前将描述符与接收缓冲区同步到 DMA 可见的存储。
   // Make descriptors and RX storage visible to DMA before starting the channel.
@@ -211,7 +211,7 @@ bool STM32GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
   }
 
   GpdmaNvicMaskGuard irq_guard(dma_handle);
-  REQUIRE_FROM_CALLBACK(irq_guard.Valid() && irq_guard.WasEnabled(), in_isr);
+  ASSERT_FROM_CALLBACK(irq_guard.Valid() && irq_guard.WasEnabled(), in_isr);
   if (!irq_guard.Valid() || !irq_guard.WasEnabled())
   {
     return false;
@@ -226,7 +226,7 @@ bool STM32GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
   if (dma_handle->State == HAL_DMA_STATE_ABORT)
   {
     const bool joined = abort_is_joinable();
-    REQUIRE_FROM_CALLBACK(joined, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(joined, in_isr);
     return joined;
   }
   if (dma_handle->State == HAL_DMA_STATE_READY && IsStopped(dma_handle) &&
@@ -254,7 +254,7 @@ bool STM32GpdmaUartAdapter::LaunchStop(DMA_HandleTypeDef* dma_handle,
     }
 
     const bool joined = abort_is_joinable();
-    REQUIRE_FROM_CALLBACK(joined, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(joined, in_isr);
     return joined;
   }
 
@@ -287,8 +287,8 @@ bool STM32GpdmaUartAdapter::AllStopsComplete() const
 
 void STM32GpdmaUartAdapter::FinalizeStopped(DMA_HandleTypeDef* dma_handle, bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
-  REQUIRE_FROM_CALLBACK(dma_handle->Lock == HAL_UNLOCKED, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(dma_handle->Lock == HAL_UNLOCKED, in_isr);
   if (!StopComplete(dma_handle))
   {
     return;
@@ -330,14 +330,14 @@ void STM32GpdmaUartAdapter::ClearFlags(DMA_HandleTypeDef* dma_handle)
 void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size, bool in_isr)
 {
   DMA_HandleTypeDef* const dma_handle = state_.uart_handle_->hdmarx;
-  REQUIRE_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
-  REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue->Head != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(StopComplete(dma_handle), in_isr);
+  ASSERT_FROM_CALLBACK(dma_handle->LinkedListQueue != nullptr, in_isr);
+  ASSERT_FROM_CALLBACK(dma_handle->LinkedListQueue->Head != nullptr, in_isr);
 
   DMA_NodeConfTypeDef node_config{};
-  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_GetNodeConfig(
-                            &node_config, dma_handle->LinkedListQueue->Head) == HAL_OK,
-                        in_isr);
+  [[maybe_unused]] const auto dma_ex_list_get_node_config_result =
+      HAL_DMAEx_List_GetNodeConfig(&node_config, dma_handle->LinkedListQueue->Head);
+  DEV_ASSERT_FROM_CALLBACK(dma_ex_list_get_node_config_result == HAL_OK, in_isr);
 
   // 保留 BSP 的请求与端口等属性，明确设置字节接收环的布局。
   // Preserve BSP request and port attributes while defining the byte RX ring layout.
@@ -368,19 +368,24 @@ void STM32GpdmaUartAdapter::BuildRxQueue(uint8_t* buffer, size_t total_size, boo
   {
     node_config.DstAddress =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&buffer[i * node_size]));
-    REQUIRE_FROM_CALLBACK(
-        HAL_DMAEx_List_BuildNode(&node_config, &state_.nodes_[i]) == HAL_OK, in_isr);
-    REQUIRE_FROM_CALLBACK(
-        HAL_DMAEx_List_InsertNode_Tail(&state_.rx_queue_, &state_.nodes_[i]) == HAL_OK,
-        in_isr);
+    [[maybe_unused]] const auto dma_ex_list_build_node_result =
+        HAL_DMAEx_List_BuildNode(&node_config, &state_.nodes_[i]);
+    DEV_ASSERT_FROM_CALLBACK(dma_ex_list_build_node_result == HAL_OK, in_isr);
+    [[maybe_unused]] const auto dma_ex_list_insert_node_tail_result =
+        HAL_DMAEx_List_InsertNode_Tail(&state_.rx_queue_, &state_.nodes_[i]);
+    DEV_ASSERT_FROM_CALLBACK(dma_ex_list_insert_node_tail_result == HAL_OK, in_isr);
   }
 
-  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_SetCircularMode(&state_.rx_queue_) == HAL_OK,
-                        in_isr);
-  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_UnLinkQ(dma_handle) == HAL_OK, in_isr);
-  REQUIRE_FROM_CALLBACK(HAL_DMAEx_List_LinkQ(dma_handle, &state_.rx_queue_) == HAL_OK,
-                        in_isr);
-  REQUIRE_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue_, in_isr);
+  [[maybe_unused]] const auto dma_ex_list_set_circular_mode_result =
+      HAL_DMAEx_List_SetCircularMode(&state_.rx_queue_);
+  DEV_ASSERT_FROM_CALLBACK(dma_ex_list_set_circular_mode_result == HAL_OK, in_isr);
+  [[maybe_unused]] const auto dma_ex_list_un_linkq_result =
+      HAL_DMAEx_List_UnLinkQ(dma_handle);
+  DEV_ASSERT_FROM_CALLBACK(dma_ex_list_un_linkq_result == HAL_OK, in_isr);
+  [[maybe_unused]] const auto dma_ex_list_linkq_result =
+      HAL_DMAEx_List_LinkQ(dma_handle, &state_.rx_queue_);
+  DEV_ASSERT_FROM_CALLBACK(dma_ex_list_linkq_result == HAL_OK, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(dma_handle->LinkedListQueue == &state_.rx_queue_, in_isr);
 
   state_.rx_buffer_ = buffer;
   state_.rx_total_size_ = total_size;

@@ -20,6 +20,7 @@
 #include "libxr_def.hpp"
 #include "libxr_pipe.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -42,10 +43,10 @@ int CountCommand(CommandState* state, int argc, char** argv)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-  ASSERT(state != nullptr);
-  ASSERT(state->count != nullptr);
-  ASSERT(argc == 1);
-  ASSERT(std::strcmp(argv[0], state->expected_name) == 0);
+  TEST_ASSERT(state != nullptr);
+  TEST_ASSERT(state->count != nullptr);
+  TEST_ASSERT(argc == 1);
+  TEST_ASSERT(std::strcmp(argv[0], state->expected_name) == 0);
   (*state->count)++;
   return 0;
 }
@@ -106,7 +107,7 @@ struct TerminalFixture
         return;
       }
     }
-    ASSERT(false);
+    TEST_ASSERT(false);
   }
 
   /**
@@ -127,8 +128,8 @@ struct TerminalFixture
 
     std::string text(output_size, '\0');
     LibXR::ReadOperation read_op;
-    ASSERT(output.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
-           LibXR::ErrorCode::OK);
+    TEST_ASSERT(output.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
+                LibXR::ErrorCode::OK);
     return text;
   }
 
@@ -143,8 +144,8 @@ struct TerminalFixture
   std::string SendRaw(const void* data, size_t size)
   {
     LibXR::WriteOperation write_op;
-    ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
-           LibXR::ErrorCode::OK);
+    TEST_ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
+                LibXR::ErrorCode::OK);
     RunUntilIdle();
     return DrainOutput();
   }

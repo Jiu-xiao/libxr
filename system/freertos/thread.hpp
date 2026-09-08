@@ -65,7 +65,7 @@ class Thread
   void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
               size_t stack_depth, Thread::Priority priority)
   {
-    ASSERT(configMAX_PRIORITIES >= 6);
+    static_assert(configMAX_PRIORITIES >= 6);
 
     class ThreadBlock
     {
@@ -96,7 +96,7 @@ class Thread
                            static_cast<uint32_t>(priority), &(this->thread_handle_));
     UNUSED(ans);
     UNUSED(block);
-    ASSERT(ans == pdPASS);
+    REQUIRE(ans == pdPASS);
   }
 
   /**

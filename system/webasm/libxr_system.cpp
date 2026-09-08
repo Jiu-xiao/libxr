@@ -38,8 +38,9 @@ extern "C"
       const size_t accepted = std::min(size, queue.EmptySize());
       if (accepted != 0U)
       {
-        REQUIRE(queue.PushBatch(reinterpret_cast<const uint8_t*>(js_input), accepted) ==
-                LibXR::ErrorCode::OK);
+        [[maybe_unused]] const auto push_batch_result =
+            queue.PushBatch(reinterpret_cast<const uint8_t*>(js_input), accepted);
+        DEV_ASSERT(push_batch_result == LibXR::ErrorCode::OK);
       }
       queue.Publish();
     }
@@ -92,7 +93,7 @@ void LibXR::PlatformInit()
                   emit(second, second_size);
                   return first_size + second_size;
                 });
-            REQUIRE(accepted == offered);
+            DEV_ASSERT(accepted == offered);
           }
         });
   };

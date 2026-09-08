@@ -10,6 +10,7 @@
  *          2. `Up` / `Down` history navigation recalls newer and older commands.
  */
 #include "terminal_session_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -44,29 +45,29 @@ void TestInputCrLfAndHistory()
   fixture.ramfs.Add(two_cmd);
 
   fixture.SendText("one\r\n");
-  ASSERT(one_count == 1);
-  ASSERT(two_count == 0);
+  TEST_ASSERT(one_count == 1);
+  TEST_ASSERT(two_count == 0);
 
   fixture.SendText("two\n");
-  ASSERT(two_count == 1);
+  TEST_ASSERT(two_count == 1);
 
   constexpr char KEY_UP[] = "\033[A";
   constexpr char KEY_DOWN[] = "\033[B";
 
   auto newest_history = fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
-  ASSERT(newest_history.find("\033[2K\r") != std::string::npos);
-  ASSERT(newest_history.find("two") != std::string::npos);
+  TEST_ASSERT(newest_history.find("\033[2K\r") != std::string::npos);
+  TEST_ASSERT(newest_history.find("two") != std::string::npos);
   fixture.SendText("\n");
-  ASSERT(two_count == 2);
+  TEST_ASSERT(two_count == 2);
 
   fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
   auto older_history = fixture.SendRaw(KEY_UP, sizeof(KEY_UP) - 1);
-  ASSERT(older_history.find("one") != std::string::npos);
+  TEST_ASSERT(older_history.find("one") != std::string::npos);
   auto move_forward_history = fixture.SendRaw(KEY_DOWN, sizeof(KEY_DOWN) - 1);
-  ASSERT(move_forward_history.find("two") != std::string::npos);
+  TEST_ASSERT(move_forward_history.find("two") != std::string::npos);
   fixture.SendText("\n");
-  ASSERT(two_count == 3);
+  TEST_ASSERT(two_count == 3);
 }
 
 }  // namespace

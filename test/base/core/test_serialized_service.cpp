@@ -7,6 +7,7 @@
 
 #include "serialized_service.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -25,27 +26,28 @@ void TestDeferredAndRecursiveEvents()
   service.Publish(SECOND);
   unsigned calls = 0U;
   unsigned depth = 0U;
-  ASSERT(service.Invoke(FIRST, true,
-                        [&](uint32_t events, bool in_isr)
-                        {
-                          ASSERT(++depth == 1U);
-                          ASSERT(in_isr);
-                          if (calls++ == 0U)
-                          {
-                            ASSERT(events == (FIRST | SECOND));
-                            ASSERT(!service.Invoke(
-                                THIRD, false, [](uint32_t, bool) { ASSERT(false); }));
-                            service.Publish(THIRD);
-                          }
-                          else
-                          {
-                            ASSERT(events == THIRD);
-                          }
-                          --depth;
-                        }));
-  ASSERT(calls == 2U && depth == 0U);
-  ASSERT(service.Invoke(FIRST, false, [](uint32_t events, bool in_isr)
-                        { ASSERT(events == FIRST && !in_isr); }));
+  TEST_ASSERT(service.Invoke(FIRST, true,
+                             [&](uint32_t events, bool in_isr)
+                             {
+                               TEST_ASSERT(++depth == 1U);
+                               TEST_ASSERT(in_isr);
+                               if (calls++ == 0U)
+                               {
+                                 TEST_ASSERT(events == (FIRST | SECOND));
+                                 TEST_ASSERT(!service.Invoke(THIRD, false,
+                                                             [](uint32_t, bool)
+                                                             { TEST_ASSERT(false); }));
+                                 service.Publish(THIRD);
+                               }
+                               else
+                               {
+                                 TEST_ASSERT(events == THIRD);
+                               }
+                               --depth;
+                             }));
+  TEST_ASSERT(calls == 2U && depth == 0U);
+  TEST_ASSERT(service.Invoke(FIRST, false, [](uint32_t events, bool in_isr)
+                             { TEST_ASSERT(events == FIRST && !in_isr); }));
 }
 
 void TestCompetingCallableLifetime()
@@ -58,35 +60,36 @@ void TestCompetingCallableLifetime()
   std::thread owner(
       [&]
       {
-        ASSERT(service.Invoke(FIRST, false,
-                              [&](uint32_t events, bool in_isr)
-                              {
-                                ASSERT(events != 0U);
-                                ASSERT(!in_isr);
-                                if (owner_calls++ == 0U)
-                                {
-                                  ASSERT(events == FIRST);
-                                  entered.release();
-                                  resume.acquire();
-                                }
-                                else
-                                {
-                                  ASSERT(events == (SECOND | THIRD));
-                                  ASSERT(payload == 42);
-                                }
-                              }));
+        TEST_ASSERT(service.Invoke(FIRST, false,
+                                   [&](uint32_t events, bool in_isr)
+                                   {
+                                     TEST_ASSERT(events != 0U);
+                                     TEST_ASSERT(!in_isr);
+                                     if (owner_calls++ == 0U)
+                                     {
+                                       TEST_ASSERT(events == FIRST);
+                                       entered.release();
+                                       resume.acquire();
+                                     }
+                                     else
+                                     {
+                                       TEST_ASSERT(events == (SECOND | THIRD));
+                                       TEST_ASSERT(payload == 42);
+                                     }
+                                   }));
       });
   entered.acquire();
   payload = 42;
   {
     int transient_capture = 7;
-    ASSERT(!service.Invoke(SECOND, true, [&](uint32_t, bool) { transient_capture = 8; }));
-    ASSERT(transient_capture == 7);
+    TEST_ASSERT(
+        !service.Invoke(SECOND, true, [&](uint32_t, bool) { transient_capture = 8; }));
+    TEST_ASSERT(transient_capture == 7);
   }
   service.Publish(THIRD);
   resume.release();
   owner.join();
-  ASSERT(owner_calls == 2U);
+  TEST_ASSERT(owner_calls == 2U);
 }
 
 void TestConcurrentReleaseAndPayloadPublication()
@@ -103,19 +106,19 @@ void TestConcurrentReleaseAndPayloadPublication()
   std::atomic<unsigned> active{0U};
   auto handler = [&](uint32_t events, bool)
   {
-    ASSERT(events != 0U);
-    ASSERT(active.fetch_add(1U, std::memory_order_relaxed) == 0U);
+    TEST_ASSERT(events != 0U);
+    TEST_ASSERT(active.fetch_add(1U, std::memory_order_relaxed) == 0U);
     for (unsigned i = 0U; i < PRODUCERS; ++i)
     {
       if ((events & (1U << i)) != 0U)
       {
         // The producer publishes this plain payload only through the service event.
-        ASSERT(payload[i] == consumed[i] + 1U);
+        TEST_ASSERT(payload[i] == consumed[i] + 1U);
         consumed[i] = payload[i];
         acknowledged[i].release();
       }
     }
-    ASSERT(active.fetch_sub(1U, std::memory_order_relaxed) == 1U);
+    TEST_ASSERT(active.fetch_sub(1U, std::memory_order_relaxed) == 1U);
   };
   for (unsigned i = 0U; i < PRODUCERS; ++i)
   {
@@ -136,9 +139,9 @@ void TestConcurrentReleaseAndPayloadPublication()
   }
   for (uint32_t count : consumed)
   {
-    ASSERT(count == ITERATIONS);
+    TEST_ASSERT(count == ITERATIONS);
   }
-  ASSERT(active.load(std::memory_order_relaxed) == 0U);
+  TEST_ASSERT(active.load(std::memory_order_relaxed) == 0U);
 }
 }  // namespace
 

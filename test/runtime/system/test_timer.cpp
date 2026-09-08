@@ -17,6 +17,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 #include "timer.hpp"
 
 /**
@@ -51,5 +52,5 @@ void test_timer()
     }
   }
 
-  ASSERT(timer_arg == 20);
+  TEST_ASSERT(timer_arg == 20);
 }

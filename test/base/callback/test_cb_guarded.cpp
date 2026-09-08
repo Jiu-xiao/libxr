@@ -10,6 +10,7 @@
  *          2. Lambda binding still forwards the payload value and ISR flag.
  */
 #include "cb_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -31,19 +32,19 @@ void TestGuardedAndLambdaCallbacks()
   {
     GuardedCreationProbe probe;
     probe.cb.Run(false, 1);
-    ASSERT(probe.seen_count == 2);
-    ASSERT(probe.seen[0] == 1);
-    ASSERT(probe.seen[1] == 2);
-    ASSERT(probe.seen_in_isr[0] == false);
-    ASSERT(probe.seen_in_isr[1] == false);
-    ASSERT(probe.max_depth == 1);
+    TEST_ASSERT(probe.seen_count == 2);
+    TEST_ASSERT(probe.seen[0] == 1);
+    TEST_ASSERT(probe.seen[1] == 2);
+    TEST_ASSERT(probe.seen_in_isr[0] == false);
+    TEST_ASSERT(probe.seen_in_isr[1] == false);
+    TEST_ASSERT(probe.max_depth == 1);
   }
 
   {
     LambdaCreationProbe probe;
     probe.cb.Run(true, 7);
-    ASSERT(probe.seen_value == 7);
-    ASSERT(probe.seen_in_isr == true);
+    TEST_ASSERT(probe.seen_value == 7);
+    TEST_ASSERT(probe.seen_in_isr == true);
   }
 }
 

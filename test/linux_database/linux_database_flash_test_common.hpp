@@ -26,6 +26,7 @@
 #include "libxr_def.hpp"
 #include "linux_flash.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxDatabaseTestCommon
 {
@@ -92,7 +93,7 @@ class FailingFlash : public Flash
     {
       return ErrorCode::FAILED;
     }
-    ASSERT(offset + size <= flash_area_.size());
+    TEST_ASSERT(offset + size <= flash_area_.size());
     std::memset(flash_area_.data() + offset, 0xFF, size);
     return ErrorCode::OK;
   }
@@ -103,7 +104,7 @@ class FailingFlash : public Flash
     {
       return ErrorCode::FAILED;
     }
-    ASSERT(offset + data.size_ <= flash_area_.size());
+    TEST_ASSERT(offset + data.size_ <= flash_area_.size());
     std::memcpy(flash_area_.data() + offset, data.addr_, data.size_);
     return ErrorCode::OK;
   }
@@ -157,7 +158,7 @@ void ExpectFatalExit(int exit_code, Func&& func)
   // 辅助内容：验证当前失败或退出预期。
   // Helper coverage: validate the current expected failure or exit condition.
   pid_t child = fork();
-  ASSERT(child >= 0);
+  TEST_ASSERT(child >= 0);
 
   if (child == 0)
   {
@@ -174,9 +175,9 @@ void ExpectFatalExit(int exit_code, Func&& func)
   }
 
   int status = 0;
-  ASSERT(waitpid(child, &status, 0) == child);
-  ASSERT(WIFEXITED(status));
-  ASSERT(WEXITSTATUS(status) == exit_code);
+  TEST_ASSERT(waitpid(child, &status, 0) == child);
+  TEST_ASSERT(WIFEXITED(status));
+  TEST_ASSERT(WEXITSTATUS(status) == exit_code);
 }
 
 }  // namespace LinuxDatabaseTestCommon

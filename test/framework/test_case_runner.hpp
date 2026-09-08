@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "test_assert.hpp"
+
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
 #include <sys/wait.h>
 #include <unistd.h>
@@ -66,13 +68,13 @@ inline void run_test_case(const TestCase& test_case)
 
   if (!test_case.isolated)
   {
-    ASSERT(test_case.function() == 0);
+    TEST_ASSERT(test_case.function() == 0);
     return;
   }
 
 #if defined(LIBXR_SYSTEM_POSIX_HOST)
   pid_t child = fork();
-  ASSERT(child >= 0);
+  TEST_ASSERT(child >= 0);
 
   if (child == 0)
   {
@@ -81,10 +83,10 @@ inline void run_test_case(const TestCase& test_case)
   }
 
   int status = 0;
-  ASSERT(waitpid(child, &status, 0) == child);
-  ASSERT(WIFEXITED(status));
-  ASSERT(WEXITSTATUS(status) == 0);
+  TEST_ASSERT(waitpid(child, &status, 0) == child);
+  TEST_ASSERT(WIFEXITED(status));
+  TEST_ASSERT(WEXITSTATUS(status) == 0);
 #else
-  ASSERT(false);
+  TEST_ASSERT(false);
 #endif
 }

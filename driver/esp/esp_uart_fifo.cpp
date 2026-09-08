@@ -134,14 +134,14 @@ void IRAM_ATTR ESP32UART::DrainRxFifo(bool in_isr)
     const size_t chunk =
         std::min({free_space, rx_isr_buffer_size_,
                   static_cast<size_t>(uart_hal_get_rxfifo_len(&uart_hal_))});
-    REQUIRE_FROM_CALLBACK(chunk != 0U, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(chunk != 0U, in_isr);
     int read_size = static_cast<int>(chunk);
     uart_hal_read_rxfifo(&uart_hal_, rx_isr_buffer_, &read_size);
-    REQUIRE_FROM_CALLBACK(read_size > 0 && static_cast<size_t>(read_size) <= chunk,
-                          in_isr);
-    REQUIRE_FROM_CALLBACK(
-        queue.PushBatch(rx_isr_buffer_, static_cast<size_t>(read_size)) == ErrorCode::OK,
-        in_isr);
+    DEV_ASSERT_FROM_CALLBACK(read_size > 0 && static_cast<size_t>(read_size) <= chunk,
+                             in_isr);
+    [[maybe_unused]] const auto push_batch_result =
+        queue.PushBatch(rx_isr_buffer_, static_cast<size_t>(read_size));
+    DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
   }
 
   queue.Publish();

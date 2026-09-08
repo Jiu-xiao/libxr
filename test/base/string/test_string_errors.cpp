@@ -11,6 +11,7 @@
  * semantics.
  */
 #include "string_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -30,26 +31,26 @@ void TestRuntimeStringErrors()
   // Test coverage: verify error code, empty-view, and safe-storage semantics for
   // null-pointer inputs.
   LibXR::RuntimeStringView<> null_part("camera", static_cast<const char*>(nullptr));
-  ASSERT(null_part.Empty());
-  ASSERT(null_part.Status() == LibXR::ErrorCode::PTR_NULL);
-  ASSERT(null_part.Size() == 0);
+  TEST_ASSERT(null_part.Empty());
+  TEST_ASSERT(null_part.Status() == LibXR::ErrorCode::PTR_NULL);
+  TEST_ASSERT(null_part.Size() == 0);
 
   LibXR::RuntimeStringView<> null_copy(static_cast<const char*>(nullptr));
-  ASSERT(null_copy.Empty());
-  ASSERT(null_copy.Status() == LibXR::ErrorCode::PTR_NULL);
-  ASSERT(null_copy.Size() == 0);
-  ASSERT(null_copy.View().empty());
-  ASSERT(null_copy.CStr()[0] == '\0');
+  TEST_ASSERT(null_copy.Empty());
+  TEST_ASSERT(null_copy.Status() == LibXR::ErrorCode::PTR_NULL);
+  TEST_ASSERT(null_copy.Size() == 0);
+  TEST_ASSERT(null_copy.View().empty());
+  TEST_ASSERT(null_copy.CStr()[0] == '\0');
 
   LibXR::RuntimeStringView<> bare_null(nullptr);
-  ASSERT(bare_null.Empty());
-  ASSERT(bare_null.Status() == LibXR::ErrorCode::PTR_NULL);
-  ASSERT(bare_null.View().empty());
+  TEST_ASSERT(bare_null.Empty());
+  TEST_ASSERT(bare_null.Status() == LibXR::ErrorCode::PTR_NULL);
+  TEST_ASSERT(bare_null.View().empty());
 
   LibXR::RuntimeStringView<> bare_null_part("camera", nullptr);
-  ASSERT(bare_null_part.Empty());
-  ASSERT(bare_null_part.Status() == LibXR::ErrorCode::PTR_NULL);
-  ASSERT(bare_null_part.View().empty());
+  TEST_ASSERT(bare_null_part.Empty());
+  TEST_ASSERT(bare_null_part.Status() == LibXR::ErrorCode::PTR_NULL);
+  TEST_ASSERT(bare_null_part.View().empty());
 }
 
 }  // namespace

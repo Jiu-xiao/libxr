@@ -14,6 +14,7 @@
 #pragma once
 
 #include "linux_database_image_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxDatabaseTestCommon
 {
@@ -54,9 +55,10 @@ inline void AssertMainValidBackupInvalid(const char* path)
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
   auto bytes = ReadAllBytes(path);
-  ASSERT(ReadLe32(bytes, 0) == XR_DB_FLASH_HEADER);
-  ASSERT(ReadLe32(bytes, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
-  ASSERT(ReadLe32(bytes, XR_DB_BLOCK_SIZE + XR_DB_CHECKSUM_OFFSET) != XR_DB_CHECKSUM);
+  TEST_ASSERT(ReadLe32(bytes, 0) == XR_DB_FLASH_HEADER);
+  TEST_ASSERT(ReadLe32(bytes, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
+  TEST_ASSERT(ReadLe32(bytes, XR_DB_BLOCK_SIZE + XR_DB_CHECKSUM_OFFSET) !=
+              XR_DB_CHECKSUM);
 }
 
 inline void RunPartialBackupCase(const char* path, MainChecksum main_checksum,
@@ -74,7 +76,7 @@ inline void RunPartialBackupCase(const char* path, MainChecksum main_checksum,
   }
   WriteAllBytes(path, bytes);
 
-  ASSERT(ReopenDatabaseValue(path, default_value) == expected_value);
+  TEST_ASSERT(ReopenDatabaseValue(path, default_value) == expected_value);
   AssertMainValidBackupInvalid(path);
 }
 

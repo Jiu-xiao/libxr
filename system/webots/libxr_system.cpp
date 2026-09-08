@@ -169,7 +169,8 @@ void StdiThread(LibXR::ReadPort* read_port)
           queue.Publish();
           continue;
         }
-        REQUIRE(queue.PushBatch(read_buff, size) == LibXR::ErrorCode::OK);
+        [[maybe_unused]] const auto push_batch_result = queue.PushBatch(read_buff, size);
+        DEV_ASSERT(push_batch_result == LibXR::ErrorCode::OK);
         queue.Publish();
       }
     }

@@ -1,5 +1,6 @@
 #include "libxr.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -18,13 +19,13 @@ void RunExternalQueueChecks()
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle b;
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle c;
 
-  ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
-  ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
-  ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
-  ASSERT(pool.EmptySize() == 0);
+  TEST_ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(pool.EmptySize() == 0);
 
   b.Reset();
-  ASSERT(pool.EmptySize() == 1);
+  TEST_ASSERT(pool.EmptySize() == 1);
 }
 
 template <typename QueueType>
@@ -34,9 +35,9 @@ void RunExternalSlotChecks()
   LibXR::BasicObjectPool<Payload, QueueType> pool(3, slots);
 
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle handle;
-  ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
   handle->value = 123;
-  ASSERT(slots[handle.Index()].value == 123);
+  TEST_ASSERT(slots[handle.Index()].value == 123);
 }
 
 template <typename QueueType>
@@ -47,9 +48,9 @@ void RunExternalQueueAndSlotChecks()
   LibXR::BasicObjectPool<Payload, QueueType> pool(free_queue, 3, slots);
 
   typename LibXR::BasicObjectPool<Payload, QueueType>::Handle handle;
-  ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
   handle->value = 456;
-  ASSERT(slots[handle.Index()].value == 456);
+  TEST_ASSERT(slots[handle.Index()].value == 456);
 }
 }  // namespace
 
@@ -64,26 +65,26 @@ void test_object_pool()
     LibXR::ObjectPool<Payload>::Handle c;
     LibXR::ObjectPool<Payload>::Handle d;
 
-    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
-    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
-    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
-    ASSERT(pool.EmptySize() == 0);
-    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.EmptySize() == 0);
+    TEST_ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
 
     a->value = 11;
     b->value = 22;
     c->value = 33;
-    ASSERT((*a).value == 11);
-    ASSERT((*b).value == 22);
-    ASSERT((*c).value == 33);
+    TEST_ASSERT((*a).value == 11);
+    TEST_ASSERT((*b).value == 22);
+    TEST_ASSERT((*c).value == 33);
 
     const auto a_index = a.Index();
     a.Reset();
-    ASSERT(pool.EmptySize() == 1);
-    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
-    ASSERT(d.Index() == a_index);
+    TEST_ASSERT(pool.EmptySize() == 1);
+    TEST_ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(d.Index() == a_index);
     d->value = 44;
-    ASSERT(pool.UnsafeAt(d.Index()).value == 44);
+    TEST_ASSERT(pool.UnsafeAt(d.Index()).value == 44);
   }
 
   // The same pool contract should work with the typed SPSC free-index queue.
@@ -95,26 +96,26 @@ void test_object_pool()
     LibXR::SPSCObjectPool<Payload>::Handle c;
     LibXR::SPSCObjectPool<Payload>::Handle d;
 
-    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
-    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
-    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
-    ASSERT(pool.EmptySize() == 0);
-    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.EmptySize() == 0);
+    TEST_ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
 
     a->value = 11;
     b->value = 22;
     c->value = 33;
-    ASSERT((*a).value == 11);
-    ASSERT((*b).value == 22);
-    ASSERT((*c).value == 33);
+    TEST_ASSERT((*a).value == 11);
+    TEST_ASSERT((*b).value == 22);
+    TEST_ASSERT((*c).value == 33);
 
     const auto a_index = a.Index();
     a.Reset();
-    ASSERT(pool.EmptySize() == 1);
-    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
-    ASSERT(d.Index() == a_index);
+    TEST_ASSERT(pool.EmptySize() == 1);
+    TEST_ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(d.Index() == a_index);
     d->value = 44;
-    ASSERT(pool.UnsafeAt(d.Index()).value == 44);
+    TEST_ASSERT(pool.UnsafeAt(d.Index()).value == 44);
   }
 
   // The same pool contract should work with the typed MPMC free-index queue.
@@ -126,17 +127,17 @@ void test_object_pool()
     LibXR::MPMCObjectPool<Payload>::Handle c;
     LibXR::MPMCObjectPool<Payload>::Handle d;
 
-    ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
-    ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
-    ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
-    ASSERT(pool.EmptySize() == 0);
-    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(pool.Acquire(a) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.Acquire(b) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.Acquire(c) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.EmptySize() == 0);
+    TEST_ASSERT(pool.Acquire(d) == LibXR::ErrorCode::EMPTY);
 
     const auto a_index = a.Index();
     a.Reset();
-    ASSERT(pool.EmptySize() == 1);
-    ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
-    ASSERT(d.Index() == a_index);
+    TEST_ASSERT(pool.EmptySize() == 1);
+    TEST_ASSERT(pool.Acquire(d) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(d.Index() == a_index);
   }
 
   // External queue should also be supported.
@@ -163,12 +164,12 @@ void test_object_pool()
 
     {
       LibXR::ObjectPool<Payload>::Handle handle;
-      ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(pool.Acquire(handle) == LibXR::ErrorCode::OK);
       handle->value = 77;
-      ASSERT(pool.EmptySize() == 1);
+      TEST_ASSERT(pool.EmptySize() == 1);
     }
 
-    ASSERT(pool.EmptySize() == 2);
+    TEST_ASSERT(pool.EmptySize() == 2);
   }
 
   // Move-only handle ownership should transfer the return responsibility.
@@ -176,16 +177,16 @@ void test_object_pool()
     LibXR::ObjectPool<Payload> pool(1);
 
     LibXR::ObjectPool<Payload>::Handle first;
-    ASSERT(pool.Acquire(first) == LibXR::ErrorCode::OK);
-    ASSERT(pool.EmptySize() == 0);
+    TEST_ASSERT(pool.Acquire(first) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(pool.EmptySize() == 0);
 
     auto second = std::move(first);
-    ASSERT(!first.Valid());
-    ASSERT(second.Valid());
+    TEST_ASSERT(!first.Valid());
+    TEST_ASSERT(second.Valid());
     second->value = 99;
-    ASSERT(pool.UnsafeAt(second.Index()).value == 99);
+    TEST_ASSERT(pool.UnsafeAt(second.Index()).value == 99);
 
     second.Reset();
-    ASSERT(pool.EmptySize() == 1);
+    TEST_ASSERT(pool.EmptySize() == 1);
   }
 }

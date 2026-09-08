@@ -3,6 +3,7 @@
  * @brief PID 周期误差语义子测试。 Split test unit for PID cyclic-error semantics.
  */
 #include "pid_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试项函数 `RunPidCycleTests`。 Test-item function `RunPidCycleTests`.
@@ -41,8 +42,8 @@ void RunPidCycleTests()
       const double OUT = pid.Calculate(SP, FB, DT);
       const double EXPECT = static_cast<double>(SP - FB);
 
-      ASSERT(near(OUT, EXPECT, 1e-6));
-      ASSERT(near(pid.LastError(), EXPECT, 1e-6));
+      TEST_ASSERT(near(OUT, EXPECT, 1e-6));
+      TEST_ASSERT(near(pid.LastError(), EXPECT, 1e-6));
     }
 
     // cycle = true: err = CycleValue(sp) - fb
@@ -53,12 +54,12 @@ void RunPidCycleTests()
       const double EXPECT_CYCLE = static_cast<double>(LibXR::CycleValue<S>(SP) - FB);
       const double EXPECT_LINEAR = static_cast<double>(SP - FB);
 
-      ASSERT(std::isfinite(EXPECT_CYCLE));
-      ASSERT(std::abs(EXPECT_CYCLE - EXPECT_LINEAR) > 1.0);
+      TEST_ASSERT(std::isfinite(EXPECT_CYCLE));
+      TEST_ASSERT(std::abs(EXPECT_CYCLE - EXPECT_LINEAR) > 1.0);
 
       const double OUT = pid.Calculate(SP, FB, DT);
-      ASSERT(near(OUT, EXPECT_CYCLE, 1e-6));
-      ASSERT(near(pid.LastError(), EXPECT_CYCLE, 1e-6));
+      TEST_ASSERT(near(OUT, EXPECT_CYCLE, 1e-6));
+      TEST_ASSERT(near(pid.LastError(), EXPECT_CYCLE, 1e-6));
     }
   }
 }

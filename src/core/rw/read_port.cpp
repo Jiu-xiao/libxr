@@ -13,7 +13,7 @@ ReadPort::ReadPort(size_t buffer_size)
 
 ReadPort::ReadQueue ReadPort::GetReadQueue(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(queue_data_ != nullptr, in_isr);
+  ASSERT_FROM_CALLBACK(queue_data_ != nullptr, in_isr);
   return ReadQueue(*this, in_isr);
 }
 
@@ -24,7 +24,7 @@ ErrorCode ReadPort::ReadQueue::PushBatch(const uint8_t* data, size_t size)
   DEV_ASSERT_FROM_CALLBACK(!finished_, in_isr_);
   if (size != 0U)
   {
-    DEV_ASSERT_FROM_CALLBACK(data != nullptr, in_isr_);
+    ASSERT_FROM_CALLBACK(data != nullptr, in_isr_);
   }
 
   const ErrorCode result = port_.queue_data_->PushBatch(data, size);
@@ -90,12 +90,12 @@ bool ReadPort::HasEnough(size_t available, size_t requested) const
   return requested == 0U ? available != 0U : available >= requested;
 }
 
-void ReadPort::ReleaseClaimed(bool in_isr)
+void ReadPort::ReleaseClaimed([[maybe_unused]] bool in_isr)
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
   {
-    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::CLAIMED, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(GetPhase(observed) == Phase::CLAIMED, in_isr);
     const uint32_t desired = WithPhase(observed, Phase::IDLE);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -129,12 +129,12 @@ bool ReadPort::ClaimBlockCompletion()
   }
 }
 
-void ReadPort::ReleaseBlockCompletion(bool in_isr)
+void ReadPort::ReleaseBlockCompletion([[maybe_unused]] bool in_isr)
 {
   uint32_t observed = state_.load(std::memory_order_acquire);
   for (;;)
   {
-    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::BLOCK_CLAIMED, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(GetPhase(observed) == Phase::BLOCK_CLAIMED, in_isr);
     const uint32_t desired = WithPhase(observed, Phase::IDLE);
     if (state_.compare_exchange_weak(observed, desired, std::memory_order_acq_rel,
                                      std::memory_order_acquire))
@@ -172,7 +172,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
 
   if (data.size_ != 0U)
   {
-    REQUIRE_FROM_CALLBACK(data.addr_ != nullptr, in_isr);
+    ASSERT_FROM_CALLBACK(data.addr_ != nullptr, in_isr);
     if (data.size_ > Capacity())
     {
       ReleaseClaimed(in_isr);
@@ -184,9 +184,9 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   {
     if (data.size_ != 0U)
     {
-      REQUIRE_FROM_CALLBACK(queue_data_->PopBatch(reinterpret_cast<uint8_t*>(data.addr_),
-                                                  data.size_) == ErrorCode::OK,
-                            in_isr);
+      [[maybe_unused]] const auto pop_batch_result =
+          queue_data_->PopBatch(reinterpret_cast<uint8_t*>(data.addr_), data.size_);
+      DEV_ASSERT_FROM_CALLBACK(pop_batch_result == ErrorCode::OK, in_isr);
     }
 
     Request completed{data, op};
@@ -208,7 +208,7 @@ ErrorCode ReadPort::operator()(RawData data, ReadOperation& op, bool in_isr)
   for (;;)
   {
     uint32_t observed = state_.load(std::memory_order_acquire);
-    REQUIRE_FROM_CALLBACK(GetPhase(observed) == Phase::CLAIMED, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(GetPhase(observed) == Phase::CLAIMED, in_isr);
 
     if (HasEvent(observed))
     {
@@ -270,7 +270,7 @@ void ReadPort::ProcessPendingReads(bool in_isr)
         if (current_phase == Phase::CLAIMED_WITH_WAITER)
         {
           Semaphore* const waiter = info_.op.data.sem_info.sem;
-          REQUIRE_FROM_CALLBACK(waiter != nullptr, in_isr);
+          DEV_ASSERT_FROM_CALLBACK(waiter != nullptr, in_isr);
           const uint32_t desired = WithPhase(current, Phase::IDLE);
           if (state_.compare_exchange_weak(current, desired, std::memory_order_acq_rel,
                                            std::memory_order_acquire))
@@ -281,7 +281,7 @@ void ReadPort::ProcessPendingReads(bool in_isr)
           continue;
         }
 
-        REQUIRE_FROM_CALLBACK(current_phase == Phase::CLAIMED, in_isr);
+        DEV_ASSERT_FROM_CALLBACK(current_phase == Phase::CLAIMED, in_isr);
         const uint32_t desired = WithPhase(current, Phase::PENDING);
         if (state_.compare_exchange_weak(current, desired, std::memory_order_acq_rel,
                                          std::memory_order_acquire))
@@ -311,14 +311,14 @@ void ReadPort::ProcessPendingReads(bool in_isr)
 void ReadPort::CompleteClaimedRead(bool in_isr)
 {
   Request completed = info_;
-  REQUIRE_FROM_CALLBACK(completed.op.type != ReadOperation::OperationType::BLOCK, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(completed.op.type != ReadOperation::OperationType::BLOCK,
+                           in_isr);
 
   if (completed.data.size_ != 0U)
   {
-    REQUIRE_FROM_CALLBACK(
-        queue_data_->PopBatch(reinterpret_cast<uint8_t*>(completed.data.addr_),
-                              completed.data.size_) == ErrorCode::OK,
-        in_isr);
+    [[maybe_unused]] const auto pop_batch_result = queue_data_->PopBatch(
+        reinterpret_cast<uint8_t*>(completed.data.addr_), completed.data.size_);
+    DEV_ASSERT_FROM_CALLBACK(pop_batch_result == ErrorCode::OK, in_isr);
   }
 
   ReleaseClaimed(in_isr);
@@ -332,15 +332,16 @@ void ReadPort::CompleteClaimedRead(bool in_isr)
 void ReadPort::CompleteClaimedBlock(bool in_isr)
 {
   Request completed = info_;
-  REQUIRE_FROM_CALLBACK(completed.op.type == ReadOperation::OperationType::BLOCK, in_isr);
-  REQUIRE_FROM_CALLBACK(ClaimBlockCompletion(), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(completed.op.type == ReadOperation::OperationType::BLOCK,
+                           in_isr);
+  [[maybe_unused]] const auto claim_block_completion_result = ClaimBlockCompletion();
+  DEV_ASSERT_FROM_CALLBACK(claim_block_completion_result, in_isr);
 
   if (completed.data.size_ != 0U)
   {
-    REQUIRE_FROM_CALLBACK(
-        queue_data_->PopBatch(reinterpret_cast<uint8_t*>(completed.data.addr_),
-                              completed.data.size_) == ErrorCode::OK,
-        in_isr);
+    [[maybe_unused]] const auto pop_batch_result = queue_data_->PopBatch(
+        reinterpret_cast<uint8_t*>(completed.data.addr_), completed.data.size_);
+    DEV_ASSERT_FROM_CALLBACK(pop_batch_result == ErrorCode::OK, in_isr);
     OnReadQueueSpaceAvailable(in_isr);
   }
 
@@ -353,7 +354,7 @@ ErrorCode ReadPort::WaitForBlock(ReadOperation& op)
   ErrorCode wait_result = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
   if (wait_result == ErrorCode::OK)
   {
-    REQUIRE(GetPhase(state_.load(std::memory_order_acquire)) == Phase::BLOCK_CLAIMED);
+    DEV_ASSERT(GetPhase(state_.load(std::memory_order_acquire)) == Phase::BLOCK_CLAIMED);
     const ErrorCode result = block_result_;
     ReleaseBlockCompletion(false);
     return result;
@@ -385,7 +386,7 @@ ErrorCode ReadPort::WaitForBlock(ReadOperation& op)
       continue;
     }
 
-    REQUIRE(phase == Phase::CLAIMED_WITH_WAITER || phase == Phase::BLOCK_CLAIMED);
+    DEV_ASSERT(phase == Phase::CLAIMED_WITH_WAITER || phase == Phase::BLOCK_CLAIMED);
     break;
   }
 
@@ -400,7 +401,7 @@ ErrorCode ReadPort::WaitForBlock(ReadOperation& op)
     return ErrorCode::TIMEOUT;
   }
 
-  REQUIRE(completed_phase == Phase::BLOCK_CLAIMED);
+  DEV_ASSERT(completed_phase == Phase::BLOCK_CLAIMED);
   const ErrorCode result = block_result_;
   ReleaseBlockCompletion(false);
   return result;
@@ -425,7 +426,7 @@ ErrorCode ReadPort::ClearQueuedData(bool in_isr)
 
 void ReadPort::BindQueue(SPSCQueue<uint8_t>* queue)
 {
-  REQUIRE(queue != nullptr);
-  REQUIRE(queue_data_ == nullptr);
+  DEV_ASSERT(queue != nullptr);
+  DEV_ASSERT(queue_data_ == nullptr);
   queue_data_ = queue;
 }

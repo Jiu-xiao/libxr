@@ -11,6 +11,7 @@
  * next wait cycle.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -40,7 +41,7 @@ void test_rw_write_port_block_pending_result_propagates()
   StartWriteFinisher(finisher, w, done, ErrorCode::FAILED, "wr_finish");
 
   auto ec = w(ConstRawData{TX, sizeof(TX)}, op);
-  ASSERT(ec == ErrorCode::FAILED);
+  TEST_ASSERT(ec == ErrorCode::FAILED);
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
 }
@@ -71,20 +72,20 @@ void test_rw_write_port_block_reused_waiter_discards_stale_signal()
   StartWriteFinisher(finisher1, w, done1, ErrorCode::FAILED, "wr_stale1");
 
   auto ec = w(ConstRawData{TX1, sizeof(TX1)}, op);
-  ASSERT(ec == ErrorCode::FAILED);
+  TEST_ASSERT(ec == ErrorCode::FAILED);
   ExpectWaitOk(done1, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher1);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(sem.Value() == 0);
 
   Semaphore done2;
   Thread finisher2;
   StartWriteFinisher(finisher2, w, done2, ErrorCode::OK, "wr_stale2");
 
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
   ExpectWaitOk(done2, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher2);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 }  // namespace

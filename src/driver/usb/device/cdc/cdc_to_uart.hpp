@@ -64,13 +64,13 @@ class CDCToUart : public CDCUart
               LibXR::min(cdc_to_uart->read_port_->Size(), cdc_to_uart->rx_buffer_.size_);
 
           static ReadOperation op_read_cdc_noblock;
-          auto ans = cdc_to_uart->Read({cdc_to_uart->rx_buffer_.addr_, size},
-                                       op_read_cdc_noblock, in_isr);
-          ASSERT(ans == ErrorCode::OK);
+          [[maybe_unused]] auto ans = cdc_to_uart->Read(
+              {cdc_to_uart->rx_buffer_.addr_, size}, op_read_cdc_noblock, in_isr);
+          DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
 
           ans = cdc_to_uart->uart_.Write({cdc_to_uart->rx_buffer_.addr_, size},
                                          cdc_to_uart->op_write_uart_, in_isr);
-          ASSERT(ans == ErrorCode::OK);
+          DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
         },
         this);
 
@@ -82,8 +82,9 @@ class CDCToUart : public CDCUart
     cb_uart_write_ = Callback<ErrorCode>::CreateGuarded(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
-          auto ans = cdc_to_uart->Read({nullptr, 0}, cdc_to_uart->op_read_cdc_, in_isr);
-          ASSERT(ans == ErrorCode::OK);
+          [[maybe_unused]] auto ans =
+              cdc_to_uart->Read({nullptr, 0}, cdc_to_uart->op_read_cdc_, in_isr);
+          DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
         },
         this);
 
@@ -99,13 +100,13 @@ class CDCToUart : public CDCUart
                                  cdc_to_uart->tx_buffer_.size_);
           static ReadOperation op_read_uart_noblock;
 
-          auto ans = cdc_to_uart->uart_.Read({cdc_to_uart->tx_buffer_.addr_, size},
-                                             op_read_uart_noblock, in_isr);
-          ASSERT(ans == ErrorCode::OK);
+          [[maybe_unused]] auto ans = cdc_to_uart->uart_.Read(
+              {cdc_to_uart->tx_buffer_.addr_, size}, op_read_uart_noblock, in_isr);
+          DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
 
           ans = cdc_to_uart->Write({cdc_to_uart->tx_buffer_.addr_, size},
                                    cdc_to_uart->op_write_cdc_, in_isr);
-          ASSERT(ans == ErrorCode::OK);
+          DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
         },
         this);
 
@@ -117,9 +118,9 @@ class CDCToUart : public CDCUart
     cb_cdc_write_ = Callback<ErrorCode>::CreateGuarded(
         [](bool in_isr, CDCToUart* cdc_to_uart, ErrorCode)
         {
-          auto ans_uart_read =
+          [[maybe_unused]] auto ans_uart_read =
               cdc_to_uart->uart_.Read({nullptr, 0}, cdc_to_uart->op_read_uart_, in_isr);
-          ASSERT(ans_uart_read == ErrorCode::OK);
+          DEV_ASSERT_FROM_CALLBACK(ans_uart_read == ErrorCode::OK, in_isr);
         },
         this);
 

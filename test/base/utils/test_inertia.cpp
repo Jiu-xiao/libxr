@@ -19,6 +19,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_inertia`。 Test entry function `test_inertia`.
@@ -50,33 +51,33 @@ void test_inertia()
   {
     for (int j = 0; j < 3; ++j)
     {
-      ASSERT(equal(from_arr9(i, j), from_mat(i, j)));
+      TEST_ASSERT(equal(from_arr9(i, j), from_mat(i, j)));
     }
   }
 
-  ASSERT(equal(from_sym(0, 0), 1.) && equal(from_sym(1, 1), 2.) &&
-         equal(from_sym(2, 2), 3.) && equal(from_sym(0, 1), -4.) &&
-         equal(from_sym(1, 0), -4.) && equal(from_sym(0, 2), -6.) &&
-         equal(from_sym(2, 0), -6.) && equal(from_sym(1, 2), -5.) &&
-         equal(from_sym(2, 1), -5.));
+  TEST_ASSERT(equal(from_sym(0, 0), 1.) && equal(from_sym(1, 1), 2.) &&
+              equal(from_sym(2, 2), 3.) && equal(from_sym(0, 1), -4.) &&
+              equal(from_sym(1, 0), -4.) && equal(from_sym(0, 2), -6.) &&
+              equal(from_sym(2, 0), -6.) && equal(from_sym(1, 2), -5.) &&
+              equal(from_sym(2, 1), -5.));
 
   for (int i = 0; i < 9; ++i)
   {
-    ASSERT(equal(from_arr9.data[i], from_vals.data[i]));
+    TEST_ASSERT(equal(from_arr9.data[i], from_vals.data[i]));
   }
 
   /* Translation and rotation checks */
   Position pos(std::sqrt(0.5), std::sqrt(0.5), 0.);
   auto translated = from_vals.Translate(pos);
-  ASSERT(equal(translated.data[0], 1.05));
-  ASSERT(equal(translated.data[1], -4.05));
-  ASSERT(equal(translated.data[2], -6.0));
-  ASSERT(equal(translated.data[3], -4.05));
-  ASSERT(equal(translated.data[4], 2.05));
-  ASSERT(equal(translated.data[5], -5.0));
-  ASSERT(equal(translated.data[6], -6.0));
-  ASSERT(equal(translated.data[7], -5.0));
-  ASSERT(equal(translated.data[8], 3.1));
+  TEST_ASSERT(equal(translated.data[0], 1.05));
+  TEST_ASSERT(equal(translated.data[1], -4.05));
+  TEST_ASSERT(equal(translated.data[2], -6.0));
+  TEST_ASSERT(equal(translated.data[3], -4.05));
+  TEST_ASSERT(equal(translated.data[4], 2.05));
+  TEST_ASSERT(equal(translated.data[5], -5.0));
+  TEST_ASSERT(equal(translated.data[6], -6.0));
+  TEST_ASSERT(equal(translated.data[7], -5.0));
+  TEST_ASSERT(equal(translated.data[8], 3.1));
 
   auto rotated_q = translated.Rotate(Quaternion<>(0.9238795, 0., 0., 0.3826834));
   auto rotated_m =
@@ -86,7 +87,7 @@ void test_inertia()
   {
     for (int j = 0; j < 3; ++j)
     {
-      ASSERT(equal(rotated_q(i, j), rotated_m(i, j)));
+      TEST_ASSERT(equal(rotated_q(i, j), rotated_m(i, j)));
     }
   }
 
@@ -94,9 +95,9 @@ void test_inertia()
   Eigen::Matrix<double, 3, 3> m_add;
   m_add << 1., 2., 3., 4., 5., 6., 7., 8., 9.;
   auto m_sum = from_vals + m_add;
-  ASSERT(equal(m_sum(0, 0), from_vals(0, 0) + 1.) &&
-         equal(m_sum(1, 1), from_vals(1, 1) + 5.) &&
-         equal(m_sum(2, 2), from_vals(2, 2) + 9.));
+  TEST_ASSERT(equal(m_sum(0, 0), from_vals(0, 0) + 1.) &&
+              equal(m_sum(1, 1), from_vals(1, 1) + 5.) &&
+              equal(m_sum(2, 2), from_vals(2, 2) + 9.));
 
   /* Center of mass combination */
   Transform t1(Quaternion<>(), Position(1., 0., 0.));
@@ -104,28 +105,28 @@ void test_inertia()
   CenterOfMass<> c1(from_vals, t1);
   CenterOfMass<> c2(from_arr9, t2);
   auto c = c1 + c2;
-  ASSERT(equal(c.mass, 0.2));
-  ASSERT(equal(c.position(0), 0.5) && equal(c.position(1), 0.5) &&
-         equal(c.position(2), 0.));
+  TEST_ASSERT(equal(c.mass, 0.2));
+  TEST_ASSERT(equal(c.position(0), 0.5) && equal(c.position(1), 0.5) &&
+              equal(c.position(2), 0.));
 
   /* Original behaviour check */
   auto inertia_new = Inertia(0.1, 1., 1., 1., 0., 0., 0.)
                          .Translate(pos)
                          .Rotate(LibXR::EulerAngle(0., 0., LibXR::PI / 4).ToQuaternion());
 
-  ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
-         equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
-         equal(inertia_new(1, 1), 1.) && equal(inertia_new(1, 2), 0.) &&
-         equal(inertia_new(2, 0), 0.) && equal(inertia_new(2, 1), 0.) &&
-         equal(inertia_new(2, 2), 1.1));
+  TEST_ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
+              equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
+              equal(inertia_new(1, 1), 1.) && equal(inertia_new(1, 2), 0.) &&
+              equal(inertia_new(2, 0), 0.) && equal(inertia_new(2, 1), 0.) &&
+              equal(inertia_new(2, 2), 1.1));
 
   inertia_new = Inertia(0.1, 1., 1., 1., 0., 0., 0.)
                     .Translate(pos)
                     .Rotate(LibXR::EulerAngle(0., 0., LibXR::PI / 4).ToRotationMatrix());
 
-  ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
-         equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
-         equal(inertia_new(1, 1), 1.) && equal(inertia_new(1, 2), 0.) &&
-         equal(inertia_new(2, 0), 0.) && equal(inertia_new(2, 1), 0.) &&
-         equal(inertia_new(2, 2), 1.1));
+  TEST_ASSERT(equal(inertia_new(0, 0), 1.1) && equal(inertia_new(0, 1), 0.) &&
+              equal(inertia_new(0, 2), 0.) && equal(inertia_new(1, 0), 0.) &&
+              equal(inertia_new(1, 1), 1.) && equal(inertia_new(1, 2), 0.) &&
+              equal(inertia_new(2, 0), 0.) && equal(inertia_new(2, 1), 0.) &&
+              equal(inertia_new(2, 2), 1.1));
 }

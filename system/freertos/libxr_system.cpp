@@ -15,7 +15,7 @@ extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t
   static volatile const char* task_name = pcTaskName;
   UNUSED(task_name);
   UNUSED(xTask);
-  ASSERT(false);
+  REQUIRE(false);
 }
 
 uint32_t LibXR::libxr_freertos_timebase_tick_offset = 0;

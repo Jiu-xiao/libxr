@@ -495,18 +495,18 @@ void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data, bool in
   }
 
   auto* first = LinkItemFromHeadAddr(gdma_link_get_head_addr(rx_dma_link_));
-  REQUIRE_FROM_CALLBACK(first != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(first != nullptr, in_isr);
   auto* item = first;
   for (uint32_t i = 0U; i < rx_dma_node_index_; ++i)
   {
-    REQUIRE_FROM_CALLBACK(item != nullptr, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(item != nullptr, in_isr);
     item = item->next;
   }
 
   auto queue = _read_port.GetReadQueue(in_isr);
   for (uint32_t processed = 0U; processed < DMA_RX_NODE_COUNT; ++processed)
   {
-    REQUIRE_FROM_CALLBACK(item != nullptr, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(item != nullptr, in_isr);
     if (item->dw0.owner != GDMA_OWNER_CPU)
     {
       break;
@@ -515,15 +515,16 @@ void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data, bool in
     std::atomic_thread_fence(std::memory_order_acquire);
     const size_t received = std::min<size_t>(item->dw0.length, rx_dma_chunk_size_);
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE || SOC_PSRAM_DMA_CAPABLE
-    REQUIRE_FROM_CALLBACK(CacheSyncDmaBuffer(item->buffer, rx_dma_chunk_size_, false),
-                          in_isr);
+    [[maybe_unused]] const auto cache_sync_dma_buffer_result =
+        CacheSyncDmaBuffer(item->buffer, rx_dma_chunk_size_, false);
+    REQUIRE_FROM_CALLBACK(cache_sync_dma_buffer_result, in_isr);
 #endif
     if (received != 0U && queue.EmptySize() != 0U)
     {
       const size_t fitting = std::min(received, queue.EmptySize());
-      REQUIRE_FROM_CALLBACK(queue.PushBatch(static_cast<const uint8_t*>(item->buffer),
-                                            fitting) == ErrorCode::OK,
-                            in_isr);
+      [[maybe_unused]] const auto push_batch_result =
+          queue.PushBatch(static_cast<const uint8_t*>(item->buffer), fitting);
+      DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
     }
 
     std::atomic_thread_fence(std::memory_order_release);
@@ -536,19 +537,21 @@ void IRAM_ATTR ESP32UART::HandleDmaRxDone(gdma_event_data_t* event_data, bool in
 
 void IRAM_ATTR ESP32UART::StopDmaRx(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(rx_dma_channel_ != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(gdma_stop(rx_dma_channel_) == ESP_OK, in_isr);
-  REQUIRE_FROM_CALLBACK(gdma_reset(rx_dma_channel_) == ESP_OK, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(rx_dma_channel_ != nullptr, in_isr);
+  [[maybe_unused]] const auto gdma_stop_result = gdma_stop(rx_dma_channel_);
+  REQUIRE_FROM_CALLBACK(gdma_stop_result == ESP_OK, in_isr);
+  [[maybe_unused]] const auto gdma_reset_result = gdma_reset(rx_dma_channel_);
+  REQUIRE_FROM_CALLBACK(gdma_reset_result == ESP_OK, in_isr);
 }
 
 void IRAM_ATTR ESP32UART::ResetDmaRxDescriptors(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(rx_dma_link_ != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(rx_dma_link_ != nullptr, in_isr);
   auto* item = LinkItemFromHeadAddr(gdma_link_get_head_addr(rx_dma_link_));
-  REQUIRE_FROM_CALLBACK(item != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(item != nullptr, in_isr);
   for (uint32_t i = 0U; i < DMA_RX_NODE_COUNT; ++i)
   {
-    REQUIRE_FROM_CALLBACK(item != nullptr, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(item != nullptr, in_isr);
     item->dw0.size = static_cast<uint32_t>(rx_dma_chunk_size_);
     item->dw0.length = static_cast<uint32_t>(rx_dma_chunk_size_);
     item->dw0.err_eof = 0U;
@@ -563,11 +566,11 @@ void IRAM_ATTR ESP32UART::ResetDmaRxDescriptors(bool in_isr)
 
 void IRAM_ATTR ESP32UART::StartDmaRx(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(rx_dma_channel_ != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(rx_dma_link_ != nullptr, in_isr);
-  REQUIRE_FROM_CALLBACK(
-      gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_)) == ESP_OK,
-      in_isr);
+  DEV_ASSERT_FROM_CALLBACK(rx_dma_channel_ != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(rx_dma_link_ != nullptr, in_isr);
+  [[maybe_unused]] const auto gdma_start_result =
+      gdma_start(rx_dma_channel_, gdma_link_get_head_addr(rx_dma_link_));
+  REQUIRE_FROM_CALLBACK(gdma_start_result == ESP_OK, in_isr);
 }
 
 // RX DMA 恢复会从节点零重新启动整个环。

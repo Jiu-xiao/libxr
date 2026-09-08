@@ -13,6 +13,7 @@
 #pragma once
 
 #include "pipe_transfer_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -28,22 +29,22 @@ void VerifyZeroWriteMode(TestMode mode)
   auto write_result = w(ConstRawData{nullptr, 0}, write.op);
   if (mode == TestMode::BLOCK)
   {
-    ASSERT(write_result == ErrorCode::OK);
+    TEST_ASSERT(write_result == ErrorCode::OK);
   }
   else
   {
-    ASSERT(write_result == ErrorCode::OK);
+    TEST_ASSERT(write_result == ErrorCode::OK);
     write.ExpectFinal(ErrorCode::OK);
   }
-  ASSERT(w.Size() == 0);
+  TEST_ASSERT(w.Size() == 0);
 
   uint8_t tx = 0x5A;
   uint8_t rx = 0;
   WriteOperation plain_write;
   ReadOperation plain_read;
-  ASSERT(w(ConstRawData{&tx, 1}, plain_write) == ErrorCode::OK);
-  ASSERT(r(RawData{&rx, 1}, plain_read) == ErrorCode::OK);
-  ASSERT(rx == tx);
+  TEST_ASSERT(w(ConstRawData{&tx, 1}, plain_write) == ErrorCode::OK);
+  TEST_ASSERT(r(RawData{&rx, 1}, plain_read) == ErrorCode::OK);
+  TEST_ASSERT(rx == tx);
 }
 
 void VerifyZeroReadMode(TestMode mode)
@@ -56,25 +57,25 @@ void VerifyZeroReadMode(TestMode mode)
 
   uint8_t tx = 0xA7;
   WriteOperation write_op;
-  ASSERT(w(ConstRawData{&tx, 1}, write_op) == ErrorCode::OK);
+  TEST_ASSERT(w(ConstRawData{&tx, 1}, write_op) == ErrorCode::OK);
 
   uint8_t dummy = 0x11;
   ReadHarness read(mode);
   auto zero_result = r(RawData{&dummy, 0}, read.op);
   if (mode == TestMode::BLOCK)
   {
-    ASSERT(zero_result == ErrorCode::OK);
+    TEST_ASSERT(zero_result == ErrorCode::OK);
   }
   else
   {
-    ASSERT(zero_result == ErrorCode::OK);
+    TEST_ASSERT(zero_result == ErrorCode::OK);
     read.ExpectFinal(ErrorCode::OK);
   }
 
   uint8_t rx = 0;
   ReadOperation plain_read;
-  ASSERT(r(RawData{&rx, 1}, plain_read) == ErrorCode::OK);
-  ASSERT(rx == tx);
+  TEST_ASSERT(r(RawData{&rx, 1}, plain_read) == ErrorCode::OK);
+  TEST_ASSERT(rx == tx);
 }
 
 }  // namespace

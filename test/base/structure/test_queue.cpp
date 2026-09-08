@@ -26,6 +26,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -60,21 +61,21 @@ void test_queue()
     uint16_t output = 0;
 
     LibXR::QueueBase queue_base(sizeof(input), 2);
-    ASSERT(queue_base.PushBytes(&input) == LibXR::ErrorCode::OK);
-    ASSERT(queue_base.PopBytes(&output) == LibXR::ErrorCode::OK);
-    ASSERT(output == input);
+    TEST_ASSERT(queue_base.PushBytes(&input) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue_base.PopBytes(&output) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(output == input);
 
     output = 0;
     LibXR::SPSCQueueBase spsc_base(sizeof(input), 2);
-    ASSERT(spsc_base.PushBytes(&input) == LibXR::ErrorCode::OK);
-    ASSERT(spsc_base.PopBytes(&output) == LibXR::ErrorCode::OK);
-    ASSERT(output == input);
+    TEST_ASSERT(spsc_base.PushBytes(&input) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(spsc_base.PopBytes(&output) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(output == input);
 
     output = 0;
     LibXR::MPMCQueueBase mpmc_base(sizeof(input), 2);
-    ASSERT(mpmc_base.PushBytes(&input) == LibXR::ErrorCode::OK);
-    ASSERT(mpmc_base.PopBytes(&output) == LibXR::ErrorCode::OK);
-    ASSERT(output == input);
+    TEST_ASSERT(mpmc_base.PushBytes(&input) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(mpmc_base.PopBytes(&output) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(output == input);
   }
 
   // Queue::Overwrite replaces the queue contents with exactly one new element.
@@ -84,15 +85,15 @@ void test_queue()
 
     for (uint32_t item = 0; item < queue.MaxSize(); ++item)
     {
-      ASSERT(queue.Push(item) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(queue.Push(item) == LibXR::ErrorCode::OK);
     }
-    ASSERT(queue.Size() == queue.MaxSize());
+    TEST_ASSERT(queue.Size() == queue.MaxSize());
 
-    ASSERT(queue.Overwrite(0xA5A5A5A5U) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Size() == 1);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(value == 0xA5A5A5A5U);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(queue.Overwrite(0xA5A5A5A5U) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Size() == 1);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == 0xA5A5A5A5U);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
   // The ordinary FIFO queue supports capacity 1 and no-default payloads for normal byte
@@ -102,22 +103,22 @@ void test_queue()
     uint32_t value = 0;
     uint32_t batch[1] = {44};
 
-    ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Push(22) == LibXR::ErrorCode::FULL);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(value == 11);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(22) == LibXR::ErrorCode::FULL);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == 11);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
 
-    ASSERT(queue.PushBatch(batch, 1) == LibXR::ErrorCode::OK);
-    ASSERT(queue.PopBatch(&value, 1) == LibXR::ErrorCode::OK);
-    ASSERT(value == 44);
+    TEST_ASSERT(queue.PushBatch(batch, 1) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.PopBatch(&value, 1) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == 44);
 
     LibXR::Queue<NoDefaultPayload> no_default_queue(1);
     NoDefaultPayload pushed(88);
     NoDefaultPayload popped(0);
-    ASSERT(no_default_queue.Push(pushed) == LibXR::ErrorCode::OK);
-    ASSERT(no_default_queue.Pop(popped) == LibXR::ErrorCode::OK);
-    ASSERT(popped.value == 88);
+    TEST_ASSERT(no_default_queue.Push(pushed) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(no_default_queue.Pop(popped) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(popped.value == 88);
   }
 
   // Batch operations preserve FIFO order across wraparound.
@@ -125,26 +126,26 @@ void test_queue()
     LibXR::Queue<int> batch_queue(5);
 
     int initial[5] = {1, 2, 3, 4, 5};
-    ASSERT(batch_queue.PushBatch(initial, 5) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(batch_queue.PushBatch(initial, 5) == LibXR::ErrorCode::OK);
 
     int peek_buffer[5] = {};
-    ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == LibXR::ErrorCode::OK);
     for (int i = 0; i < 5; ++i)
     {
-      ASSERT(peek_buffer[i] == initial[i]);
+      TEST_ASSERT(peek_buffer[i] == initial[i]);
     }
 
     int dummy[2] = {};
-    ASSERT(batch_queue.PopBatch(dummy, 2) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(batch_queue.PopBatch(dummy, 2) == LibXR::ErrorCode::OK);
 
     int wrap[2] = {6, 7};
-    ASSERT(batch_queue.PushBatch(wrap, 2) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(batch_queue.PushBatch(wrap, 2) == LibXR::ErrorCode::OK);
 
     int expected[5] = {3, 4, 5, 6, 7};
-    ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(batch_queue.PeekBatch(peek_buffer, 5) == LibXR::ErrorCode::OK);
     for (int i = 0; i < 5; ++i)
     {
-      ASSERT(peek_buffer[i] == expected[i]);
+      TEST_ASSERT(peek_buffer[i] == expected[i]);
     }
   }
 }

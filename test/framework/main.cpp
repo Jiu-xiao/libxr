@@ -34,14 +34,10 @@ int main()
       {
         UNUSED(in_isr);
         UNUSED(arg);
-        UNUSED(file);
-        UNUSED(line);
-
-        std::fprintf(stderr, "Error: Union test failed at step [%s].\r\n", test_name);
+        std::fprintf(stderr, "%s:%u: product assertion failed in [%s].\n", file,
+                     static_cast<unsigned>(line), test_name ? test_name : "startup");
         std::fflush(stderr);
-        // NOLINTNEXTLINE
-        *(volatile long long*)(nullptr) = 0;
-        exit(-1);
+        std::abort();
       },
       reinterpret_cast<void*>(0));
 

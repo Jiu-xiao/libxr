@@ -184,7 +184,8 @@ class Topic::SyncSubscriber
       return wait_ans;
     }
 
-    ASSERT(data.wait_state.load(std::memory_order_acquire) == SyncBlock::WAIT_CLAIMED);
+    DEV_ASSERT(data.wait_state.load(std::memory_order_acquire) ==
+               SyncBlock::WAIT_CLAIMED);
 
     ErrorCode finish_wait_ans;
     do

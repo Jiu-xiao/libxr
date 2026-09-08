@@ -20,6 +20,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 static uint32_t counter = 0;
 
@@ -43,7 +44,7 @@ void test_list()
   list.Add(node2);
   list.Add(node3);
 
-  ASSERT(list.Size() == 3);
+  TEST_ASSERT(list.Size() == 3);
 
   auto node_foreach_fn = [](int& node)
   {
@@ -55,18 +56,18 @@ void test_list()
 
   list.Foreach<int>(node_foreach_fn);
 
-  ASSERT(counter == 3);
+  TEST_ASSERT(counter == 3);
 
-  ASSERT(list.Delete(node2) == LibXR::ErrorCode::OK);
-  ASSERT(list.Size() == 2);
+  TEST_ASSERT(list.Delete(node2) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(list.Size() == 2);
 
-  ASSERT(list.Delete(node1) == LibXR::ErrorCode::OK);
-  ASSERT(list.Size() == 1);
+  TEST_ASSERT(list.Delete(node1) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(list.Size() == 1);
 
-  ASSERT(list.Delete(node3) == LibXR::ErrorCode::OK);
-  ASSERT(list.Size() == 0);
+  TEST_ASSERT(list.Delete(node3) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(list.Size() == 0);
 
-  ASSERT(list.Delete(node1) == LibXR::ErrorCode::NOT_FOUND);
+  TEST_ASSERT(list.Delete(node1) == LibXR::ErrorCode::NOT_FOUND);
 
   LibXR::LockFreeList::Node<int> node4(10);
   LibXR::LockFreeList::Node<int> node5(20);
@@ -78,9 +79,9 @@ void test_list()
   list_lock_free.Add(node5);
   list_lock_free.Add(node6);
 
-  ASSERT(list_lock_free.Size() == 3);
+  TEST_ASSERT(list_lock_free.Size() == 3);
 
   list_lock_free.Foreach<int>(node_foreach_fn);
 
-  ASSERT(counter == 6);
+  TEST_ASSERT(counter == 6);
 }

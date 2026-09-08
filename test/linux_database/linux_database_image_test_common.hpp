@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "linux_database_flash_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxDatabaseTestCommon
 {
@@ -50,12 +51,12 @@ inline void WriteLe32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value
 [[nodiscard]] inline std::vector<uint8_t> ReadAllBytes(const char* path)
 {
   std::ifstream file(path, std::ios::binary);
-  ASSERT(static_cast<bool>(file));
+  TEST_ASSERT(static_cast<bool>(file));
 
   std::vector<uint8_t> bytes(XR_DB_FLASH_SIZE, 0);
   file.read(reinterpret_cast<char*>(bytes.data()),
             static_cast<std::streamsize>(bytes.size()));
-  ASSERT(file.gcount() == static_cast<std::streamsize>(bytes.size()));
+  TEST_ASSERT(file.gcount() == static_cast<std::streamsize>(bytes.size()));
   return bytes;
 }
 
@@ -72,17 +73,17 @@ inline void WriteAllBytes(const char* path, const std::vector<uint8_t>& bytes)
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  ASSERT(static_cast<bool>(file));
+  TEST_ASSERT(static_cast<bool>(file));
   file.write(reinterpret_cast<const char*>(bytes.data()),
              static_cast<std::streamsize>(bytes.size()));
-  ASSERT(static_cast<bool>(file));
+  TEST_ASSERT(static_cast<bool>(file));
 }
 
 inline void CraftPartialBackup(std::vector<uint8_t>& bytes, size_t partial_len)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-  ASSERT(partial_len < XR_DB_BLOCK_SIZE);
+  TEST_ASSERT(partial_len < XR_DB_BLOCK_SIZE);
 
   const size_t backup_offset = XR_DB_BLOCK_SIZE;
   for (size_t i = 0; i < partial_len; ++i)
@@ -138,7 +139,7 @@ inline void CreateSeedDatabase(const char* path)
   DatabaseRaw<16> db(flash, 5);
   db.Restore();
   DatabaseRaw<16>::Key<uint32_t> key(db, "key", 1234);
-  ASSERT(key.data_ == 1234);
+  TEST_ASSERT(key.data_ == 1234);
 }
 
 inline void CreateTwoKeyDatabase(const char* path)
@@ -149,8 +150,8 @@ inline void CreateTwoKeyDatabase(const char* path)
   db.Restore();
   DatabaseRaw<16>::Key<uint32_t> key1(db, "key1", 1111);
   DatabaseRaw<16>::Key<uint32_t> key2(db, "key2", 2222);
-  ASSERT(key1.data_ == 1111);
-  ASSERT(key2.data_ == 2222);
+  TEST_ASSERT(key1.data_ == 1111);
+  TEST_ASSERT(key2.data_ == 2222);
 }
 
 }  // namespace LinuxDatabaseTestCommon

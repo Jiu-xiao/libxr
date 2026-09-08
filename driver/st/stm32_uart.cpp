@@ -236,7 +236,7 @@ void STM32UART::HandleTxService(uint32_t events, bool in_isr)
     }
     else
     {
-      REQUIRE_FROM_CALLBACK(state == ConfigState::PUBLISHED, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(state == ConfigState::PUBLISHED, in_isr);
     }
   }
 
@@ -250,7 +250,8 @@ void STM32UART::HandleTxService(uint32_t events, bool in_isr)
       return;
     }
     events |= TX_EVENT_ABORT;
-    REQUIRE_FROM_CALLBACK(HAL_UART_Abort(uart_handle_) == HAL_OK, in_isr);
+    [[maybe_unused]] const auto uart_abort_result = HAL_UART_Abort(uart_handle_);
+    REQUIRE_FROM_CALLBACK(uart_abort_result == HAL_OK, in_isr);
     if (uart_handle_->hdmatx != nullptr)
     {
       STM32GpdmaUartAdapter::FinalizeStopped(uart_handle_->hdmatx, in_isr);
@@ -354,7 +355,7 @@ void STM32UART::FillTx(bool in_isr)
           return;
         }
         size = queue.AvailableSize();
-        REQUIRE_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
+        DEV_ASSERT_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
         queue.PopAll(dma_buff_tx_.ActiveBuffer());
         dma_buff_tx_.SetActiveLength(size);
       }
@@ -374,7 +375,7 @@ void STM32UART::FillTx(bool in_isr)
     if (!queue.Empty())
     {
       const size_t size = queue.AvailableSize();
-      REQUIRE_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
+      DEV_ASSERT_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
       queue.PopAll(dma_buff_tx_.PendingBuffer());
       dma_buff_tx_.SetPendingLength(size);
       dma_buff_tx_.EnablePending();
@@ -414,7 +415,7 @@ STM32UART::STM32UART(UART_HandleTypeDef* uart_handle, RawData dma_buff_rx,
 
   if ((uart_handle->Init.Mode & UART_MODE_TX) == UART_MODE_TX)
   {
-    REQUIRE(tx_queue_size > 0U);
+    ASSERT(tx_queue_size > 0U);
     ASSERT(uart_handle_->hdmatx != NULL);
 #if defined(LIBXR_STM32_UART_GPDMA)
     ASSERT(uart_handle_->hdmatx->Mode == DMA_NORMAL);
@@ -492,7 +493,7 @@ void STM32UART::ApplyConfig(UART::Configuration config, bool in_isr)
           config.data_bits == 7U ? UART_WORDLENGTH_8B : UART_WORDLENGTH_9B;
       break;
     default:
-      REQUIRE_FROM_CALLBACK(false, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
       return;
   }
 
@@ -505,7 +506,7 @@ void STM32UART::ApplyConfig(UART::Configuration config, bool in_isr)
       uart_handle_->Init.StopBits = UART_STOPBITS_2;
       break;
     default:
-      REQUIRE_FROM_CALLBACK(false, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(false, in_isr);
       return;
   }
 
@@ -513,13 +514,15 @@ void STM32UART::ApplyConfig(UART::Configuration config, bool in_isr)
   // 通道已停止，直接配置寄存器，避免在中断中等待 HAL tick。
   // Channels are stopped; configure registers without waiting for HAL ticks in an ISR.
   __HAL_UART_DISABLE(uart_handle_);
-  REQUIRE_FROM_CALLBACK(UART_SetConfig(uart_handle_) == HAL_OK, in_isr);
+  [[maybe_unused]] const auto uart_set_config_result = UART_SetConfig(uart_handle_);
+  REQUIRE_FROM_CALLBACK(uart_set_config_result == HAL_OK, in_isr);
   CLEAR_BIT(uart_handle_->Instance->CR2, USART_CR2_LINEN | USART_CR2_CLKEN);
   CLEAR_BIT(uart_handle_->Instance->CR3,
             USART_CR3_SCEN | USART_CR3_HDSEL | USART_CR3_IREN);
   __HAL_UART_ENABLE(uart_handle_);
 #else
-  REQUIRE_FROM_CALLBACK(HAL_UART_Init(uart_handle_) == HAL_OK, in_isr);
+  [[maybe_unused]] const auto uart_init_result = HAL_UART_Init(uart_handle_);
+  REQUIRE_FROM_CALLBACK(uart_init_result == HAL_OK, in_isr);
 #endif
 }
 
@@ -553,19 +556,20 @@ void STM32UART::SetRxDMA(bool in_isr)
     ASSERT(uart_handle_->hdmarx != NULL);
 
 #if defined(LIBXR_STM32_UART_GPDMA)
-    REQUIRE_FROM_CALLBACK(
+    [[maybe_unused]] const auto start_linked_list_dma_rx_result =
         gpdma_adapter_.StartLinkedListDmaRx(static_cast<uint8_t*>(dma_buff_rx_.addr_),
-                                            dma_buff_rx_.size_, in_isr) == HAL_OK,
-        in_isr);
+                                            dma_buff_rx_.size_, in_isr);
+    REQUIRE_FROM_CALLBACK(start_linked_list_dma_rx_result == HAL_OK, in_isr);
 #else
     uart_handle_->hdmarx->Init.Mode = DMA_CIRCULAR;
-    REQUIRE_FROM_CALLBACK(HAL_DMA_Init(uart_handle_->hdmarx) == HAL_OK, in_isr);
+    [[maybe_unused]] const auto dma_init_result = HAL_DMA_Init(uart_handle_->hdmarx);
+    REQUIRE_FROM_CALLBACK(dma_init_result == HAL_OK, in_isr);
 
-    REQUIRE_FROM_CALLBACK(
+    [[maybe_unused]] const auto uart_ex_receive_to_idle_dma_result =
         HAL_UARTEx_ReceiveToIdle_DMA(uart_handle_,
                                      reinterpret_cast<uint8_t*>(dma_buff_rx_.addr_),
-                                     dma_buff_rx_.size_) == HAL_OK,
-        in_isr);
+                                     dma_buff_rx_.size_);
+    REQUIRE_FROM_CALLBACK(uart_ex_receive_to_idle_dma_result == HAL_OK, in_isr);
 #endif
   }
 }
@@ -579,21 +583,22 @@ void STM32UART::HandleRxData(bool in_isr)
   }
 
   auto* const rx_buf = static_cast<uint8_t*>(dma_buff_rx_.addr_);
-  REQUIRE_FROM_CALLBACK(rx_buf != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(rx_buf != nullptr, in_isr);
 
 #if defined(LIBXR_STM32_UART_GPDMA)
   const uintptr_t destination =
       reinterpret_cast<uintptr_t>(gpdma_adapter_.GetLinkedListDmaRxProducer());
   const uintptr_t begin = reinterpret_cast<uintptr_t>(rx_buf);
-  REQUIRE_FROM_CALLBACK(destination >= begin && destination - begin <= dma_size, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(destination >= begin && destination - begin <= dma_size,
+                           in_isr);
   const size_t curr_pos = destination - begin;
 #else
   const size_t remaining = __HAL_DMA_GET_COUNTER(uart_handle_->hdmarx);
-  REQUIRE_FROM_CALLBACK(remaining <= dma_size, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(remaining <= dma_size, in_isr);
   const size_t curr_pos = remaining == 0U ? dma_size : dma_size - remaining;
 #endif
   const size_t last_pos = last_rx_pos_;
-  REQUIRE_FROM_CALLBACK(last_pos < dma_size, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(last_pos < dma_size, in_isr);
 
   STM32_InvalidateDCacheByAddr(rx_buf, dma_size);
 
@@ -610,13 +615,15 @@ void STM32UART::HandleRxData(bool in_isr)
       const size_t first_accepted = std::min(first_size, accepted);
       if (first_accepted != 0U)
       {
-        REQUIRE_FROM_CALLBACK(
-            queue.PushBatch(rx_buf + last_pos, first_accepted) == ErrorCode::OK, in_isr);
+        [[maybe_unused]] const auto push_batch_result =
+            queue.PushBatch(rx_buf + last_pos, first_accepted);
+        DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
         accepted -= first_accepted;
       }
       if (accepted != 0U)
       {
-        REQUIRE_FROM_CALLBACK(queue.PushBatch(rx_buf, accepted) == ErrorCode::OK, in_isr);
+        [[maybe_unused]] const auto push_batch_result = queue.PushBatch(rx_buf, accepted);
+        DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
       }
     }
 
@@ -703,22 +710,23 @@ void STM32UART::BeginAbort(bool in_isr)
   gpdma_adapter_.CloseTxTerminalSource();
   if (uart_handle_->hdmatx != nullptr)
   {
-    REQUIRE_FROM_CALLBACK(
-        gpdma_adapter_.LaunchStop(uart_handle_->hdmatx, DmaAbortCallback, in_isr),
-        in_isr);
+    [[maybe_unused]] const auto launch_stop_result =
+        gpdma_adapter_.LaunchStop(uart_handle_->hdmatx, DmaAbortCallback, in_isr);
+    REQUIRE_FROM_CALLBACK(launch_stop_result, in_isr);
   }
   if (uart_handle_->hdmarx != nullptr)
   {
-    REQUIRE_FROM_CALLBACK(
-        gpdma_adapter_.LaunchStop(uart_handle_->hdmarx, DmaAbortCallback, in_isr),
-        in_isr);
+    [[maybe_unused]] const auto launch_stop_result =
+        gpdma_adapter_.LaunchStop(uart_handle_->hdmarx, DmaAbortCallback, in_isr);
+    REQUIRE_FROM_CALLBACK(launch_stop_result, in_isr);
   }
   if (gpdma_adapter_.AllStopsComplete())
   {
     tx_service_.Publish(TX_EVENT_ABORT);
   }
 #else
-  REQUIRE_FROM_CALLBACK(HAL_UART_Abort_IT(uart_handle_) == HAL_OK, in_isr);
+  [[maybe_unused]] const auto uart_abort_it_result = HAL_UART_Abort_IT(uart_handle_);
+  REQUIRE_FROM_CALLBACK(uart_abort_it_result == HAL_OK, in_isr);
 #endif
 }
 
@@ -737,7 +745,7 @@ void STM32UART::DmaAbortCallback(DMA_HandleTypeDef* dma_handle)
 void STM32UART::StartTxDma(bool in_isr)
 {
   const size_t size = dma_buff_tx_.GetActiveLength();
-  REQUIRE_FROM_CALLBACK(size != 0U && size <= dma_buff_tx_.Size(), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(size != 0U && size <= dma_buff_tx_.Size(), in_isr);
 
   STM32_CleanDCacheByAddr(dma_buff_tx_.ActiveBuffer(), size);
   tx_busy_.Set();

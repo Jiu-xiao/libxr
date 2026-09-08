@@ -22,6 +22,7 @@
  */
 #include "libxr.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -68,22 +69,22 @@ void test_app_framework_hardware()
                               LibXR::Entry<DeviceB>{dev_b, {"b", "shared"}},
                               LibXR::Entry<DeviceC>{dev_c, {"c-only"}});
 
-  ASSERT(hw.Find<DeviceA>("a") == &dev_a);
-  ASSERT(hw.Find<DeviceB>("b") == &dev_b);
-  ASSERT(hw.Find<DeviceC>("c-only") == &dev_c);
+  TEST_ASSERT(hw.Find<DeviceA>("a") == &dev_a);
+  TEST_ASSERT(hw.Find<DeviceB>("b") == &dev_b);
+  TEST_ASSERT(hw.Find<DeviceC>("c-only") == &dev_c);
 
-  ASSERT(hw.Find<DeviceA>("shared") == &dev_a);
-  ASSERT(hw.Find<DeviceB>("shared") == &dev_b);
-  ASSERT(hw.Find<DeviceC>("shared") == nullptr);
+  TEST_ASSERT(hw.Find<DeviceA>("shared") == &dev_a);
+  TEST_ASSERT(hw.Find<DeviceB>("shared") == &dev_b);
+  TEST_ASSERT(hw.Find<DeviceC>("shared") == nullptr);
 
-  ASSERT(hw.Find<DeviceA>("missing") == nullptr);
-  ASSERT(hw.Find<DeviceB>({"missing", "shared"}) == &dev_b);
-  ASSERT(hw.Find<DeviceA>({"missing", "fallback-a"}) == &dev_a);
-  ASSERT(hw.Find<DeviceC>({"missing", "shared"}) == nullptr);
-  ASSERT(hw.Find<DeviceA>({}) == nullptr);
+  TEST_ASSERT(hw.Find<DeviceA>("missing") == nullptr);
+  TEST_ASSERT(hw.Find<DeviceB>({"missing", "shared"}) == &dev_b);
+  TEST_ASSERT(hw.Find<DeviceA>({"missing", "fallback-a"}) == &dev_a);
+  TEST_ASSERT(hw.Find<DeviceC>({"missing", "shared"}) == nullptr);
+  TEST_ASSERT(hw.Find<DeviceA>({}) == nullptr);
 
   hw.Register(LibXR::Entry<DeviceD>{dev_d, {"d", "shared-d"}});
-  ASSERT(hw.Find<DeviceD>("d") == &dev_d);
-  ASSERT(hw.Find<DeviceD>({"missing", "shared-d"}) == &dev_d);
-  ASSERT(hw.Find<DeviceA>("shared-d") == nullptr);
+  TEST_ASSERT(hw.Find<DeviceD>("d") == &dev_d);
+  TEST_ASSERT(hw.Find<DeviceD>({"missing", "shared-d"}) == &dev_d);
+  TEST_ASSERT(hw.Find<DeviceA>("shared-d") == nullptr);
 }

@@ -9,6 +9,7 @@
  *          1. Mutable callback subscribers can modify the caller-visible payload.
  *          2. Queued subscribers drop later publishes when the queue is full.
  */
+#include "test_assert.hpp"
 #include "topic_test_common.hpp"
 
 namespace
@@ -36,7 +37,7 @@ void TestTopicMutationAndQueueDrop()
   mutable_topic.RegisterCallback(mutable_cb);
   int mutable_payload = 1234;
   mutable_topic.Publish(mutable_payload, LibXR::MicrosecondTimestamp(7037));
-  ASSERT(mutable_payload == 5678);
+  TEST_ASSERT(mutable_payload == 5678);
 
   auto queue_drop_topic = LibXR::Topic::CreateTopic<int>("queue_drop_tp", &domain);
   LibXR::SPSCQueue<int> drop_queue(1);
@@ -47,18 +48,18 @@ void TestTopicMutationAndQueueDrop()
     auto value = static_cast<int>(i);
     queue_drop_topic.Publish(value, LibXR::MicrosecondTimestamp(8000 + i));
   }
-  ASSERT(drop_queue.Size() == drop_queue.MaxSize());
+  TEST_ASSERT(drop_queue.Size() == drop_queue.MaxSize());
   int dropped_value = -123;
   queue_drop_topic.Publish(dropped_value, LibXR::MicrosecondTimestamp(9009));
-  ASSERT(drop_queue.Size() == drop_queue.MaxSize());
+  TEST_ASSERT(drop_queue.Size() == drop_queue.MaxSize());
   for (size_t i = 0; i < drop_queue.MaxSize(); ++i)
   {
     int value = 0;
-    ASSERT(drop_queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(value == static_cast<int>(i));
+    TEST_ASSERT(drop_queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == static_cast<int>(i));
   }
   int dropped_message = 0;
-  ASSERT(drop_queue.Pop(dropped_message) == LibXR::ErrorCode::EMPTY);
+  TEST_ASSERT(drop_queue.Pop(dropped_message) == LibXR::ErrorCode::EMPTY);
 }
 
 }  // namespace

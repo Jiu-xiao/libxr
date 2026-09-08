@@ -4,6 +4,7 @@
  *        / Pipe blocking submission and repeated transfer tests.
  */
 #include "rw_runtime_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -22,7 +23,7 @@ void test_pipe_stream_block_immediate_path()
 
   uint8_t rx[8] = {0};
   ReadOperation rop;
-  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+  TEST_ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
 
   Semaphore sem;
   WriteOperation wop(sem, 100);
@@ -32,11 +33,11 @@ void test_pipe_stream_block_immediate_path()
   ws << ConstRawData{A, sizeof(A)} << ConstRawData{B, sizeof(B)};
 
   auto ec = ws.Commit();
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   static const uint8_t EXPECT[] = {0x21, 0x22, 0x23, 0x31, 0x32, 0x33, 0x34, 0x35};
-  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 /**
@@ -75,7 +76,7 @@ void test_pipe_block_reuse_stress()
       Thread writer;
       StartDelayedPipeWriter(writer, ctx, "pipe_block_async");
 
-      ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
+      TEST_ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
       ExpectWaitOk(write_done);
       JoinThreadIfNeeded(writer);
       ExpectCallResult(write, ctx.result, ErrorCode::OK);
@@ -87,9 +88,9 @@ void test_pipe_block_reuse_stress()
       ExpectCallResult(read, r(RawData{rx.data(), rx.size()}, read.op), ErrorCode::OK);
     }
 
-    ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-    ASSERT(r.Size() == 0);
-    ASSERT(w.Size() == 0);
+    TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+    TEST_ASSERT(r.Size() == 0);
+    TEST_ASSERT(w.Size() == 0);
   }
 }
 

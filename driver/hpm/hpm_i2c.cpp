@@ -585,7 +585,7 @@ HPMI2C::HPMI2C(I2C_Type* i2c, clock_name_t clock, bool auto_board_init,
 
   ASSERT(source_clock_hz_ != 0);
   const ErrorCode ans = SetConfig(config);
-  ASSERT(ans == ErrorCode::OK);
+  REQUIRE(ans == ErrorCode::OK);
 }
 
 ErrorCode HPMI2C::SetAddressMode(AddressMode mode)

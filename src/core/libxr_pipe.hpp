@@ -37,7 +37,7 @@ class Pipe
    */
   explicit Pipe(size_t buffer_size) : read_port_(0), write_port_(0, buffer_size)
   {
-    REQUIRE(write_port_.queue_data_ != nullptr);
+    ASSERT(write_port_.queue_data_ != nullptr);
     read_port_.BindQueue(write_port_.queue_data_);
     write_port_ = &WriteFun;
   }

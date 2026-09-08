@@ -24,6 +24,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_event`。 Test entry function `test_event`.
@@ -44,7 +45,7 @@ void test_event()
       {
         last_in_isr = in_isr;
         *arg = *arg + 1;
-        ASSERT(event == 0x1234);
+        TEST_ASSERT(event == 0x1234);
       },
       &event_arg);
 
@@ -53,7 +54,7 @@ void test_event()
       {
         last_in_isr = in_isr;
         *arg = *arg + 1;
-        ASSERT(event == 0xF0001234);
+        TEST_ASSERT(event == 0xF0001234);
       },
       &high_event_arg);
 
@@ -62,47 +63,47 @@ void test_event()
   // Direct activation must report non-ISR context.
   event.Register(0x1234, event_cb);
   event.Active(0x1234);
-  ASSERT(event_arg == 1);
-  ASSERT(last_in_isr == false);
+  TEST_ASSERT(event_arg == 1);
+  TEST_ASSERT(last_in_isr == false);
 
   for (int i = 0; i <= 0x1234; i++)
   {
     event.Active(i);
   }
-  ASSERT(event_arg == 2);
-  ASSERT(last_in_isr == false);
+  TEST_ASSERT(event_arg == 2);
+  TEST_ASSERT(last_in_isr == false);
 
   // Callback-safe activation must preserve the explicit in_isr flag.
   event.ActiveFromCallback(event.GetList(0x1234), 0x1234, false);
-  ASSERT(event_arg == 3);
-  ASSERT(last_in_isr == false);
+  TEST_ASSERT(event_arg == 3);
+  TEST_ASSERT(last_in_isr == false);
 
   event.ActiveFromCallback(event.GetList(0x1234), 0x1234, true);
-  ASSERT(event_arg == 4);
-  ASSERT(last_in_isr == true);
+  TEST_ASSERT(event_arg == 4);
+  TEST_ASSERT(last_in_isr == true);
 
   // Default callback-safe behavior remains ISR=true for legacy callers.
   event.ActiveFromCallback(event.GetList(0x1234), 0x1234);
-  ASSERT(event_arg == 5);
-  ASSERT(last_in_isr == true);
+  TEST_ASSERT(event_arg == 5);
+  TEST_ASSERT(last_in_isr == true);
 
   // Bound events must keep the source callback context unchanged.
   event.Bind(event_bind, 0x4321, 0x1234);
   event_bind.Active(0x4321);
-  ASSERT(event_arg == 6);
-  ASSERT(last_in_isr == false);
+  TEST_ASSERT(event_arg == 6);
+  TEST_ASSERT(last_in_isr == false);
 
   event_bind.ActiveFromCallback(event_bind.GetList(0x4321), 0x4321, false);
-  ASSERT(event_arg == 7);
-  ASSERT(last_in_isr == false);
+  TEST_ASSERT(event_arg == 7);
+  TEST_ASSERT(last_in_isr == false);
 
   event_bind.ActiveFromCallback(event_bind.GetList(0x4321), 0x4321, true);
-  ASSERT(event_arg == 8);
-  ASSERT(last_in_isr == true);
+  TEST_ASSERT(event_arg == 8);
+  TEST_ASSERT(last_in_isr == true);
 
   // High-value event IDs must still compare and dispatch correctly.
   event.Register(0xF0001234, high_event_cb);
   event.Active(0xF0001234);
-  ASSERT(high_event_arg == 1);
-  ASSERT(last_in_isr == false);
+  TEST_ASSERT(high_event_arg == 1);
+  TEST_ASSERT(last_in_isr == false);
 }

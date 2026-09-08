@@ -112,45 +112,45 @@ MSPM0UART::MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_stora
       rx_dma_storage_(rx_dma_storage),
       tx_half_size_(tx_dma_storage.size_ / 2U)
 {
-  REQUIRE(res_.instance != nullptr);
-  REQUIRE(res_.clock_freq > 0U);
-  REQUIRE(res_.index < MAX_UART_INSTANCES);
-  REQUIRE(res_.index == ResolveIndex(res_.irqn));
-  REQUIRE(instance_map_[res_.index] == nullptr);
-  REQUIRE(tx_dma_storage_.addr_ != nullptr);
-  REQUIRE(tx_dma_storage_.size_ > 1U);
-  REQUIRE((tx_dma_storage_.size_ % 2U) == 0U);
-  REQUIRE((reinterpret_cast<uintptr_t>(tx_dma_storage_.addr_) % alignof(size_t)) == 0U);
-  REQUIRE((tx_dma_storage_.size_ % (2U * alignof(size_t))) == 0U);
-  REQUIRE(tx_half_size_ <= MSPM0_UART_DMA_MAX_TRANSFER_SIZE);
-  REQUIRE(tx_queue_size > 0U);
-  REQUIRE(rx_queue_capacity > 0U);
+  ASSERT(res_.instance != nullptr);
+  ASSERT(res_.clock_freq > 0U);
+  ASSERT(res_.index < MAX_UART_INSTANCES);
+  ASSERT(res_.index == ResolveIndex(res_.irqn));
+  ASSERT(instance_map_[res_.index] == nullptr);
+  ASSERT(tx_dma_storage_.addr_ != nullptr);
+  ASSERT(tx_dma_storage_.size_ > 1U);
+  ASSERT((tx_dma_storage_.size_ % 2U) == 0U);
+  ASSERT((reinterpret_cast<uintptr_t>(tx_dma_storage_.addr_) % alignof(size_t)) == 0U);
+  ASSERT((tx_dma_storage_.size_ % (2U * alignof(size_t))) == 0U);
+  ASSERT(tx_half_size_ <= MSPM0_UART_DMA_MAX_TRANSFER_SIZE);
+  ASSERT(tx_queue_size > 0U);
+  ASSERT(rx_queue_capacity > 0U);
 
   if (res_.rx_mode == RxMode::EXTEND_DMA)
   {
-    REQUIRE(rx_dma_storage_.addr_ != nullptr);
-    REQUIRE(rx_dma_storage_.size_ > 1U);
-    REQUIRE((rx_dma_storage_.size_ % 2U) == 0U);
-    REQUIRE(rx_dma_storage_.size_ <= MSPM0_UART_DMA_MAX_TRANSFER_SIZE);
-    REQUIRE(res_.dma_rx_channel < DMA_SYS_N_DMA_FULL_CHANNEL);
+    ASSERT(rx_dma_storage_.addr_ != nullptr);
+    ASSERT(rx_dma_storage_.size_ > 1U);
+    ASSERT((rx_dma_storage_.size_ % 2U) == 0U);
+    ASSERT(rx_dma_storage_.size_ <= MSPM0_UART_DMA_MAX_TRANSFER_SIZE);
+    ASSERT(res_.dma_rx_channel < DMA_SYS_N_DMA_FULL_CHANNEL);
   }
   else
   {
-    REQUIRE(rx_dma_storage_.addr_ == nullptr);
-    REQUIRE(rx_dma_storage_.size_ == 0U);
-    REQUIRE(!res_.rx_half_interrupt);
-    REQUIRE(res_.dma_rx_channel == INVALID_DMA_CHANNEL);
+    ASSERT(rx_dma_storage_.addr_ == nullptr);
+    ASSERT(rx_dma_storage_.size_ == 0U);
+    ASSERT(!res_.rx_half_interrupt);
+    ASSERT(res_.dma_rx_channel == INVALID_DMA_CHANNEL);
   }
 
-  REQUIRE(res_.dma_tx_channel < MAX_DMA_CHANNELS);
-  REQUIRE(res_.dma_tx_trigger != 0U);
+  ASSERT(res_.dma_tx_channel < MAX_DMA_CHANNELS);
+  ASSERT(res_.dma_tx_trigger != 0U);
   if (res_.rx_mode == RxMode::EXTEND_DMA)
   {
-    REQUIRE(res_.dma_rx_channel < MAX_DMA_CHANNELS);
-    REQUIRE(res_.dma_rx_channel != res_.dma_tx_channel);
-    REQUIRE(res_.dma_rx_trigger != 0U);
-    REQUIRE(res_.dma_rx_trigger != res_.dma_tx_trigger);
-    REQUIRE(!res_.rx_half_interrupt || res_.dma_rx_channel < 8U);
+    ASSERT(res_.dma_rx_channel < MAX_DMA_CHANNELS);
+    ASSERT(res_.dma_rx_channel != res_.dma_tx_channel);
+    ASSERT(res_.dma_rx_trigger != 0U);
+    ASSERT(res_.dma_rx_trigger != res_.dma_tx_trigger);
+    ASSERT(!res_.rx_half_interrupt || res_.dma_rx_channel < 8U);
   }
 
   for (const MSPM0UART* other : instance_map_)
@@ -160,23 +160,23 @@ MSPM0UART::MSPM0UART(Resources res, RawData tx_dma_storage, RawData rx_dma_stora
       continue;
     }
 
-    REQUIRE(res_.dma_tx_channel != other->res_.dma_tx_channel);
+    ASSERT(res_.dma_tx_channel != other->res_.dma_tx_channel);
     if (other->res_.rx_mode == RxMode::EXTEND_DMA)
     {
-      REQUIRE(res_.dma_tx_channel != other->res_.dma_rx_channel);
+      ASSERT(res_.dma_tx_channel != other->res_.dma_rx_channel);
     }
 
     if (res_.rx_mode == RxMode::EXTEND_DMA)
     {
-      REQUIRE(res_.dma_rx_channel != other->res_.dma_tx_channel);
+      ASSERT(res_.dma_rx_channel != other->res_.dma_tx_channel);
       if (other->res_.rx_mode == RxMode::EXTEND_DMA)
       {
-        REQUIRE(res_.dma_rx_channel != other->res_.dma_rx_channel);
+        ASSERT(res_.dma_rx_channel != other->res_.dma_rx_channel);
       }
     }
   }
 
-  REQUIRE(ValidateConfig(config) == ErrorCode::OK);
+  ASSERT(ValidateConfig(config) == ErrorCode::OK);
   _read_port.SetOwner(this);
   _write_port = WriteFun;
 
@@ -220,8 +220,8 @@ ErrorCode MSPM0UART::ValidateConfig(UART::Configuration config) const
 UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
                                                      uint32_t baudrate)
 {
-  REQUIRE(instance != nullptr);
-  REQUIRE(baudrate > 0U);
+  DEV_ASSERT(instance != nullptr);
+  DEV_ASSERT(baudrate > 0U);
 
   UART::Configuration config = {baudrate, UART::Parity::NO_PARITY, 8U, 1U};
   switch (DL_UART_getWordLength(instance))
@@ -253,7 +253,7 @@ UART::Configuration MSPM0UART::BuildConfigFromSysCfg(UART_Regs* instance,
       config.parity = UART::Parity::ODD;
       break;
     default:
-      REQUIRE(false);
+      DEV_ASSERT(false);
       break;
   }
   config.stop_bits = DL_UART_getStopBits(instance) == DL_UART_STOP_BITS_TWO ? 2U : 1U;
@@ -301,7 +301,7 @@ void MSPM0UART::HandleService(uint32_t events, bool in_isr)
 {
   if ((events & EVENT_CONFIG) != 0U)
   {
-    REQUIRE_FROM_CALLBACK(
+    DEV_ASSERT_FROM_CALLBACK(
         config_state_.load(std::memory_order_acquire) == ConfigState::RESERVED, in_isr);
     config_state_.store(ConfigState::PUBLISHED, std::memory_order_release);
   }
@@ -380,7 +380,7 @@ void MSPM0UART::FillTx(bool in_isr)
       }
 
       size = queue.AvailableSize();
-      REQUIRE_FROM_CALLBACK(size > 0U && size <= tx_half_size_, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(size > 0U && size <= tx_half_size_, in_isr);
       queue.PopAll(TxHalf(free_half));
       tx_half_size_used_[free_half] = size;
     }
@@ -396,7 +396,7 @@ void MSPM0UART::FillTx(bool in_isr)
 
 void MSPM0UART::HandleTxDone(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(active_half_ >= 0 && active_half_ < 2, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(active_half_ >= 0 && active_half_ < 2, in_isr);
   const uint8_t completed = static_cast<uint8_t>(active_half_);
   tx_half_size_used_[completed] = 0U;
   active_half_ = -1;
@@ -444,7 +444,8 @@ void MSPM0UART::HandleMainRx(bool in_isr)
     }
 
     const uint8_t byte = DL_UART_receiveData(res_.instance);
-    REQUIRE_FROM_CALLBACK(queue.PushBatch(&byte, 1U) == ErrorCode::OK, in_isr);
+    [[maybe_unused]] const auto push_batch_result = queue.PushBatch(&byte, 1U);
+    DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
   }
   queue.Publish();
 }
@@ -452,14 +453,14 @@ void MSPM0UART::HandleMainRx(bool in_isr)
 void MSPM0UART::HandleExtendRx(bool in_isr)
 {
   const size_t capacity = RxCapacity();
-  REQUIRE_FROM_CALLBACK(capacity > 1U, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(capacity > 1U, in_isr);
 
   const uint32_t remaining = DL_DMA_getTransferSize(DMA, res_.dma_rx_channel);
-  REQUIRE_FROM_CALLBACK(remaining <= capacity, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(remaining <= capacity, in_isr);
 
   const size_t position = remaining == 0U ? capacity : capacity - remaining;
   const size_t cursor = rx_dma_cursor_;
-  REQUIRE_FROM_CALLBACK(cursor < capacity, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(cursor < capacity, in_isr);
 
   const size_t first_size = position >= cursor ? position - cursor : capacity - cursor;
   const size_t second_size = position >= cursor ? 0U : position;
@@ -471,16 +472,16 @@ void MSPM0UART::HandleExtendRx(bool in_isr)
   if (first_accepted != 0U)
   {
     auto* source = static_cast<const uint8_t*>(rx_dma_storage_.addr_) + cursor;
-    REQUIRE_FROM_CALLBACK(queue.PushBatch(source, first_accepted) == ErrorCode::OK,
-                          in_isr);
+    [[maybe_unused]] const auto push_batch_result =
+        queue.PushBatch(source, first_accepted);
+    DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
     accepted -= first_accepted;
   }
   if (accepted != 0U)
   {
-    REQUIRE_FROM_CALLBACK(
-        queue.PushBatch(static_cast<const uint8_t*>(rx_dma_storage_.addr_), accepted) ==
-            ErrorCode::OK,
-        in_isr);
+    [[maybe_unused]] const auto push_batch_result =
+        queue.PushBatch(static_cast<const uint8_t*>(rx_dma_storage_.addr_), accepted);
+    DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
   }
 
   // 超出软件容量的尾部作为溢出丢弃，回调前先推进游标。
@@ -580,7 +581,7 @@ void MSPM0UART::OnDmaInterrupt()
 
 void MSPM0UARTReadPort::OnReadQueueSpaceAvailable(bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(owner_ != nullptr, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(owner_ != nullptr, in_isr);
   owner_->NotifyReadSpace(in_isr);
 }
 
@@ -619,7 +620,7 @@ void MSPM0UART::ConfigureRxDma()
                                               DL_DMA_EARLY_INTERRUPT_THRESHOLD_HALF);
   }
 #else
-  REQUIRE(false);
+  DEV_ASSERT(false);
 #endif
 }
 
@@ -642,7 +643,7 @@ void MSPM0UART::ApplyConfig(UART::Configuration config)
     case 8U:
       break;
     default:
-      REQUIRE(false);
+      DEV_ASSERT(false);
       break;
   }
 
@@ -735,8 +736,8 @@ void MSPM0UART::DiscardRxFifo()
 
 void MSPM0UART::StartTxDma(uint8_t half, size_t size)
 {
-  REQUIRE(half < 2U);
-  REQUIRE(size > 0U && size <= tx_half_size_);
+  DEV_ASSERT(half < 2U);
+  DEV_ASSERT(size > 0U && size <= tx_half_size_);
 
   DL_DMA_disableChannel(DMA, res_.dma_tx_channel);
   DL_DMA_clearInterruptStatus(DMA, DmaCompleteMask(res_.dma_tx_channel));

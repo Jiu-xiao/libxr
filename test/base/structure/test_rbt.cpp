@@ -18,6 +18,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_rbt`。 Test entry function `test_rbt`.
@@ -43,10 +44,10 @@ void test_rbt()
   for (int i = 0; i < 100; i++)
   {
     node_pos = rbtree.ForeachDisc(node_pos);
-    ASSERT(*node_pos == i);
+    TEST_ASSERT(*node_pos == i);
   }
 
-  ASSERT(rbtree.GetNum() == 100);
+  TEST_ASSERT(rbtree.GetNum() == 100);
 
   static int rbt_arg = 0;
 
@@ -54,17 +55,17 @@ void test_rbt()
       [&](LibXR::RBTree<int>::Node<int>& node)
       {
         rbt_arg = rbt_arg + 1;
-        ASSERT(rbt_arg == node + 1);
+        TEST_ASSERT(rbt_arg == node + 1);
         return LibXR::ErrorCode::OK;
       });
 
   for (int i = 0; i < 100; i++)
   {
     rbtree.Delete(nodes[i]);
-    ASSERT(rbtree.GetNum() == 99 - i);
+    TEST_ASSERT(rbtree.GetNum() == 99 - i);
   }
 
-  ASSERT(rbtree.GetNum() == 0);
+  TEST_ASSERT(rbtree.GetNum() == 0);
 
   LibXR::RBTree<uint32_t> uint32_tree([](const uint32_t& a, const uint32_t& b)
                                       { return (a > b) - (a < b); });
@@ -81,8 +82,8 @@ void test_rbt()
   for (size_t i = 0; i < std::size(keys); i++)
   {
     uint32_node_pos = uint32_tree.ForeachDisc(uint32_node_pos);
-    ASSERT(uint32_node_pos != nullptr);
-    ASSERT(*uint32_node_pos == keys[i]);
-    ASSERT(uint32_tree.Search<uint32_t>(keys[i]) == &uint32_nodes[i]);
+    TEST_ASSERT(uint32_node_pos != nullptr);
+    TEST_ASSERT(*uint32_node_pos == keys[i]);
+    TEST_ASSERT(uint32_tree.Search<uint32_t>(keys[i]) == &uint32_nodes[i]);
   }
 }

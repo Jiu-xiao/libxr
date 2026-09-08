@@ -4,6 +4,7 @@
  * alignment and length compatibility.
  */
 #include "message_packet_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -28,7 +29,7 @@ void TestPacketAlignmentAndLengthCompatibility()
   auto aligned_cb = LibXR::Topic::Callback::Create(
       [](bool, void*, const LibXR::Topic::MessageView<WideAlignedPayload>& message)
       {
-        ASSERT(message.data != nullptr);
+        TEST_ASSERT(message.data != nullptr);
         aligned_view_value = message.data->right;
       },
       reinterpret_cast<void*>(0));
@@ -37,12 +38,12 @@ void TestPacketAlignmentAndLengthCompatibility()
   aligned_server.Register(aligned_topic);
   WideAlignedPayload aligned_tx{0x1122334455667788ULL, 0x8877665544332211ULL};
   LibXR::Topic::PackedData<WideAlignedPayload> aligned_packet;
-  ASSERT(aligned_topic.PackData(aligned_tx, aligned_packet,
-                                LibXR::MicrosecondTimestamp(6106)) ==
-         LibXR::ErrorCode::OK);
+  TEST_ASSERT(aligned_topic.PackData(aligned_tx, aligned_packet,
+                                     LibXR::MicrosecondTimestamp(6106)) ==
+              LibXR::ErrorCode::OK);
   aligned_view_value = 0;
-  ASSERT(aligned_server.ParseData(LibXR::ConstRawData(aligned_packet)) == 1);
-  ASSERT(aligned_view_value == aligned_tx.right);
+  TEST_ASSERT(aligned_server.ParseData(LibXR::ConstRawData(aligned_packet)) == 1);
+  TEST_ASSERT(aligned_view_value == aligned_tx.right);
 
   auto prefix_topic =
       LibXR::Topic::CreateTopic<PrefixIntPayload>("prefix_int_tp", &domain);
@@ -55,14 +56,14 @@ void TestPacketAlignmentAndLengthCompatibility()
   prefix_server.Register(prefix_topic);
   PrefixIntPayload prefix_tx{0x11223344, 0x55667788};
   LibXR::Topic::PackedData<PrefixIntPayload> prefix_packet;
-  ASSERT(prefix_topic.PackData(prefix_tx, prefix_packet,
-                               LibXR::MicrosecondTimestamp(6116)) ==
-         LibXR::ErrorCode::OK);
+  TEST_ASSERT(prefix_topic.PackData(prefix_tx, prefix_packet,
+                                    LibXR::MicrosecondTimestamp(6116)) ==
+              LibXR::ErrorCode::OK);
   RewritePacketPayloadLengthForTest(prefix_packet, sizeof(int32_t));
   prefix_rx = PrefixIntPayload{-1, -1};
-  ASSERT(prefix_server.ParseData(LibXR::ConstRawData(
-             &prefix_packet, LibXR::Topic::PACK_BASE_SIZE + sizeof(int32_t))) == 1);
-  ASSERT(prefix_rx.value == prefix_tx.value);
+  TEST_ASSERT(prefix_server.ParseData(LibXR::ConstRawData(
+                  &prefix_packet, LibXR::Topic::PACK_BASE_SIZE + sizeof(int32_t))) == 1);
+  TEST_ASSERT(prefix_rx.value == prefix_tx.value);
 }
 
 }  // namespace

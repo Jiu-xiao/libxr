@@ -4,6 +4,7 @@
  * `LinuxSharedTopic` domain and mixed-mode semantics.
  */
 #include "linux_shm_topic_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxShmTopicTest
 {
@@ -36,26 +37,26 @@ void RunMixedModeScenarios()
 
     SharedTopic publisher_a(topic_name, domain_a, config);
     SharedTopic publisher_b(topic_name, "linux_shm_domain_b", config);
-    ASSERT(publisher_a.Valid());
-    ASSERT(publisher_b.Valid());
+    TEST_ASSERT(publisher_a.Valid());
+    TEST_ASSERT(publisher_b.Valid());
 
     SharedSubscriber subscriber_a(topic_name, "linux_shm_domain_a");
     SharedSubscriber subscriber_b(topic_name, domain_b);
-    ASSERT(subscriber_a.Valid());
-    ASSERT(subscriber_b.Valid());
+    TEST_ASSERT(subscriber_a.Valid());
+    TEST_ASSERT(subscriber_b.Valid());
 
     IPCFrame frame = {};
     FillFrame(frame, 331);
-    ASSERT(publisher_a.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher_a.Publish(frame) == LibXR::ErrorCode::OK);
     FillFrame(frame, 441);
-    ASSERT(publisher_b.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher_b.Publish(frame) == LibXR::ErrorCode::OK);
 
     SharedData recv_a;
     SharedData recv_b;
-    ASSERT(subscriber_a.Wait(recv_a, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(recv_b, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(recv_a.GetData()->seq == 331);
-    ASSERT(recv_b.GetData()->seq == 441);
+    TEST_ASSERT(subscriber_a.Wait(recv_a, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_b.Wait(recv_b, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(recv_a.GetData()->seq == 331);
+    TEST_ASSERT(recv_b.GetData()->seq == 441);
     recv_a.Reset();
     recv_b.Reset();
 
@@ -73,44 +74,44 @@ void RunMixedModeScenarios()
     config.queue_num = 4;
 
     SharedTopic publisher(topic_name, config);
-    ASSERT(publisher.Valid());
+    TEST_ASSERT(publisher.Valid());
 
     SharedSubscriber subscriber_broadcast(topic_name);
     SharedSubscriber subscriber_rr_a(topic_name,
                                      LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
     SharedSubscriber subscriber_rr_b(topic_name,
                                      LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    ASSERT(subscriber_broadcast.Valid());
-    ASSERT(subscriber_rr_a.Valid());
-    ASSERT(subscriber_rr_b.Valid());
+    TEST_ASSERT(subscriber_broadcast.Valid());
+    TEST_ASSERT(subscriber_rr_a.Valid());
+    TEST_ASSERT(subscriber_rr_b.Valid());
 
     IPCFrame frame = {};
     FillFrame(frame, 381);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
     FillFrame(frame, 382);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
     FillFrame(frame, 383);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
     SharedData bc0;
     SharedData bc1;
     SharedData bc2;
-    ASSERT(subscriber_broadcast.Wait(bc0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_broadcast.Wait(bc1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_broadcast.Wait(bc2, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(bc0.GetData()->seq == 381);
-    ASSERT(bc1.GetData()->seq == 382);
-    ASSERT(bc2.GetData()->seq == 383);
+    TEST_ASSERT(subscriber_broadcast.Wait(bc0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_broadcast.Wait(bc1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_broadcast.Wait(bc2, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(bc0.GetData()->seq == 381);
+    TEST_ASSERT(bc1.GetData()->seq == 382);
+    TEST_ASSERT(bc2.GetData()->seq == 383);
 
     SharedData rr_a0;
     SharedData rr_b0;
     SharedData rr_a1;
-    ASSERT(subscriber_rr_a.Wait(rr_a0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_rr_b.Wait(rr_b0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_rr_a.Wait(rr_a1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(rr_a0.GetData()->seq == 381);
-    ASSERT(rr_b0.GetData()->seq == 382);
-    ASSERT(rr_a1.GetData()->seq == 383);
+    TEST_ASSERT(subscriber_rr_a.Wait(rr_a0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_rr_b.Wait(rr_b0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_rr_a.Wait(rr_a1, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(rr_a0.GetData()->seq == 381);
+    TEST_ASSERT(rr_b0.GetData()->seq == 382);
+    TEST_ASSERT(rr_a1.GetData()->seq == 383);
   }
 
   UNUSED(SharedTopic::Remove(topic_name));
@@ -126,28 +127,28 @@ void RunMixedModeScenarios()
     config.queue_num = 2;
 
     SharedTopic publisher(topic_name, config);
-    ASSERT(publisher.Valid());
+    TEST_ASSERT(publisher.Valid());
 
     SharedSubscriber subscriber_broadcast(topic_name);
     SharedSubscriber subscriber_rr(topic_name,
                                    LibXR::LinuxSharedSubscriberMode::BALANCE_RR);
-    ASSERT(subscriber_broadcast.Valid());
-    ASSERT(subscriber_rr.Valid());
+    TEST_ASSERT(subscriber_broadcast.Valid());
+    TEST_ASSERT(subscriber_rr.Valid());
 
     IPCFrame frame = {};
     FillFrame(frame, 391);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
     FillFrame(frame, 392);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::FULL);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::FULL);
 
     SharedData bc0;
-    ASSERT(subscriber_broadcast.Wait(bc0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(bc0.GetData()->seq == 391);
+    TEST_ASSERT(subscriber_broadcast.Wait(bc0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(bc0.GetData()->seq == 391);
 
     SharedData rr0;
-    ASSERT(subscriber_rr.Wait(rr0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(rr0.GetData()->seq == 391);
+    TEST_ASSERT(subscriber_rr.Wait(rr0, SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(rr0.GetData()->seq == 391);
   }
 }
 }  // namespace LinuxShmTopicTest

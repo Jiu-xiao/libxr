@@ -38,7 +38,7 @@ class ESP32PWM : public PWM
     const esp_err_t err = ledc_channel_config(&channel_conf);
     if (err != ESP_OK)
     {
-      ASSERT(false);
+      REQUIRE(false);
     }
   }
 

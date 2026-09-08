@@ -24,6 +24,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 static_assert(LibXR::Detail::LoggerLiteral::SelectFrontend<
                   LibXR::Detail::LoggerLiteral::Frontend::Auto, "brace {}", int>() ==
@@ -73,12 +74,12 @@ std::string ReadPipeText(LibXR::Pipe& pipe)
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
   const size_t output_size = pipe.GetReadPort().Size();
-  ASSERT(output_size > 0);
+  TEST_ASSERT(output_size > 0);
 
   std::string text(output_size, '\0');
   LibXR::ReadOperation read_op;
-  ASSERT(pipe.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
-         LibXR::ErrorCode::OK);
+  TEST_ASSERT(pipe.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
+              LibXR::ErrorCode::OK);
   return text;
 }
 
@@ -113,13 +114,14 @@ void test_logger()
   LibXR::STDIO::write_ = old_write;
   LibXR::STDIO::write_stream_ = old_stream;
 
-  ASSERT(text.find(
-             LibXR::LIBXR_FOREGROUND_STR[static_cast<size_t>(LibXR::Foreground::RED)]) !=
-         std::string::npos);
-  ASSERT(text.find("(logger_test.cpp:123) brace 7") != std::string::npos);
-  ASSERT(text.find("(logger_test.cpp:124) printf 9") != std::string::npos);
-  ASSERT(text.find("(logger_test.cpp:125) plain literal") != std::string::npos);
-  ASSERT(text.find(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
-             LibXR::TerminalControl::RESET)]) != std::string::npos);
-  ASSERT(CountSubstring(text, "\r\n") == 3);
+  TEST_ASSERT(
+      text.find(
+          LibXR::LIBXR_FOREGROUND_STR[static_cast<size_t>(LibXR::Foreground::RED)]) !=
+      std::string::npos);
+  TEST_ASSERT(text.find("(logger_test.cpp:123) brace 7") != std::string::npos);
+  TEST_ASSERT(text.find("(logger_test.cpp:124) printf 9") != std::string::npos);
+  TEST_ASSERT(text.find("(logger_test.cpp:125) plain literal") != std::string::npos);
+  TEST_ASSERT(text.find(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
+                  LibXR::TerminalControl::RESET)]) != std::string::npos);
+  TEST_ASSERT(CountSubstring(text, "\r\n") == 3);
 }

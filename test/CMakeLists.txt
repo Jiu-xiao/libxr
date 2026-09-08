@@ -4,6 +4,38 @@ endif()
 
 add_compile_options(-g)
 
+add_library(
+  test_assert_disabled OBJECT
+  framework/assert_disabled_headers.cpp ../src/core/rw/read_port.cpp
+  ../src/core/rw/write_port.cpp ../src/core/rw/write_stream.cpp
+)
+target_include_directories(
+  test_assert_disabled PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+)
+target_compile_definitions(
+  test_assert_disabled PRIVATE $<TARGET_PROPERTY:xr,INTERFACE_COMPILE_DEFINITIONS>
+)
+target_compile_options(
+  test_assert_disabled PRIVATE -ULIBXR_DEBUG_BUILD -ULIBXR_DEV_ASSERT_BUILD -Wall -Werror
+                               -Wunused-parameter
+)
+
+enable_testing()
+foreach(debug RANGE 0 1)
+  foreach(dev RANGE 0 1)
+    set(mode_target test_assert_${debug}_${dev})
+    add_executable(${mode_target} framework/assert_modes.cpp)
+    target_include_directories(${mode_target} PRIVATE framework ../src/core)
+    if(debug)
+      target_compile_definitions(${mode_target} PRIVATE LIBXR_DEBUG_BUILD)
+    endif()
+    if(dev)
+      target_compile_definitions(${mode_target} PRIVATE LIBXR_DEV_ASSERT_BUILD)
+    endif()
+    add_test(NAME ${mode_target} COMMAND ${mode_target})
+  endforeach()
+endforeach()
+
 file(GLOB_RECURSE XR_TEST_BASE_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/base/*.cpp"
 )

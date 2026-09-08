@@ -19,6 +19,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_async`。 Test entry function `test_async`.
@@ -48,11 +49,11 @@ void test_async()
       new (async_storage) LibXR::ASync(512, LibXR::Thread::Priority::REALTIME);
   for (int i = 0; i < 10; i++)
   {
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::READY);
-    ASSERT(async_arg == i);
+    TEST_ASSERT(async->GetStatus() == LibXR::ASync::Status::READY);
+    TEST_ASSERT(async_arg == i);
     async->AssignJob(async_cb);
 
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::BUSY);
+    TEST_ASSERT(async->GetStatus() == LibXR::ASync::Status::BUSY);
     const uint32_t wait_start = LibXR::Thread::GetTime();
     while (async->status_.load(std::memory_order_acquire) != LibXR::ASync::Status::DONE &&
            LibXR::Thread::GetTime() - wait_start < 1000U)
@@ -60,9 +61,10 @@ void test_async()
       LibXR::Thread::Yield();
     }
 
-    ASSERT(async->status_.load(std::memory_order_acquire) == LibXR::ASync::Status::DONE);
-    ASSERT(async_arg == i + 1);
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::DONE);
-    ASSERT(async->GetStatus() == LibXR::ASync::Status::READY);
+    TEST_ASSERT(async->status_.load(std::memory_order_acquire) ==
+                LibXR::ASync::Status::DONE);
+    TEST_ASSERT(async_arg == i + 1);
+    TEST_ASSERT(async->GetStatus() == LibXR::ASync::Status::DONE);
+    TEST_ASSERT(async->GetStatus() == LibXR::ASync::Status::READY);
   }
 }
