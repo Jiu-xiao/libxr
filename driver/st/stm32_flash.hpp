@@ -9,6 +9,8 @@
 #include "libxr_type.hpp"
 #include "main.h"
 
+#ifdef HAL_FLASH_MODULE_ENABLED
+
 namespace LibXR
 {
 
@@ -146,6 +148,8 @@ class STM32Flash : public Flash
     return FLASH_TYPEPROGRAM_DOUBLEWORD;
 #elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
     return FLASH_TYPEPROGRAM_FLASHWORD;
+#elif defined(FLASH_TYPEPROGRAM_QUADWORD)
+    return FLASH_TYPEPROGRAM_QUADWORD;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
@@ -163,6 +167,8 @@ class STM32Flash : public Flash
     return 8;
 #elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
     return FLASH_NB_32BITWORD_IN_FLASHWORD * 4;
+#elif defined(FLASH_TYPEPROGRAM_QUADWORD)
+    return 16;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
@@ -172,3 +178,5 @@ class STM32Flash : public Flash
 };
 
 }  // namespace LibXR
+
+#endif
