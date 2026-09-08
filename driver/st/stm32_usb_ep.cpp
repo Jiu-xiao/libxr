@@ -42,7 +42,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 }
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
 STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
                              PCD_HandleTypeDef* hpcd, Direction dir,
                              size_t hw_buffer_offset, size_t hw_buffer_size,
@@ -135,7 +135,7 @@ void STM32Endpoint::Configure(const Config& cfg)
   }
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   if (packet_size_limit > hw_buffer_size_)
   {
     packet_size_limit = hw_buffer_size_;
@@ -225,7 +225,7 @@ ErrorCode STM32Endpoint::Transfer(size_t size)
   }
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   if (is_in)
   {
     ep->xfer_fill_db = 0U;
@@ -334,7 +334,7 @@ static STM32Endpoint* GetEndpoint(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool i
     return STM32Endpoint::map_otg_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];
   }
 #endif
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   if (id == STM32_USB_FS_DEV)
   {
     return STM32Endpoint::map_fs_[epnum & 0x7F][static_cast<uint8_t>(is_in)];

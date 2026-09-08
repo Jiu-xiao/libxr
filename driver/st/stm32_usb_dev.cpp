@@ -264,7 +264,7 @@ ErrorCode STM32USBDeviceOtgHS::SetAddress(uint8_t address,
 
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
 STM32USBDeviceDevFs::STM32USBDeviceDevFs(
     PCD_HandleTypeDef* hpcd, const std::initializer_list<EPConfig> EP_CFGS,
     USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
