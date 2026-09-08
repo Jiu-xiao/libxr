@@ -10,6 +10,7 @@
  *          2. After the last release, the publisher can create new data again.
  */
 #include "linux_shm_topic_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxShmTopicTest
 {
@@ -29,34 +30,34 @@ void RunLifecycleSlotReferenceScenario()
     config.queue_num = 4;
 
     SharedTopic publisher(topic_name, config);
-    ASSERT(publisher.Valid());
+    TEST_ASSERT(publisher.Valid());
 
     SharedSubscriber subscriber_a(topic_name);
     SharedSubscriber subscriber_b(topic_name);
-    ASSERT(subscriber_a.Valid());
-    ASSERT(subscriber_b.Valid());
+    TEST_ASSERT(subscriber_a.Valid());
+    TEST_ASSERT(subscriber_b.Valid());
 
     IPCFrame frame = {};
     FillFrame(frame, 301);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
 
-    ASSERT(subscriber_a.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_a.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_b.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     AssertFrame(*subscriber_a.GetData(), 301);
     AssertFrame(*subscriber_b.GetData(), 301);
 
     subscriber_a.Release();
 
     SharedData blocked_data;
-    ASSERT(publisher.CreateData(blocked_data) == LibXR::ErrorCode::FULL);
+    TEST_ASSERT(publisher.CreateData(blocked_data) == LibXR::ErrorCode::FULL);
 
     subscriber_b.Release();
-    ASSERT(publisher.CreateData(blocked_data) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.CreateData(blocked_data) == LibXR::ErrorCode::OK);
     FillFrame(*blocked_data.GetData(), 302);
-    ASSERT(publisher.Publish(blocked_data) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(blocked_data) == LibXR::ErrorCode::OK);
 
-    ASSERT(subscriber_a.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
-    ASSERT(subscriber_b.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_a.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(subscriber_b.Wait(SHORT_WAIT_MS) == LibXR::ErrorCode::OK);
     AssertFrame(*subscriber_a.GetData(), 302);
     AssertFrame(*subscriber_b.GetData(), 302);
     subscriber_a.Release();

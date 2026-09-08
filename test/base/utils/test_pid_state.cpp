@@ -4,6 +4,7 @@
  * behavior.
  */
 #include "pid_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试项函数 `RunPidStateTests`。 Test-item function `RunPidStateTests`.
@@ -30,7 +31,7 @@ void RunPidStateTests()
 
     (void)pid.Calculate(0.0, 0.3, 0.1);
     // eps 放宽：兼容默认 Scalar 为 float 的实现
-    ASSERT(near(pid.LastFeedback(), 0.3, 1e-6));
+    TEST_ASSERT(near(pid.LastFeedback(), 0.3, 1e-6));
   }
 
   // ---------------------------------------------------------
@@ -50,7 +51,7 @@ void RunPidStateTests()
     (void)pid.Calculate(0.0, 0.0, 0.1);  // establishes last_fb = 0
     (void)pid.Calculate(0.0, 1.0, 0.1);  // fb_dot = 10, scaled by k => 20
 
-    ASSERT(near(pid.LastDerivative(), 20.0, 1e-6));
+    TEST_ASSERT(near(pid.LastDerivative(), 20.0, 1e-6));
   }
 
   // -------------------------------------------------
@@ -68,14 +69,14 @@ void RunPidStateTests()
     LibXR::PID<> pid(param);
 
     const double OUT1 = pid.Calculate(1.0, 0.0, 0.1);
-    ASSERT(std::isfinite(OUT1));
+    TEST_ASSERT(std::isfinite(OUT1));
 
     const double OUT_DT0 = pid.Calculate(1.0, 0.0, 0.0);
-    ASSERT(near(OUT_DT0, OUT1, 1e-12));
+    TEST_ASSERT(near(OUT_DT0, OUT1, 1e-12));
 
     const double STD_NAN = std::numeric_limits<double>::quiet_NaN();
     const double OUT_NAN = pid.Calculate(STD_NAN, 0.0, 0.1);
-    ASSERT(near(OUT_NAN, OUT1, 1e-12));
+    TEST_ASSERT(near(OUT_NAN, OUT1, 1e-12));
   }
 
   // -----------------------
@@ -95,11 +96,11 @@ void RunPidStateTests()
     (void)pid.Calculate(1.0, 0.0, 0.1);
     pid.Reset();
 
-    ASSERT(near(pid.GetIntegralError(), 0.0, 1e-12));
-    ASSERT(near(pid.LastError(), 0.0, 1e-12));
-    ASSERT(near(pid.LastFeedback(), 0.0, 1e-12));
-    ASSERT(near(pid.LastOutput(), 0.0, 1e-12));
-    ASSERT(near(pid.LastDerivative(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.GetIntegralError(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.LastError(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.LastFeedback(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.LastOutput(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.LastDerivative(), 0.0, 1e-12));
   }
 
   // -------------------------------------------------------
@@ -119,8 +120,8 @@ void RunPidStateTests()
     pid.SetIntegralError(1.0);  // even if preset, Calculate() should clear it
     (void)pid.Calculate(1.0, 0.0, 0.1);
 
-    ASSERT(near(pid.GetIntegralError(), 0.0, 1e-12));
-    ASSERT(near(pid.LastOutput(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.GetIntegralError(), 0.0, 1e-12));
+    TEST_ASSERT(near(pid.LastOutput(), 0.0, 1e-12));
   }
 
   // -------------------------------------------------------
@@ -138,8 +139,8 @@ void RunPidStateTests()
     LibXR::PID<> pid(param);
 
     const double OUT = pid.Calculate(1.0, 0.0, 0.1);
-    ASSERT(near(OUT, 100.0, 1e-6));
-    ASSERT(near(pid.LastOutput(), 100.0, 1e-6));
+    TEST_ASSERT(near(OUT, 100.0, 1e-6));
+    TEST_ASSERT(near(pid.LastOutput(), 100.0, 1e-6));
   }
 
   // -------------------------------------------------------

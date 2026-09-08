@@ -16,6 +16,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_stack`。 Test entry function `test_stack`.
@@ -33,16 +34,16 @@ void test_stack()
     stack.Push(i);
   }
 
-  ASSERT(stack.Push(1) == LibXR::ErrorCode::FULL);
+  TEST_ASSERT(stack.Push(1) == LibXR::ErrorCode::FULL);
 
   for (int i = 0; i <= 9; i++)
   {
     int tmp = -1;
     stack.Pop(tmp);
-    ASSERT(tmp == 9 - i);
+    TEST_ASSERT(tmp == 9 - i);
   }
 
-  ASSERT(stack.Pop() == LibXR::ErrorCode::EMPTY);
+  TEST_ASSERT(stack.Pop() == LibXR::ErrorCode::EMPTY);
 
   for (int i = 0; i <= 5; i++)
   {
@@ -50,11 +51,11 @@ void test_stack()
   }
 
   stack.Insert(10, 2);
-  ASSERT(stack[2] == 10);
-  ASSERT(stack[3] == 2);
-  ASSERT(stack.Size() == 7);
+  TEST_ASSERT(stack[2] == 10);
+  TEST_ASSERT(stack[3] == 2);
+  TEST_ASSERT(stack.Size() == 7);
   stack.Delete(2);
-  ASSERT(stack[2] == 2);
-  ASSERT(stack[3] == 3);
-  ASSERT(stack.Size() == 6);
+  TEST_ASSERT(stack[2] == 2);
+  TEST_ASSERT(stack[3] == 3);
+  TEST_ASSERT(stack.Size() == 6);
 }

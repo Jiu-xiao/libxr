@@ -3,6 +3,7 @@
  * @brief 异步 RW 完成与容量边界测试 / Asynchronous RW completion and capacity tests.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 验证异步读完成与写错误通知
@@ -38,14 +39,14 @@ void test_rw_edge_cases()
   WriteOperation op2;
   std::vector<uint8_t> tx1(w.EmptySize(), 0x3C);
 
-  ASSERT(!tx1.empty());
-  ASSERT(w(ConstRawData{tx1.data(), tx1.size()}, op1) == ErrorCode::OK);
+  TEST_ASSERT(!tx1.empty());
+  TEST_ASSERT(w(ConstRawData{tx1.data(), tx1.size()}, op1) == ErrorCode::OK);
   auto second_result = w(ConstRawData{tx2, sizeof(tx2)}, op2);
-  ASSERT(second_result == ErrorCode::FULL);
+  TEST_ASSERT(second_result == ErrorCode::FULL);
 
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     static uint8_t sink[4];
     queue.PopAll(sink);
   }

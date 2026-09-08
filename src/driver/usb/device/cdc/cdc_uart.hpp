@@ -156,10 +156,10 @@ class CDCUart : public CDCBase, public LibXR::UART
         return false;
       }
 
-      const auto ans =
+      [[maybe_unused]] const auto ans =
           queue.PushBatch(static_cast<const uint8_t*>(read_port_cdc_.pending_data_.addr_),
                           read_port_cdc_.pending_data_.size_);
-      ASSERT(ans == ErrorCode::OK);
+      DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
       read_port_cdc_.pending_data_ = {nullptr, 0};
       queue.Publish();
     }
@@ -169,7 +169,7 @@ class CDCUart : public CDCBase, public LibXR::UART
       return false;
     }
 
-    const auto ans = ep->Transfer(ep->MaxPacketSize());
+    [[maybe_unused]] const auto ans = ep->Transfer(ep->MaxPacketSize());
     if (ans == ErrorCode::OK)
     {
       read_port_cdc_.recv_pause_ = false;
@@ -224,9 +224,9 @@ class CDCUart : public CDCBase, public LibXR::UART
         return;
       }
 
-      const auto ans =
+      [[maybe_unused]] const auto ans =
           queue.PushBatch(static_cast<const uint8_t*>(data.addr_), data.size_);
-      ASSERT(ans == ErrorCode::OK);
+      DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
       queue.Publish();
     }
     (void)TryRearmOut(in_isr);
@@ -251,8 +251,8 @@ class CDCUart : public CDCBase, public LibXR::UART
     {
       if (ep->GetActiveLength() == 0U && write_port_cdc_.Size() == 0U)
       {
-        const auto ans = ep->TransferZLP();
-        ASSERT(ans == ErrorCode::OK);
+        [[maybe_unused]] const auto ans = ep->TransferZLP();
+        DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
         need_write_zlp_ = false;
         return;
       }
@@ -265,14 +265,15 @@ class CDCUart : public CDCBase, public LibXR::UART
   /**
    * @brief 启动已填充的 IN 缓冲区 / Start the filled IN buffer
    * @param ep 数据 IN 端点 / Data IN endpoint
+   * @param in_isr 是否在中断中调用 / Whether called in an ISR
    */
-  void StartTxBuffer(Endpoint& ep)
+  void StartTxBuffer(Endpoint& ep, [[maybe_unused]] bool in_isr)
   {
     const size_t LENGTH = ep.GetActiveLength();
-    ASSERT(LENGTH != 0U);
+    DEV_ASSERT_FROM_CALLBACK(LENGTH != 0U, in_isr);
     ep.SetActiveLength(0U);
-    const auto ans = ep.Transfer(LENGTH);
-    ASSERT(ans == ErrorCode::OK);
+    [[maybe_unused]] const auto ans = ep.Transfer(LENGTH);
+    DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
     const size_t MPS = ep.MaxPacketSize();
     need_write_zlp_ = MPS != 0U && LENGTH % MPS == 0U;
   }
@@ -310,12 +311,12 @@ class CDCUart : public CDCBase, public LibXR::UART
                               }
                               return first_size + second_size;
                             });
-    ASSERT(LENGTH != 0U && LENGTH <= UINT16_MAX);
+    DEV_ASSERT_FROM_CALLBACK(LENGTH != 0U && LENGTH <= UINT16_MAX, in_isr);
     ep.SetActiveLength(static_cast<uint16_t>(LENGTH));
     need_write_zlp_ = false;
     if (ep.GetState() == Endpoint::State::IDLE)
     {
-      StartTxBuffer(ep);
+      StartTxBuffer(ep, in_isr);
     }
   }
 
@@ -334,7 +335,7 @@ class CDCUart : public CDCBase, public LibXR::UART
 
     if (ep->GetActiveLength() != 0U)
     {
-      StartTxBuffer(*ep);
+      StartTxBuffer(*ep, in_isr);
     }
     else
     {

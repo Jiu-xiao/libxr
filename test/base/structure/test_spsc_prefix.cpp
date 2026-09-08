@@ -8,6 +8,7 @@
 
 #include "spsc_queue.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -17,21 +18,21 @@ void PositionEmptyQueue(Queue& queue, size_t offset)
 {
   for (size_t i = 0; i < offset; ++i)
   {
-    ASSERT(queue.Push(0U) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(0U) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
   }
 }
 
 void CheckContents(Queue& queue, const std::vector<uint32_t>& expected)
 {
-  ASSERT(queue.Size() == expected.size());
+  TEST_ASSERT(queue.Size() == expected.size());
   for (uint32_t value : expected)
   {
     uint32_t actual = 0U;
-    ASSERT(queue.Pop(actual) == LibXR::ErrorCode::OK);
-    ASSERT(actual == value);
+    TEST_ASSERT(queue.Pop(actual) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(actual == value);
   }
-  ASSERT(queue.Size() == 0U);
+  TEST_ASSERT(queue.Size() == 0U);
 }
 
 void FillQueue(Queue& queue, size_t offset, size_t used, std::vector<uint32_t>& expected)
@@ -41,7 +42,7 @@ void FillQueue(Queue& queue, size_t offset, size_t used, std::vector<uint32_t>& 
   {
     const uint32_t value = static_cast<uint32_t>(10U + index);
     expected.push_back(value);
-    ASSERT(queue.Push(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(value) == LibXR::ErrorCode::OK);
   }
 }
 
@@ -59,10 +60,10 @@ void CheckProducePrefix(size_t capacity, size_t offset, size_t used, size_t limi
       [&](uint32_t* first, size_t first_size, uint32_t* second, size_t second_size)
       {
         ++calls;
-        ASSERT(first != nullptr && first_size > 0U);
-        ASSERT(first_size + second_size == offer);
-        ASSERT((second == nullptr) == (second_size == 0U));
-        ASSERT(queue.Size() == used);
+        TEST_ASSERT(first != nullptr && first_size > 0U);
+        TEST_ASSERT(first_size + second_size == offer);
+        TEST_ASSERT((second == nullptr) == (second_size == 0U));
+        TEST_ASSERT(queue.Size() == used);
         for (size_t index = 0U; index < prefix; ++index)
         {
           (index < first_size ? first[index] : second[index - first_size]) =
@@ -71,8 +72,8 @@ void CheckProducePrefix(size_t capacity, size_t offset, size_t used, size_t limi
         return prefix;
       });
 
-  ASSERT(produced == prefix);
-  ASSERT(calls == (offer == 0U ? 0U : 1U));
+  TEST_ASSERT(produced == prefix);
+  TEST_ASSERT(calls == (offer == 0U ? 0U : 1U));
   for (size_t index = 0U; index < prefix; ++index)
   {
     expected.push_back(static_cast<uint32_t>(100U + index));
@@ -95,20 +96,20 @@ void CheckConsumePrefix(size_t capacity, size_t offset, size_t used, size_t limi
           size_t second_size)
       {
         ++calls;
-        ASSERT(first != nullptr && first_size > 0U);
-        ASSERT(first_size + second_size == offer);
-        ASSERT((second == nullptr) == (second_size == 0U));
+        TEST_ASSERT(first != nullptr && first_size > 0U);
+        TEST_ASSERT(first_size + second_size == offer);
+        TEST_ASSERT((second == nullptr) == (second_size == 0U));
         for (size_t index = 0U; index < offer; ++index)
         {
-          ASSERT((index < first_size ? first[index] : second[index - first_size]) ==
-                 expected[index]);
+          TEST_ASSERT((index < first_size ? first[index] : second[index - first_size]) ==
+                      expected[index]);
         }
-        ASSERT(queue.Size() == used);
+        TEST_ASSERT(queue.Size() == used);
         return prefix;
       });
 
-  ASSERT(consumed == prefix);
-  ASSERT(calls == (offer == 0U ? 0U : 1U));
+  TEST_ASSERT(consumed == prefix);
+  TEST_ASSERT(calls == (offer == 0U ? 0U : 1U));
   expected.erase(expected.begin(), expected.begin() + prefix);
   CheckContents(queue, expected);
 }
@@ -147,34 +148,35 @@ void TestOppositeSideProgress()
       queue.ProduceWithWriter(std::numeric_limits<size_t>::max(),
                               [&](uint32_t* first, size_t n1, uint32_t*, size_t n2)
                               {
-                                ASSERT(n1 == 3U && n2 == 0U);
+                                TEST_ASSERT(n1 == 3U && n2 == 0U);
                                 first[0] = 71U;
                                 uint32_t value = 0U;
-                                ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+                                TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
                                 return 1U;
                               });
-  ASSERT(produced == 1U);
-  ASSERT(queue.ConsumeWithReader(
-             3U,
-             [&](const uint32_t* first, size_t n1, const uint32_t*, size_t n2)
-             {
-               ASSERT(n1 == 1U && n2 == 0U && first[0] == 71U);
-               ASSERT(queue.Push(72U) == LibXR::ErrorCode::OK);
-               return 1U;
-             }) == 1U);
+  TEST_ASSERT(produced == 1U);
+  TEST_ASSERT(queue.ConsumeWithReader(
+                  3U,
+                  [&](const uint32_t* first, size_t n1, const uint32_t*, size_t n2)
+                  {
+                    TEST_ASSERT(n1 == 1U && n2 == 0U && first[0] == 71U);
+                    TEST_ASSERT(queue.Push(72U) == LibXR::ErrorCode::OK);
+                    return 1U;
+                  }) == 1U);
   CheckContents(queue, {72U});
 
-  ASSERT(queue.PushBatch(static_cast<const uint32_t*>(nullptr), 0U) ==
-         LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.PushBatch(static_cast<const uint32_t*>(nullptr), 0U) ==
+              LibXR::ErrorCode::OK);
   const uint32_t full[] = {1U, 2U, 3U};
-  ASSERT(queue.PushBatch(full, 3U) == LibXR::ErrorCode::OK);
-  ASSERT(queue.ConsumeWithReader(3U,
-                                 [&](const uint32_t*, size_t, const uint32_t*, size_t)
-                                 {
-                                   ASSERT(queue.Push(99U) == LibXR::ErrorCode::FULL);
-                                   return 2U;
-                                 }) == 2U);
-  ASSERT(queue.Push(99U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.PushBatch(full, 3U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(
+      queue.ConsumeWithReader(3U,
+                              [&](const uint32_t*, size_t, const uint32_t*, size_t)
+                              {
+                                TEST_ASSERT(queue.Push(99U) == LibXR::ErrorCode::FULL);
+                                return 2U;
+                              }) == 2U);
+  TEST_ASSERT(queue.Push(99U) == LibXR::ErrorCode::OK);
   CheckContents(queue, {3U, 99U});
 }
 
@@ -187,50 +189,54 @@ void TestAlignedPayloadAndRawStride()
 {
   LibXR::SPSCQueue<AlignedPayload> queue(3U);
   AlignedPayload seed{0U};
-  ASSERT(queue.Push(seed) == LibXR::ErrorCode::OK);
-  ASSERT(queue.Push(seed) == LibXR::ErrorCode::OK);
-  ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
-  ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
-  ASSERT(queue.ProduceWithWriter(
-             3U,
-             [](AlignedPayload* first, size_t n1, AlignedPayload* second, size_t n2)
-             {
-               ASSERT(n1 == 2U && n2 == 1U);
-               ASSERT(reinterpret_cast<uintptr_t>(first) % alignof(AlignedPayload) == 0U);
-               ASSERT(reinterpret_cast<uintptr_t>(second) % alignof(AlignedPayload) ==
-                      0U);
-               first[0] = AlignedPayload{11U};
-               first[1] = AlignedPayload{12U};
-               second[0] = AlignedPayload{13U};
-               return 3U;
-             }) == 3U);
+  TEST_ASSERT(queue.Push(seed) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.Push(seed) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(
+      queue.ProduceWithWriter(
+          3U,
+          [](AlignedPayload* first, size_t n1, AlignedPayload* second, size_t n2)
+          {
+            TEST_ASSERT(n1 == 2U && n2 == 1U);
+            TEST_ASSERT(reinterpret_cast<uintptr_t>(first) % alignof(AlignedPayload) ==
+                        0U);
+            TEST_ASSERT(reinterpret_cast<uintptr_t>(second) % alignof(AlignedPayload) ==
+                        0U);
+            first[0] = AlignedPayload{11U};
+            first[1] = AlignedPayload{12U};
+            second[0] = AlignedPayload{13U};
+            return 3U;
+          }) == 3U);
   for (uint32_t expected = 11U; expected <= 13U; ++expected)
   {
     AlignedPayload actual{};
-    ASSERT(queue.Pop(actual) == LibXR::ErrorCode::OK);
-    ASSERT(actual.value == expected);
+    TEST_ASSERT(queue.Pop(actual) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(actual.value == expected);
   }
 
   LibXR::SPSCQueueBase raw(3U, 4U, 2U);
-  ASSERT(raw.ProduceWithWriter(2U,
-                               [](void* first, size_t n1, void*, size_t n2)
-                               {
-                                 ASSERT(n1 == 2U && n2 == 0U);
-                                 auto* bytes = static_cast<uint8_t*>(first);
-                                 for (size_t i = 0U; i < n1; ++i)
-                                 {
-                                   for (size_t byte = 0U; byte < 3U; ++byte)
-                                   {
-                                     bytes[i * 4U + byte] = static_cast<uint8_t>(i + 1U);
-                                   }
-                                 }
-                                 return n1;
-                               }) == 2U);
+  TEST_ASSERT(raw.ProduceWithWriter(2U,
+                                    [](void* first, size_t n1, void*, size_t n2)
+                                    {
+                                      TEST_ASSERT(n1 == 2U && n2 == 0U);
+                                      auto* bytes = static_cast<uint8_t*>(first);
+                                      for (size_t i = 0U; i < n1; ++i)
+                                      {
+                                        for (size_t byte = 0U; byte < 3U; ++byte)
+                                        {
+                                          bytes[i * 4U + byte] =
+                                              static_cast<uint8_t>(i + 1U);
+                                        }
+                                      }
+                                      return n1;
+                                    }) == 2U);
   uint8_t payload[3]{};
   for (uint8_t expected = 1U; expected <= 2U; ++expected)
   {
-    ASSERT(raw.PopBytes(payload) == LibXR::ErrorCode::OK);
-    ASSERT(payload[0] == expected && payload[1] == expected && payload[2] == expected);
+    TEST_ASSERT(raw.PopBytes(payload) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(payload[0] == expected && payload[1] == expected &&
+                payload[2] == expected);
   }
 }
 
@@ -272,7 +278,7 @@ void TestConcurrentPrefixes()
           const size_t prefix = std::min<size_t>(n1 + n2, 1U + expected % 5U);
           for (size_t i = 0U; i < prefix; ++i)
           {
-            ASSERT((i < n1 ? first[i] : second[i - n1]) == expected + i);
+            TEST_ASSERT((i < n1 ? first[i] : second[i - n1]) == expected + i);
           }
           return prefix;
         });
@@ -283,7 +289,7 @@ void TestConcurrentPrefixes()
     }
   }
   producer.join();
-  ASSERT(queue.Size() == 0U);
+  TEST_ASSERT(queue.Size() == 0U);
 }
 }  // namespace
 

@@ -10,6 +10,7 @@
  *          2. Prompt, clear-line, and clear-screen sequence output.
  */
 #include "terminal_display_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -29,15 +30,15 @@ void TestLineFeedModes()
   // modes.
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> crlf_fixture;
   crlf_fixture.terminal.LineFeed();
-  ASSERT(crlf_fixture.FlushOutput() == "\r\n");
+  TEST_ASSERT(crlf_fixture.FlushOutput() == "\r\n");
 
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::LF> lf_fixture;
   lf_fixture.terminal.LineFeed();
-  ASSERT(lf_fixture.FlushOutput() == "\n");
+  TEST_ASSERT(lf_fixture.FlushOutput() == "\n");
 
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CR> cr_fixture;
   cr_fixture.terminal.LineFeed();
-  ASSERT(cr_fixture.FlushOutput() == "\r");
+  TEST_ASSERT(cr_fixture.FlushOutput() == "\r");
 }
 
 /**
@@ -57,19 +58,19 @@ void TestHeaderAndClearSequences()
   TerminalDisplayFixture<LibXR::Terminal<>::Mode::CRLF> fixture;
 
   fixture.terminal.ShowHeader();
-  ASSERT(fixture.FlushOutput() == "ramfs:/$ ");
+  TEST_ASSERT(fixture.FlushOutput() == "ramfs:/$ ");
 
   auto dir = LibXR::RamFS::CreateDir("dir1");
   fixture.ramfs.Add(dir);
   fixture.terminal.current_dir_ = &dir;
   fixture.terminal.ShowHeader();
-  ASSERT(fixture.FlushOutput() == "ramfs:dir1$ ");
+  TEST_ASSERT(fixture.FlushOutput() == "ramfs:dir1$ ");
 
   fixture.terminal.ClearLine();
-  ASSERT(fixture.FlushOutput() == "\033[2K\r");
+  TEST_ASSERT(fixture.FlushOutput() == "\033[2K\r");
 
   fixture.terminal.Clear();
-  ASSERT(fixture.FlushOutput() == "\033[2J\033[1H");
+  TEST_ASSERT(fixture.FlushOutput() == "\033[2J\033[1H");
 }
 
 }  // namespace

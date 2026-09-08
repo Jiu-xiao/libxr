@@ -7,6 +7,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -69,7 +70,7 @@ void ProducerTask(ProducerArg arg)
   for (size_t offset = 0; offset < arg.count; ++offset)
   {
     const size_t value = arg.begin + offset;
-    ASSERT(value <= UINT16_MAX);
+    TEST_ASSERT(value <= UINT16_MAX);
     while (arg.queue->Push(static_cast<uint16_t>(value)) != LibXR::ErrorCode::OK)
     {
       LibXR::Thread::Yield();
@@ -90,14 +91,14 @@ void ConsumerTask(ConsumerArg arg)
     const auto ec = arg.queue->Pop(value);
     if (ec == LibXR::ErrorCode::OK)
     {
-      ASSERT(value < arg.total_items);
+      TEST_ASSERT(value < arg.total_items);
       const auto previous = arg.seen[value].exchange(1, std::memory_order_relaxed);
-      ASSERT(previous == 0);
+      TEST_ASSERT(previous == 0);
 
       arg.pop_sum->fetch_add(static_cast<unsigned long long>(value),
                              std::memory_order_relaxed);
       const size_t pop_index = arg.pop_count->fetch_add(1, std::memory_order_relaxed) + 1;
-      ASSERT(pop_index <= arg.total_items);
+      TEST_ASSERT(pop_index <= arg.total_items);
       continue;
     }
 
@@ -131,27 +132,27 @@ void test_mpmc_queue()
     Queue queue(3);
     Queue::ValueType value = 0;
 
-    ASSERT(queue.MaxSize() == 3);
-    ASSERT(queue.Size() == 0);
-    ASSERT(queue.EmptySize() == 3);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(queue.MaxSize() == 3);
+    TEST_ASSERT(queue.Size() == 0);
+    TEST_ASSERT(queue.EmptySize() == 3);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
 
-    ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Push(22) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Push(33) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Push(44) == LibXR::ErrorCode::FULL);
-    ASSERT(queue.Size() == 3);
-    ASSERT(queue.EmptySize() == 0);
+    TEST_ASSERT(queue.Push(11) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(22) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(33) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(44) == LibXR::ErrorCode::FULL);
+    TEST_ASSERT(queue.Size() == 3);
+    TEST_ASSERT(queue.EmptySize() == 0);
 
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(value == 11);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(value == 22);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(value == 33);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
-    ASSERT(queue.Size() == 0);
-    ASSERT(queue.EmptySize() == 3);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == 11);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == 22);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(value == 33);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(queue.Size() == 0);
+    TEST_ASSERT(queue.EmptySize() == 3);
   }
 
   // Repeat fill-and-drain cycles to verify FIFO order stays stable.
@@ -161,21 +162,21 @@ void test_mpmc_queue()
 
     for (size_t round = 0; round < 256; ++round)
     {
-      ASSERT(queue.Push(round * 4 + 0) == LibXR::ErrorCode::OK);
-      ASSERT(queue.Push(round * 4 + 1) == LibXR::ErrorCode::OK);
-      ASSERT(queue.Push(round * 4 + 2) == LibXR::ErrorCode::OK);
-      ASSERT(queue.Push(round * 4 + 3) == LibXR::ErrorCode::OK);
-      ASSERT(queue.Push(9999) == LibXR::ErrorCode::FULL);
+      TEST_ASSERT(queue.Push(round * 4 + 0) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(queue.Push(round * 4 + 1) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(queue.Push(round * 4 + 2) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(queue.Push(round * 4 + 3) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(queue.Push(9999) == LibXR::ErrorCode::FULL);
 
-      ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-      ASSERT(value == round * 4 + 0);
-      ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-      ASSERT(value == round * 4 + 1);
-      ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-      ASSERT(value == round * 4 + 2);
-      ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-      ASSERT(value == round * 4 + 3);
-      ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+      TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(value == round * 4 + 0);
+      TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(value == round * 4 + 1);
+      TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(value == round * 4 + 2);
+      TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+      TEST_ASSERT(value == round * 4 + 3);
+      TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
     }
   }
 
@@ -184,15 +185,15 @@ void test_mpmc_queue()
     LibXR::MPMCQueue<double> queue(2);
     double value = 0.0;
 
-    ASSERT(queue.Push(1.25) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Push(2.5) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Push(3.75) == LibXR::ErrorCode::FULL);
+    TEST_ASSERT(queue.Push(1.25) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(2.5) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Push(3.75) == LibXR::ErrorCode::FULL);
 
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(EqualDouble(value, 1.25));
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
-    ASSERT(EqualDouble(value, 2.5));
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(EqualDouble(value, 1.25));
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(EqualDouble(value, 2.5));
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
   }
 
   // Normal Push/Pop use byte payloads and do not require Payload{}.
@@ -201,10 +202,10 @@ void test_mpmc_queue()
     NoDefaultPayload pushed(77);
     NoDefaultPayload popped(0);
 
-    ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
-    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
-    ASSERT(popped.value == 77);
-    ASSERT(queue.Pop(popped) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(queue.Push(pushed) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Pop(popped) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(popped.value == 77);
+    TEST_ASSERT(queue.Pop(popped) == LibXR::ErrorCode::EMPTY);
   }
 
   // Two producers and two consumers with the smallest legal capacity.
@@ -254,23 +255,23 @@ void test_mpmc_queue()
       LibXR::Thread::Sleep(1);
     }
 
-    ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
-    ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
+    TEST_ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
+    TEST_ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
     for (auto& producer : producers)
     {
-      ASSERT(producer.Join() == LibXR::ErrorCode::OK);
+      TEST_ASSERT(producer.Join() == LibXR::ErrorCode::OK);
     }
     for (auto& consumer : consumers)
     {
-      ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
+      TEST_ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
     }
-    ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
-    ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
+    TEST_ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
 
     for (size_t index = 0; index < TOTAL_ITEMS; ++index)
     {
-      ASSERT(seen[index].load(std::memory_order_relaxed) == 1);
+      TEST_ASSERT(seen[index].load(std::memory_order_relaxed) == 1);
     }
   }
 
@@ -321,23 +322,23 @@ void test_mpmc_queue()
       LibXR::Thread::Sleep(1);
     }
 
-    ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
-    ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
+    TEST_ASSERT(produced_done_count.load(std::memory_order_acquire) == PRODUCER_COUNT);
+    TEST_ASSERT(consumed_done_count.load(std::memory_order_acquire) == CONSUMER_COUNT);
     for (auto& producer : producers)
     {
-      ASSERT(producer.Join() == LibXR::ErrorCode::OK);
+      TEST_ASSERT(producer.Join() == LibXR::ErrorCode::OK);
     }
     for (auto& consumer : consumers)
     {
-      ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
+      TEST_ASSERT(consumer.Join() == LibXR::ErrorCode::OK);
     }
-    ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
-    ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
-    ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(pop_count.load(std::memory_order_acquire) == TOTAL_ITEMS);
+    TEST_ASSERT(pop_sum.load(std::memory_order_acquire) == EXPECTED_SUM);
+    TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
 
     for (size_t index = 0; index < TOTAL_ITEMS; ++index)
     {
-      ASSERT(seen[index].load(std::memory_order_relaxed) == 1);
+      TEST_ASSERT(seen[index].load(std::memory_order_relaxed) == 1);
     }
   }
 }

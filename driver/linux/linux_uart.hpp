@@ -110,7 +110,7 @@ class LinuxUART : public UART
         _write_port(tx_queue_size, buffer_size)
   {
     ASSERT(buff_size_ > 0);
-    REQUIRE(tx_queue_size > 0);
+    ASSERT(tx_queue_size > 0);
 
     while (!std::filesystem::exists(dev_path))
     {
@@ -201,8 +201,8 @@ class LinuxUART : public UART
         _read_port(buffer_size, *this),
         _write_port(tx_queue_size, buffer_size)
   {
-    REQUIRE(tx_queue_size > 0);
-    REQUIRE(buff_size_ > 0);
+    ASSERT(tx_queue_size > 0);
+    ASSERT(buff_size_ > 0);
     while (!FindUSBTTYByVidPid(vid, pid, control_interface_name, serial, device_path_))
     {
       XR_LOG_WARN(
@@ -218,7 +218,7 @@ class LinuxUART : public UART
     if (std::filesystem::exists(device_path_) == false)
     {
       XR_LOG_ERROR("Cannot find UART device: %s", device_path_.c_str());
-      ASSERT(false);
+      REQUIRE(false);
       return;
     }
 
@@ -553,7 +553,7 @@ class LinuxUART : public UART
   /// attempt.
   void StartIoOwner(size_t thread_stack_size)
   {
-    REQUIRE(ValidateConfig(config_) == ErrorCode::OK);
+    ASSERT(ValidateConfig(config_) == ErrorCode::OK);
 
     wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     REQUIRE(wake_fd_ >= 0);
@@ -574,7 +574,7 @@ class LinuxUART : public UART
   /// 发布唤醒通知，已有未处理通知时允许合并 / Signal progress, coalescing pending wakes.
   void NotifyIoOwner()
   {
-    REQUIRE(wake_fd_ >= 0);
+    DEV_ASSERT(wake_fd_ >= 0);
     const uint64_t value = 1U;
     for (;;)
     {
@@ -680,7 +680,7 @@ class LinuxUART : public UART
       if (written > 0)
       {
         const size_t accepted = static_cast<size_t>(written);
-        REQUIRE(accepted <= first_size + second_size);
+        DEV_ASSERT(accepted <= first_size + second_size);
         return accepted;
       }
       if (written == 0)
@@ -769,7 +769,9 @@ class LinuxUART : public UART
       const ssize_t bytes = read(fd, rx_buff_, read_size);
       if (bytes > 0)
       {
-        REQUIRE(queue.PushBatch(rx_buff_, static_cast<size_t>(bytes)) == ErrorCode::OK);
+        [[maybe_unused]] const auto push_batch_result =
+            queue.PushBatch(rx_buff_, static_cast<size_t>(bytes));
+        DEV_ASSERT(push_batch_result == ErrorCode::OK);
         queue.Publish();
         budget -= static_cast<size_t>(bytes);
         continue;

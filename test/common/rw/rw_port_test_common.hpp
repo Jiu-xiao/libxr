@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "rw_thread_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -41,28 +42,28 @@ void VerifyPendingReadMode(TestMode mode)
     StartReadQueueCompleter(finisher, r, done, tx.data(), tx.size(), "rd_queue");
 
     auto block_result = r(RawData{rx.data(), rx.size()}, read.op);
-    ASSERT(block_result == ErrorCode::OK);
+    TEST_ASSERT(block_result == ErrorCode::OK);
 
     ExpectWaitOk(done);
     JoinThreadIfNeeded(finisher);
-    ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+    TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
     return;
   }
 
   auto call_result = r(RawData{rx.data(), rx.size()}, read.op);
-  ASSERT(call_result == ErrorCode::OK);
+  TEST_ASSERT(call_result == ErrorCode::OK);
   read.ExpectPendingSubmitted();
 
   {
     auto queue = r.GetReadQueue(false);
-    ASSERT(queue.PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
+    TEST_ASSERT(queue.PushBatch(tx.data(), tx.size()) == ErrorCode::OK);
     queue.Publish();
   }
   if (mode != TestMode::NONE)
   {
     read.ExpectFinal(ErrorCode::OK);
   }
-  ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+  TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
 }
 
 /**
@@ -85,24 +86,24 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
     StartWriteFinisher(finisher, w, done, result, "wr_finish");
 
     auto block_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
-    ASSERT(block_result == result);
+    TEST_ASSERT(block_result == result);
 
     ExpectWaitOk(done);
     JoinThreadIfNeeded(finisher);
-    ASSERT(w.Size() == 0);
+    TEST_ASSERT(w.Size() == 0);
     return;
   }
 
   auto call_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
-  ASSERT(call_result == ErrorCode::OK);
+  TEST_ASSERT(call_result == ErrorCode::OK);
 
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     if (result == ErrorCode::OK)
     {
       static uint8_t sink[16];
-      ASSERT(queue.AvailableSize() <= sizeof(sink));
+      TEST_ASSERT(queue.AvailableSize() <= sizeof(sink));
       queue.PopAll(sink);
     }
     else
@@ -114,7 +115,7 @@ void VerifyPendingWriteMode(TestMode mode, LibXR::ErrorCode result)
   {
     write.ExpectFinal(result);
   }
-  ASSERT(w.Size() == 0);
+  TEST_ASSERT(w.Size() == 0);
 }
 
 }  // namespace

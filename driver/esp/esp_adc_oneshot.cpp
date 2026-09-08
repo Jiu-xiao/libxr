@@ -18,7 +18,7 @@ namespace LibXR
 
 bool ESP32ADC::InitOneshot()
 {
-  ASSERT(oneshot_hal_ == nullptr);
+  DEV_ASSERT(oneshot_hal_ == nullptr);
   if (oneshot_hal_ != nullptr)
   {
     return false;

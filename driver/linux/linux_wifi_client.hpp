@@ -41,7 +41,7 @@ class LinuxWifiClient : public WifiClient
       if (iface.empty())
       {
         XR_LOG_ERROR("Wi-Fi interface not found");
-        ASSERT(false);
+        REQUIRE(false);
       }
       else
       {

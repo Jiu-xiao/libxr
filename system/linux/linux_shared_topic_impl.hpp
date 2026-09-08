@@ -1643,8 +1643,9 @@ class LinuxSharedTopic : public Topic
 
   static void ConsumeReady(SubscriberControl& control)
   {
-    const uint32_t prev = control.ready_sem_count.fetch_sub(1, std::memory_order_acq_rel);
-    ASSERT(prev > 0);
+    [[maybe_unused]] const uint32_t prev =
+        control.ready_sem_count.fetch_sub(1, std::memory_order_acq_rel);
+    DEV_ASSERT(prev > 0);
   }
 
   static ErrorCode WaitReady(SubscriberControl& control, uint32_t timeout_ms)
@@ -1850,7 +1851,7 @@ class LinuxSharedTopic : public Topic
   {
     const uint32_t prev =
         slots_[slot_index].refcount.fetch_sub(1, std::memory_order_acq_rel);
-    ASSERT(prev > 0);
+    DEV_ASSERT(prev > 0);
     if (prev == 1)
     {
       RecycleSlot(slot_index);

@@ -21,6 +21,7 @@
 
 #include "libxr.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxShmTopicTest
 {
@@ -87,8 +88,8 @@ inline void AssertFrame(const IPCFrame& frame, uint32_t expected_seq)
 {
   // 辅助内容：为后续测试准备或校验共享状态。
   // Helper coverage: prepare or validate shared state for later tests.
-  ASSERT(frame.seq == expected_seq);
-  ASSERT(frame.checksum == ComputeChecksum(frame));
+  TEST_ASSERT(frame.seq == expected_seq);
+  TEST_ASSERT(frame.checksum == ComputeChecksum(frame));
 }
 
 /**
@@ -122,7 +123,7 @@ inline void WaitForSubscriberNum(SharedTopic& topic, uint32_t expected_num)
   {
     usleep(10000);
   }
-  ASSERT(topic.GetSubscriberNum() == expected_num);
+  TEST_ASSERT(topic.GetSubscriberNum() == expected_num);
 }
 
 /**
@@ -137,9 +138,9 @@ inline void ExpectChildExit(pid_t child, int expected_code = 0)
   // 辅助内容：验证当前失败或退出预期。
   // Helper coverage: validate the current expected failure or exit condition.
   int status = 0;
-  ASSERT(waitpid(child, &status, 0) == child);
-  ASSERT(WIFEXITED(status));
-  ASSERT(WEXITSTATUS(status) == expected_code);
+  TEST_ASSERT(waitpid(child, &status, 0) == child);
+  TEST_ASSERT(WIFEXITED(status));
+  TEST_ASSERT(WEXITSTATUS(status) == expected_code);
 }
 
 void RunAttachQueueScenarios();

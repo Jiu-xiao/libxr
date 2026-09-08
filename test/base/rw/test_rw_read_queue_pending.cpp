@@ -4,6 +4,7 @@
  *        / Zero-length reads and background RX production tests.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -29,7 +30,7 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
     StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_zero_ready");
 
     auto ec = r(RawData{&dummy, 0}, read.op);
-    ASSERT(ec == ErrorCode::OK);
+    TEST_ASSERT(ec == ErrorCode::OK);
     ExpectWaitOk(done, SHORT_WAIT_MS);
     JoinThreadIfNeeded(finisher);
 
@@ -38,16 +39,16 @@ void test_rw_zero_read_pending_notifies_without_dequeue()
       read.ExpectFinal(ErrorCode::OK);
     }
 
-    ASSERT(dummy == 0xA0);
-    ASSERT(r.dequeue_count == 0);
-    ASSERT(r.Size() == sizeof(TX));
+    TEST_ASSERT(dummy == 0xA0);
+    TEST_ASSERT(r.dequeue_count == 0);
+    TEST_ASSERT(r.Size() == sizeof(TX));
 
     uint8_t follow_up[sizeof(TX)] = {};
     ReadOperation follow_op;
     ec = r(RawData{follow_up, sizeof(follow_up)}, follow_op);
-    ASSERT(ec == ErrorCode::OK);
-    ASSERT(std::memcmp(follow_up, TX, sizeof(TX)) == 0);
-    ASSERT(r.dequeue_count == 1);
+    TEST_ASSERT(ec == ErrorCode::OK);
+    TEST_ASSERT(std::memcmp(follow_up, TX, sizeof(TX)) == 0);
+    TEST_ASSERT(r.dequeue_count == 1);
   }
 }
 
@@ -70,11 +71,11 @@ void test_rw_read_port_block_queue_completion_copies_data()
   StartReadQueueCompleter(finisher, r, done, TX, sizeof(TX), "rd_queue_block");
 
   auto ec = r(RawData{rx, sizeof(rx)}, op);
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
-  ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(std::memcmp(rx, TX, sizeof(TX)) == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 }  // namespace

@@ -19,6 +19,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_flag`。 Test entry function `test_flag`.
@@ -31,44 +32,44 @@ void test_flag()
   // 测试内容：按文件头列出的测试项目顺序执行当前测试入口。
   // Test coverage: execute the test items listed in this file header in sequence.
   LibXR::Flag::Plain plain;
-  ASSERT(!plain.IsSet());
-  ASSERT(!plain.TestAndSet());
-  ASSERT(plain.IsSet());
-  ASSERT(plain.TestAndSet());
-  ASSERT(plain.TestAndClear());
-  ASSERT(!plain.IsSet());
-  ASSERT(!plain.TestAndClear());
-  ASSERT(!plain.Exchange(true));
-  ASSERT(plain.IsSet());
-  ASSERT(plain.Exchange(false));
-  ASSERT(!plain.IsSet());
+  TEST_ASSERT(!plain.IsSet());
+  TEST_ASSERT(!plain.TestAndSet());
+  TEST_ASSERT(plain.IsSet());
+  TEST_ASSERT(plain.TestAndSet());
+  TEST_ASSERT(plain.TestAndClear());
+  TEST_ASSERT(!plain.IsSet());
+  TEST_ASSERT(!plain.TestAndClear());
+  TEST_ASSERT(!plain.Exchange(true));
+  TEST_ASSERT(plain.IsSet());
+  TEST_ASSERT(plain.Exchange(false));
+  TEST_ASSERT(!plain.IsSet());
 
   {
     LibXR::Flag::ScopedRestore restore_outer(plain, true);
-    ASSERT(plain.IsSet());
+    TEST_ASSERT(plain.IsSet());
     {
       LibXR::Flag::ScopedRestore restore_inner(plain, false);
-      ASSERT(!plain.IsSet());
+      TEST_ASSERT(!plain.IsSet());
     }
-    ASSERT(plain.IsSet());
+    TEST_ASSERT(plain.IsSet());
   }
-  ASSERT(!plain.IsSet());
+  TEST_ASSERT(!plain.IsSet());
 
   LibXR::Flag::Atomic atomic;
-  ASSERT(!atomic.IsSet());
-  ASSERT(!atomic.TestAndSet());
-  ASSERT(atomic.IsSet());
-  ASSERT(atomic.TestAndSet());
-  ASSERT(atomic.Exchange(false));
-  ASSERT(!atomic.IsSet());
-  ASSERT(!atomic.Exchange(true));
-  ASSERT(atomic.IsSet());
+  TEST_ASSERT(!atomic.IsSet());
+  TEST_ASSERT(!atomic.TestAndSet());
+  TEST_ASSERT(atomic.IsSet());
+  TEST_ASSERT(atomic.TestAndSet());
+  TEST_ASSERT(atomic.Exchange(false));
+  TEST_ASSERT(!atomic.IsSet());
+  TEST_ASSERT(!atomic.Exchange(true));
+  TEST_ASSERT(atomic.IsSet());
   atomic.Clear();
-  ASSERT(!atomic.IsSet());
+  TEST_ASSERT(!atomic.IsSet());
 
   {
     LibXR::Flag::ScopedRestore restore(atomic, true);
-    ASSERT(atomic.IsSet());
+    TEST_ASSERT(atomic.IsSet());
   }
-  ASSERT(!atomic.IsSet());
+  TEST_ASSERT(!atomic.IsSet());
 }

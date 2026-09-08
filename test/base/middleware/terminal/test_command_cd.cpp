@@ -10,6 +10,7 @@
  *          2. Invalid paths do not corrupt the current directory or prompt.
  */
 #include "terminal_session_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -34,29 +35,29 @@ void TestCdBuiltins()
   dir1.Add(dir2);
 
   auto output = fixture.SendText("cd dir1\n");
-  ASSERT(fixture.terminal.current_dir_ == &dir1);
-  ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &dir1);
+  TEST_ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
 
   output = fixture.SendText("cd .\n");
-  ASSERT(fixture.terminal.current_dir_ == &dir1);
-  ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &dir1);
+  TEST_ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
 
   output = fixture.SendText("cd dir2\n");
-  ASSERT(fixture.terminal.current_dir_ == &dir2);
-  ASSERT(output.find("ramfs:dir2$ ") != std::string::npos);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &dir2);
+  TEST_ASSERT(output.find("ramfs:dir2$ ") != std::string::npos);
 
   output = fixture.SendText("cd ..\n");
-  ASSERT(fixture.terminal.current_dir_ == &dir1);
-  ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &dir1);
+  TEST_ASSERT(output.find("ramfs:dir1$ ") != std::string::npos);
 
   output = fixture.SendText("cd /\n");
-  ASSERT(fixture.terminal.current_dir_ == &fixture.ramfs.root_);
-  ASSERT(output.find("ramfs:/$ ") != std::string::npos);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &fixture.ramfs.root_);
+  TEST_ASSERT(output.find("ramfs:/$ ") != std::string::npos);
 
   output = fixture.SendText("cd missing\n");
-  ASSERT(fixture.terminal.current_dir_ == &fixture.ramfs.root_);
-  ASSERT(output.find("Command not found.") == std::string::npos);
-  ASSERT(output.find("ramfs:/$ ") != std::string::npos);
+  TEST_ASSERT(fixture.terminal.current_dir_ == &fixture.ramfs.root_);
+  TEST_ASSERT(output.find("Command not found.") == std::string::npos);
+  TEST_ASSERT(output.find("ramfs:/$ ") != std::string::npos);
 }
 
 }  // namespace

@@ -14,6 +14,7 @@
  *             TypeID matching.
  *          4. Typed delivery of non-trivial payloads.
  */
+#include "test_assert.hpp"
 #include "topic_test_common.hpp"
 
 namespace
@@ -33,7 +34,7 @@ void TestTopicSubscriberDispatch()
   // 测试内容：验证同一发布在不同订阅者类型上的 fan-out 与时间戳/ISR 语义。
   // Test coverage: verify fan-out of one publish across subscriber types plus
   // timestamp/ISR semantics.
-  ASSERT(LibXR::Topic::Find("missing_default_topic") == nullptr);
+  TEST_ASSERT(LibXR::Topic::Find("missing_default_topic") == nullptr);
 
   auto domain = LibXR::Topic::Domain("message_topic_domain");
   auto topic = LibXR::Topic::CreateTopic<double>("message_topic_tp", &domain);
@@ -73,7 +74,7 @@ void TestTopicSubscriberDispatch()
       [](bool, void*, const LibXR::Topic::MessageView<double>& message)
       {
         view_cb_timestamp = message.timestamp;
-        ASSERT(message.data != nullptr);
+        TEST_ASSERT(message.data != nullptr);
         view_cb_value = *message.data;
       },
       reinterpret_cast<void*>(0));
@@ -84,7 +85,7 @@ void TestTopicSubscriberDispatch()
       {
         raw_view_timestamp = message.timestamp;
         raw_view_size = message.payload.size_;
-        ASSERT(message.payload.addr_ != nullptr);
+        TEST_ASSERT(message.payload.addr_ != nullptr);
         raw_view_value = *static_cast<const double*>(message.payload.addr_);
       },
       reinterpret_cast<void*>(0));
@@ -96,7 +97,7 @@ void TestTopicSubscriberDispatch()
       {
         raw_arg_timestamp = timestamp;
         raw_arg_size = data.size_;
-        ASSERT(data.addr_ != nullptr);
+        TEST_ASSERT(data.addr_ != nullptr);
         raw_arg_value = *static_cast<const double*>(data.addr_);
       },
       reinterpret_cast<void*>(0));
@@ -106,44 +107,44 @@ void TestTopicSubscriberDispatch()
       [](bool, void*, LibXR::ConstRawData& data)
       {
         raw_mutable_arg_size = data.size_;
-        ASSERT(data.addr_ != nullptr);
+        TEST_ASSERT(data.addr_ != nullptr);
         raw_mutable_arg_value = *static_cast<const double*>(data.addr_);
       },
       reinterpret_cast<void*>(0));
   topic.RegisterCallback(raw_mutable_arg_cb);
 
-  ASSERT(!async_suber.Available());
+  TEST_ASSERT(!async_suber.Available());
 
   msg[0] = 16.16;
   const LibXR::MicrosecondTimestamp timestamp0(1001);
   async_suber.StartWaiting();
   topic.Publish(msg[0], timestamp0);
-  ASSERT(async_suber.Available());
-  ASSERT(async_suber.GetData() == msg[0]);
-  ASSERT(TimestampUs(async_suber.GetTimestamp()) == TimestampUs(timestamp0));
-  ASSERT(!async_suber.Available());
-  ASSERT(msg_queue.Size() == 1);
+  TEST_ASSERT(async_suber.Available());
+  TEST_ASSERT(async_suber.GetData() == msg[0]);
+  TEST_ASSERT(TimestampUs(async_suber.GetTimestamp()) == TimestampUs(timestamp0));
+  TEST_ASSERT(!async_suber.Available());
+  TEST_ASSERT(msg_queue.Size() == 1);
   double queue_value = 0.0;
   msg_queue.Pop(queue_value);
-  ASSERT(queue_value == msg[0]);
-  ASSERT(timed_msg_queue.Size() == 1);
+  TEST_ASSERT(queue_value == msg[0]);
+  TEST_ASSERT(timed_msg_queue.Size() == 1);
   LibXR::Topic::Message<double> queue_msg;
   timed_msg_queue.Pop(queue_msg);
-  ASSERT(queue_msg.data == msg[0]);
-  ASSERT(TimestampUs(queue_msg.timestamp) == TimestampUs(timestamp0));
-  ASSERT(msg[3] == msg[0]);
-  ASSERT(TimestampUs(cb_timestamp) == TimestampUs(timestamp0));
-  ASSERT(view_cb_value == msg[0]);
-  ASSERT(TimestampUs(view_cb_timestamp) == TimestampUs(timestamp0));
-  ASSERT(raw_view_value == msg[0]);
-  ASSERT(raw_view_size == sizeof(double));
-  ASSERT(TimestampUs(raw_view_timestamp) == TimestampUs(timestamp0));
-  ASSERT(raw_arg_value == msg[0]);
-  ASSERT(raw_arg_size == sizeof(double));
-  ASSERT(TimestampUs(raw_arg_timestamp) == TimestampUs(timestamp0));
-  ASSERT(raw_mutable_arg_value == msg[0]);
-  ASSERT(raw_mutable_arg_size == sizeof(double));
-  ASSERT(!cb_in_isr);
+  TEST_ASSERT(queue_msg.data == msg[0]);
+  TEST_ASSERT(TimestampUs(queue_msg.timestamp) == TimestampUs(timestamp0));
+  TEST_ASSERT(msg[3] == msg[0]);
+  TEST_ASSERT(TimestampUs(cb_timestamp) == TimestampUs(timestamp0));
+  TEST_ASSERT(view_cb_value == msg[0]);
+  TEST_ASSERT(TimestampUs(view_cb_timestamp) == TimestampUs(timestamp0));
+  TEST_ASSERT(raw_view_value == msg[0]);
+  TEST_ASSERT(raw_view_size == sizeof(double));
+  TEST_ASSERT(TimestampUs(raw_view_timestamp) == TimestampUs(timestamp0));
+  TEST_ASSERT(raw_arg_value == msg[0]);
+  TEST_ASSERT(raw_arg_size == sizeof(double));
+  TEST_ASSERT(TimestampUs(raw_arg_timestamp) == TimestampUs(timestamp0));
+  TEST_ASSERT(raw_mutable_arg_value == msg[0]);
+  TEST_ASSERT(raw_mutable_arg_size == sizeof(double));
+  TEST_ASSERT(!cb_in_isr);
 
   auto byte_stable_topic =
       LibXR::Topic::CreateTopic<ByteStablePayload>("byte_stable_tp", &domain);
@@ -153,7 +154,7 @@ void TestTopicSubscriberDispatch()
       [](bool, void*, const LibXR::Topic::MessageView<ByteStablePayload>& message)
       {
         byte_stable_view_timestamp = message.timestamp;
-        ASSERT(message.data != nullptr);
+        TEST_ASSERT(message.data != nullptr);
         byte_stable_view_value = message.data->data[2];
       },
       reinterpret_cast<void*>(0));
@@ -161,37 +162,38 @@ void TestTopicSubscriberDispatch()
   ByteStablePayload byte_stable_tx{1.0f, 2.0f, 3.0f, 4.0f};
   const LibXR::MicrosecondTimestamp byte_stable_timestamp(1501);
   byte_stable_topic.Publish(byte_stable_tx, byte_stable_timestamp);
-  ASSERT(byte_stable_view_value == byte_stable_tx.data[2]);
-  ASSERT(TimestampUs(byte_stable_view_timestamp) == TimestampUs(byte_stable_timestamp));
+  TEST_ASSERT(byte_stable_view_value == byte_stable_tx.data[2]);
+  TEST_ASSERT(TimestampUs(byte_stable_view_timestamp) ==
+              TimestampUs(byte_stable_timestamp));
 
   msg[0] = 32.32;
   msg[3] = -1.0f;
   const LibXR::MicrosecondTimestamp timestamp1(2002);
   async_suber.StartWaiting();
   topic.PublishFromCallback(msg[0], timestamp1, true);
-  ASSERT(async_suber.Available());
-  ASSERT(async_suber.GetData() == msg[0]);
-  ASSERT(TimestampUs(async_suber.GetTimestamp()) == TimestampUs(timestamp1));
-  ASSERT(msg_queue.Size() == 1);
+  TEST_ASSERT(async_suber.Available());
+  TEST_ASSERT(async_suber.GetData() == msg[0]);
+  TEST_ASSERT(TimestampUs(async_suber.GetTimestamp()) == TimestampUs(timestamp1));
+  TEST_ASSERT(msg_queue.Size() == 1);
   msg_queue.Pop(queue_value);
-  ASSERT(queue_value == msg[0]);
-  ASSERT(timed_msg_queue.Size() == 1);
+  TEST_ASSERT(queue_value == msg[0]);
+  TEST_ASSERT(timed_msg_queue.Size() == 1);
   timed_msg_queue.Pop(queue_msg);
-  ASSERT(queue_msg.data == msg[0]);
-  ASSERT(TimestampUs(queue_msg.timestamp) == TimestampUs(timestamp1));
-  ASSERT(msg[3] == msg[0]);
-  ASSERT(TimestampUs(cb_timestamp) == TimestampUs(timestamp1));
-  ASSERT(cb_in_isr);
-  ASSERT(view_cb_value == msg[0]);
-  ASSERT(TimestampUs(view_cb_timestamp) == TimestampUs(timestamp1));
-  ASSERT(raw_view_value == msg[0]);
-  ASSERT(raw_view_size == sizeof(double));
-  ASSERT(TimestampUs(raw_view_timestamp) == TimestampUs(timestamp1));
-  ASSERT(raw_arg_value == msg[0]);
-  ASSERT(raw_arg_size == sizeof(double));
-  ASSERT(TimestampUs(raw_arg_timestamp) == TimestampUs(timestamp1));
-  ASSERT(raw_mutable_arg_value == msg[0]);
-  ASSERT(raw_mutable_arg_size == sizeof(double));
+  TEST_ASSERT(queue_msg.data == msg[0]);
+  TEST_ASSERT(TimestampUs(queue_msg.timestamp) == TimestampUs(timestamp1));
+  TEST_ASSERT(msg[3] == msg[0]);
+  TEST_ASSERT(TimestampUs(cb_timestamp) == TimestampUs(timestamp1));
+  TEST_ASSERT(cb_in_isr);
+  TEST_ASSERT(view_cb_value == msg[0]);
+  TEST_ASSERT(TimestampUs(view_cb_timestamp) == TimestampUs(timestamp1));
+  TEST_ASSERT(raw_view_value == msg[0]);
+  TEST_ASSERT(raw_view_size == sizeof(double));
+  TEST_ASSERT(TimestampUs(raw_view_timestamp) == TimestampUs(timestamp1));
+  TEST_ASSERT(raw_arg_value == msg[0]);
+  TEST_ASSERT(raw_arg_size == sizeof(double));
+  TEST_ASSERT(TimestampUs(raw_arg_timestamp) == TimestampUs(timestamp1));
+  TEST_ASSERT(raw_mutable_arg_value == msg[0]);
+  TEST_ASSERT(raw_mutable_arg_size == sizeof(double));
 }
 
 }  // namespace

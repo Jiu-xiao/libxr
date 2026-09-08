@@ -3,6 +3,7 @@
  * @brief Pipe 流提交与复用测试 / Pipe stream submission and reuse tests.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 验证 Pipe 阻塞流提交不残留信号量
@@ -18,7 +19,7 @@ void test_pipe_stream_block_immediate_path()
 
   uint8_t rx[8] = {0};
   ReadOperation rop;
-  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+  TEST_ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
 
   Semaphore sem;
   WriteOperation wop(sem, 100);
@@ -28,11 +29,11 @@ void test_pipe_stream_block_immediate_path()
   ws << ConstRawData{A, sizeof(A)} << ConstRawData{B, sizeof(B)};
 
   auto ec = ws.Commit();
-  ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(ec == ErrorCode::OK);
 
   static const uint8_t EXPECT[] = {0x21, 0x22, 0x23, 0x31, 0x32, 0x33, 0x34, 0x35};
-  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 /**
@@ -51,20 +52,20 @@ void test_pipe_stream_commit_releases_lock_for_next_stream()
   uint8_t rx[sizeof(A) + sizeof(B)] = {0};
 
   ReadOperation rop;
-  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+  TEST_ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
 
   WriteOperation op1;
   WritePort::Stream ws1(&w, op1);
   ws1 << ConstRawData{A, sizeof(A)};
-  ASSERT(ws1.Commit() == ErrorCode::OK);
+  TEST_ASSERT(ws1.Commit() == ErrorCode::OK);
 
   WriteOperation op2;
   WritePort::Stream ws2(&w, op2);
   ws2 << ConstRawData{B, sizeof(B)};
-  ASSERT(ws2.Commit() == ErrorCode::OK);
+  TEST_ASSERT(ws2.Commit() == ErrorCode::OK);
 
   static const uint8_t EXPECT[] = {0x10, 0x11, 0x12, 0x20, 0x21, 0x22, 0x23};
-  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  TEST_ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
 /**
@@ -85,23 +86,23 @@ void test_pipe_stream_commit_allows_persistent_and_external_streams()
   uint8_t rx[sizeof(A) + sizeof(B) + sizeof(C)] = {0};
 
   ReadOperation rop;
-  ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
+  TEST_ASSERT(r(RawData{rx, sizeof(rx)}, rop) == ErrorCode::OK);
 
   WriteOperation owner_op;
   WritePort::Stream owner(&w, owner_op);
   owner << ConstRawData{A, sizeof(A)};
-  ASSERT(owner.Commit() == ErrorCode::OK);
+  TEST_ASSERT(owner.Commit() == ErrorCode::OK);
 
   WriteOperation external_op;
   WritePort::Stream external(&w, external_op);
   external << ConstRawData{B, sizeof(B)};
-  ASSERT(external.Commit() == ErrorCode::OK);
+  TEST_ASSERT(external.Commit() == ErrorCode::OK);
 
   owner << ConstRawData{C, sizeof(C)};
-  ASSERT(owner.Commit() == ErrorCode::OK);
+  TEST_ASSERT(owner.Commit() == ErrorCode::OK);
 
   static const uint8_t EXPECT[] = {'T', '1', 'E', 'X', 'T', 'T', '2', '!'};
-  ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
+  TEST_ASSERT(std::memcmp(rx, EXPECT, sizeof(EXPECT)) == 0);
 }
 
 /**

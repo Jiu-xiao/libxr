@@ -26,6 +26,7 @@
 #include "libxr_def.hpp"
 #include "libxr_pipe.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_terminal`。 Test entry function `test_terminal`.
@@ -52,9 +53,9 @@ void test_terminal()
       "run",
       [](int* count, int argc, char** argv)
       {
-        ASSERT(argc == 1);
-        ASSERT(std::strcmp(argv[0], "dir1/dir2/dir3/run") == 0 ||
-               std::strcmp(argv[0], "/dir1/dir2/dir3/run") == 0);
+        TEST_ASSERT(argc == 1);
+        TEST_ASSERT(std::strcmp(argv[0], "dir1/dir2/dir3/run") == 0 ||
+                    std::strcmp(argv[0], "/dir1/dir2/dir3/run") == 0);
         (*count)++;
         return 0;
       },
@@ -72,16 +73,16 @@ void test_terminal()
   dir_3.Add(data_file);
 
   char absolute_path[] = "/dir1/dir2/dir3";
-  ASSERT(terminal.Path2Dir(absolute_path) == &dir_3);
-  ASSERT(std::strcmp(absolute_path, "/dir1/dir2/dir3") == 0);
+  TEST_ASSERT(terminal.Path2Dir(absolute_path) == &dir_3);
+  TEST_ASSERT(std::strcmp(absolute_path, "/dir1/dir2/dir3") == 0);
 
   char root_path[] = "/";
-  ASSERT(terminal.Path2Dir(root_path) == &ramfs.root_);
-  ASSERT(std::strcmp(root_path, "/") == 0);
+  TEST_ASSERT(terminal.Path2Dir(root_path) == &ramfs.root_);
+  TEST_ASSERT(std::strcmp(root_path, "/") == 0);
 
   char relative_path[] = "dir1/dir2/dir3";
-  ASSERT(terminal.Path2Dir(relative_path) == &dir_3);
-  ASSERT(std::strcmp(relative_path, "dir1/dir2/dir3") == 0);
+  TEST_ASSERT(terminal.Path2Dir(relative_path) == &dir_3);
+  TEST_ASSERT(std::strcmp(relative_path, "dir1/dir2/dir3") == 0);
 
   auto run_terminal_until_idle = [&]()
   {
@@ -94,14 +95,14 @@ void test_terminal()
         return;
       }
     }
-    ASSERT(false);
+    TEST_ASSERT(false);
   };
 
   auto write_raw = [&](const void* data, size_t size)
   {
     LibXR::WriteOperation write_op;
-    ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
-           LibXR::ErrorCode::OK);
+    TEST_ASSERT(input.GetWritePort()(LibXR::ConstRawData{data, size}, write_op) ==
+                LibXR::ErrorCode::OK);
     run_terminal_until_idle();
   };
 
@@ -109,11 +110,11 @@ void test_terminal()
   { write_raw(command_line, std::strlen(command_line)); };
 
   write_line("dir1/dir2/dir3/run\n");
-  ASSERT(command_count == 1);
+  TEST_ASSERT(command_count == 1);
   write_line("/dir1/dir2/dir3/run\n");
-  ASSERT(command_count == 2);
+  TEST_ASSERT(command_count == 2);
   write_line("/dir1/dir2/dir3/data\n");
-  ASSERT(command_count == 2);
+  TEST_ASSERT(command_count == 2);
   write_line("unknown\n");
   write_line("alph\t\n");
   const unsigned char non_printable_unknown[] = {0xFF, 'u', 'n', 'k', 'n',
@@ -121,18 +122,18 @@ void test_terminal()
   write_raw(non_printable_unknown, sizeof(non_printable_unknown));
 
   const size_t output_size = output.GetReadPort().Size();
-  ASSERT(output_size > 0);
+  TEST_ASSERT(output_size > 0);
 
   std::vector<char> terminal_output(output_size + 1, '\0');
   LibXR::ReadOperation read_op;
-  ASSERT(output.GetReadPort()(LibXR::RawData{terminal_output.data(), output_size},
-                              read_op) == LibXR::ErrorCode::OK);
-  ASSERT(std::strstr(terminal_output.data(), "Not an executable file.") != nullptr);
-  ASSERT(std::strstr(terminal_output.data(), "Command not found.") != nullptr);
-  ASSERT(std::memchr(terminal_output.data(), static_cast<unsigned char>(0xFF),
-                     output_size) == nullptr);
-  ASSERT(std::strstr(terminal_output.data(), "alpha") != nullptr);
-  ASSERT(std::strstr(terminal_output.data(), "alphabet") != nullptr);
+  TEST_ASSERT(output.GetReadPort()(LibXR::RawData{terminal_output.data(), output_size},
+                                   read_op) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(std::strstr(terminal_output.data(), "Not an executable file.") != nullptr);
+  TEST_ASSERT(std::strstr(terminal_output.data(), "Command not found.") != nullptr);
+  TEST_ASSERT(std::memchr(terminal_output.data(), static_cast<unsigned char>(0xFF),
+                          output_size) == nullptr);
+  TEST_ASSERT(std::strstr(terminal_output.data(), "alpha") != nullptr);
+  TEST_ASSERT(std::strstr(terminal_output.data(), "alphabet") != nullptr);
 
   size_t command_not_found_count = 0;
   const char* search = terminal_output.data();
@@ -141,5 +142,5 @@ void test_terminal()
     command_not_found_count++;
     search += std::strlen("Command not found.");
   }
-  ASSERT(command_not_found_count == 2);
+  TEST_ASSERT(command_not_found_count == 2);
 }

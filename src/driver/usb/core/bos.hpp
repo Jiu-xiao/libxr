@@ -207,7 +207,7 @@ class BosManager
     for (size_t i = 0; i < count_; ++i)
     {
       ConstRawData blk = caps_[i]->GetCapabilityDescriptor();
-      ASSERT(offset + blk.size_ <= bos_buffer_.size_);
+      DEV_ASSERT(offset + blk.size_ <= bos_buffer_.size_);
 
       LibXR::Memory::FastCopy(&buffer[offset], blk.addr_, blk.size_);
       offset += blk.size_;
@@ -215,7 +215,7 @@ class BosManager
 
     if (NEED_AUTO_USB2_EXT)
     {
-      ASSERT(offset + sizeof(USB2_EXT_CAP) <= bos_buffer_.size_);
+      DEV_ASSERT(offset + sizeof(USB2_EXT_CAP) <= bos_buffer_.size_);
       LibXR::Memory::FastCopy(&buffer[offset], USB2_EXT_CAP, sizeof(USB2_EXT_CAP));
       offset += sizeof(USB2_EXT_CAP);
     }

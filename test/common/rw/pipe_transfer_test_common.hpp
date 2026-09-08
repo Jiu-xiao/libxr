@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "rw_port_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -63,11 +64,11 @@ void ExpectCallResult(Harness& harness, LibXR::ErrorCode call_result,
 {
   if (harness.mode == TestMode::BLOCK)
   {
-    ASSERT(call_result == final_result);
+    TEST_ASSERT(call_result == final_result);
   }
   else
   {
-    ASSERT(call_result == LibXR::ErrorCode::OK);
+    TEST_ASSERT(call_result == LibXR::ErrorCode::OK);
     harness.ExpectFinal(final_result);
   }
 }
@@ -97,7 +98,7 @@ void VerifyPendingReadThenWrite(TestMode read_mode, TestMode write_mode, size_t 
     StartDelayedPipeWriter(writer, ctx, "pipe_write_async");
 
     auto read_result = r(RawData{rx.data(), rx.size()}, read.op);
-    ASSERT(read_result == ErrorCode::OK);
+    TEST_ASSERT(read_result == ErrorCode::OK);
     ExpectWaitOk(write_done);
     JoinThreadIfNeeded(writer);
     ExpectCallResult(write, ctx.result, ErrorCode::OK);
@@ -105,7 +106,7 @@ void VerifyPendingReadThenWrite(TestMode read_mode, TestMode write_mode, size_t 
   else
   {
     auto read_result = r(RawData{rx.data(), rx.size()}, read.op);
-    ASSERT(read_result == ErrorCode::OK);
+    TEST_ASSERT(read_result == ErrorCode::OK);
     read.ExpectPendingSubmitted();
 
     auto write_result = w(ConstRawData{tx.data(), tx.size()}, write.op);
@@ -113,7 +114,7 @@ void VerifyPendingReadThenWrite(TestMode read_mode, TestMode write_mode, size_t 
     read.ExpectFinal(ErrorCode::OK);
   }
 
-  ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+  TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
 }
 
 void VerifyWriteThenRead(TestMode write_mode, TestMode read_mode, size_t size,
@@ -138,8 +139,8 @@ void VerifyWriteThenRead(TestMode write_mode, TestMode read_mode, size_t size,
   auto read_result = r(RawData{rx.data(), rx.size()}, read.op);
   ExpectCallResult(read, read_result, ErrorCode::OK);
 
-  ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-  ASSERT(r.Size() == 0);
+  TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+  TEST_ASSERT(r.Size() == 0);
 }
 
 }  // namespace

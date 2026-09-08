@@ -5,6 +5,7 @@
  */
 #include "linux_database_test_common.hpp"
 #include "raw_database_test_groups.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -31,10 +32,10 @@ void TestDatabaseRawInvalidMainKeyMetadataReinitializes()
   MarkMainFirstKeyAsUninitialized(bytes);
   WriteAllBytes(path, bytes);
 
-  ASSERT(ReopenDatabaseValue(path, 77) == 77);
+  TEST_ASSERT(ReopenDatabaseValue(path, 77) == 77);
   auto repaired = ReadAllBytes(path);
-  ASSERT(ReadLe32(repaired, 0) == XR_DB_FLASH_HEADER);
-  ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
+  TEST_ASSERT(ReadLe32(repaired, 0) == XR_DB_FLASH_HEADER);
+  TEST_ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
 }
 
 /**
@@ -59,7 +60,7 @@ void TestDatabaseRawInvalidBackupMetadataDoesNotRestore()
   InvalidateMainChecksum(bytes);
   WriteAllBytes(path, bytes);
 
-  ASSERT(ReopenDatabaseValue(path, 55) == 55);
+  TEST_ASSERT(ReopenDatabaseValue(path, 55) == 55);
   AssertMainValidBackupInvalid(path);
 }
 
@@ -84,7 +85,7 @@ void TestDatabaseRawRestoresFromValidBackup()
   InvalidateMainChecksum(bytes);
   WriteAllBytes(path, bytes);
 
-  ASSERT(ReopenDatabaseValue(path, 55) == 1234);
+  TEST_ASSERT(ReopenDatabaseValue(path, 55) == 1234);
   AssertMainValidBackupInvalid(path);
 }
 
@@ -108,11 +109,11 @@ void TestDatabaseRawCorruptFirstKeySizeInMultiKeyDatabaseReinitializes()
   CorruptMainFirstKeyRawInfo(bytes, 0x7FFFFFFFU);
   WriteAllBytes(path, bytes);
 
-  ASSERT(ReopenDatabaseValue(path, 77, "key1") == 77);
-  ASSERT(ReopenDatabaseValue(path, 88, "key2") == 88);
+  TEST_ASSERT(ReopenDatabaseValue(path, 77, "key1") == 77);
+  TEST_ASSERT(ReopenDatabaseValue(path, 88, "key2") == 88);
   auto repaired = ReadAllBytes(path);
-  ASSERT(ReadLe32(repaired, 0) == XR_DB_FLASH_HEADER);
-  ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
+  TEST_ASSERT(ReadLe32(repaired, 0) == XR_DB_FLASH_HEADER);
+  TEST_ASSERT(ReadLe32(repaired, XR_DB_CHECKSUM_OFFSET) == XR_DB_CHECKSUM);
 }
 
 }  // namespace

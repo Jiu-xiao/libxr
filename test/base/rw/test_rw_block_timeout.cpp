@@ -4,6 +4,7 @@
  *        / RW timeout, unconfigured-port, and capacity tests.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -25,23 +26,23 @@ void test_rw_block_read_timeout_detaches_pending()
   ReadOperation block_op(sem, 0);
 
   auto ec = r(RawData{timed_out_rx, sizeof(timed_out_rx)}, block_op);
-  ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
 
   static const uint8_t STALE_EXPECT[] = {0xA1, 0xA2, 0xA3, 0xA4};
-  ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
+  TEST_ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
 
   static const uint8_t TX[] = {0x10, 0x20, 0x30, 0x40};
   WriteOperation wop;
   ec = w(ConstRawData{TX, sizeof(TX)}, wop);
-  ASSERT(ec == ErrorCode::OK);
-  ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(std::memcmp(timed_out_rx, STALE_EXPECT, sizeof(STALE_EXPECT)) == 0);
+  TEST_ASSERT(sem.Value() == 0);
 
   uint8_t fresh_rx[sizeof(TX)] = {0};
   ReadOperation rop;
   ec = r(RawData{fresh_rx, sizeof(fresh_rx)}, rop);
-  ASSERT(ec == ErrorCode::OK);
-  ASSERT(std::memcmp(fresh_rx, TX, sizeof(TX)) == 0);
+  TEST_ASSERT(ec == ErrorCode::OK);
+  TEST_ASSERT(std::memcmp(fresh_rx, TX, sizeof(TX)) == 0);
 }
 
 /**
@@ -61,30 +62,30 @@ void test_rw_block_write_timeout_detaches_waiter()
   Semaphore sem1;
   WriteOperation op1(sem1, 0);
   auto ec = w(ConstRawData{TX1, sizeof(TX1)}, op1);
-  ASSERT(ec == ErrorCode::TIMEOUT);
-  ASSERT(sem1.Value() == 0);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem1.Value() == 0);
 
   static uint8_t sink[sizeof(TX1)] = {};
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     queue.PopAll(sink);
   }
 
   Semaphore sem2;
   WriteOperation op2(sem2, 0);
   ec = w(ConstRawData{TX2, sizeof(TX2)}, op2);
-  ASSERT(ec == ErrorCode::TIMEOUT);
-  ASSERT(sem2.Value() == 0);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem2.Value() == 0);
 
   static uint8_t sink2[sizeof(TX2)] = {};
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     queue.PopAll(sink2);
   }
-  ASSERT(sem1.Value() == 0);
-  ASSERT(sem2.Value() == 0);
+  TEST_ASSERT(sem1.Value() == 0);
+  TEST_ASSERT(sem2.Value() == 0);
 }
 
 /**
@@ -98,22 +99,22 @@ void test_rw_admission_and_capacity_errors()
   ReadPort unbound(0);
   ReadOperation read_op;
   uint8_t byte = 0;
-  ASSERT(unbound(RawData{&byte, 1}, read_op) == ErrorCode::NOT_SUPPORT);
-  ASSERT(unbound(RawData{nullptr, 0}, read_op) == ErrorCode::NOT_SUPPORT);
+  TEST_ASSERT(unbound(RawData{&byte, 1}, read_op) == ErrorCode::NOT_SUPPORT);
+  TEST_ASSERT(unbound(RawData{nullptr, 0}, read_op) == ErrorCode::NOT_SUPPORT);
 
   ReadPort read(1);
-  ASSERT(read(RawData{&byte, 2}, read_op) == ErrorCode::SIZE_ERR);
-  ASSERT(read.Size() == 0);
+  TEST_ASSERT(read(RawData{&byte, 2}, read_op) == ErrorCode::SIZE_ERR);
+  TEST_ASSERT(read.Size() == 0);
 
   WritePort unconfigured(2, 1);
   WriteOperation write_op;
-  ASSERT(unconfigured(ConstRawData{&byte, 1}, write_op) == ErrorCode::NOT_SUPPORT);
+  TEST_ASSERT(unconfigured(ConstRawData{&byte, 1}, write_op) == ErrorCode::NOT_SUPPORT);
 
   WritePort full(2, 1);
   full = PendingWriteFun;
   const uint8_t pair[2] = {0x55, 0x66};
-  ASSERT(full(ConstRawData{pair, sizeof(pair)}, write_op) == ErrorCode::FULL);
-  ASSERT(full.Size() == 0);
+  TEST_ASSERT(full(ConstRawData{pair, sizeof(pair)}, write_op) == ErrorCode::FULL);
+  TEST_ASSERT(full.Size() == 0);
 }
 
 }  // namespace

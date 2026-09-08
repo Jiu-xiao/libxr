@@ -18,6 +18,7 @@
 #include "libxr_def.hpp"
 #include "libxr_pipe.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -47,7 +48,7 @@ struct TerminalDisplayFixture
    */
   std::string FlushOutput()
   {
-    ASSERT(terminal.write_stream_.Commit() == LibXR::ErrorCode::OK);
+    TEST_ASSERT(terminal.write_stream_.Commit() == LibXR::ErrorCode::OK);
 
     const size_t output_size = output.GetReadPort().Size();
     if (output_size == 0)
@@ -57,8 +58,8 @@ struct TerminalDisplayFixture
 
     std::string text(output_size, '\0');
     LibXR::ReadOperation read_op;
-    ASSERT(output.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
-           LibXR::ErrorCode::OK);
+    TEST_ASSERT(output.GetReadPort()(LibXR::RawData{text.data(), output_size}, read_op) ==
+                LibXR::ErrorCode::OK);
     return text;
   }
 };

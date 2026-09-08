@@ -54,7 +54,7 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   ASSERT(tx_enable || rx_enable);
   if (tx_enable)
   {
-    REQUIRE(tx_queue_size > 0U);
+    ASSERT(tx_queue_size > 0U);
     ASSERT(dma_tx_channel_ != nullptr);
     ASSERT(CH32_UART_TX_DMA_IT_MAP[id] != 0);
   }
@@ -109,9 +109,9 @@ CH32UART::CH32UART(ch32_uart_id_t id, RawData dma_rx, RawData dma_tx,
   RCC_AHBPeriphClockCmd(CH32_UART_RCC_PERIPH_MAP_DMA[id], ENABLE);
 
   // 设置初始串口参数 / Apply initial UART settings.
-  REQUIRE(config.baudrate > 0U);
-  REQUIRE(Ch32DataBitsSupported(config));
-  REQUIRE(Ch32StopBitsSupported(config));
+  ASSERT(config.baudrate > 0U);
+  ASSERT(Ch32DataBitsSupported(config));
+  ASSERT(Ch32StopBitsSupported(config));
   USART_InitTypeDef usart_cfg = {};
   usart_cfg.USART_BaudRate = config.baudrate;
   usart_cfg.USART_StopBits =
@@ -274,7 +274,7 @@ void CH32UART::ApplyConfig(UART::Configuration config)
           config.data_bits == 7U ? USART_WordLength_8b : USART_WordLength_9b;
       break;
     default:
-      REQUIRE(false);
+      DEV_ASSERT(false);
       return;
   }
 
@@ -316,7 +316,7 @@ void CH32UART::HandleTxService(uint32_t events, bool in_isr)
     }
     else
     {
-      REQUIRE_FROM_CALLBACK(state == ConfigState::PUBLISHED, in_isr);
+      DEV_ASSERT_FROM_CALLBACK(state == ConfigState::PUBLISHED, in_isr);
     }
   }
 
@@ -381,7 +381,7 @@ void CH32UART::FillTx(bool in_isr)
           return;
         }
         size = queue.AvailableSize();
-        REQUIRE_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
+        DEV_ASSERT_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
         queue.PopAll(dma_buff_tx_.ActiveBuffer());
         dma_buff_tx_.SetActiveLength(size);
       }
@@ -401,7 +401,7 @@ void CH32UART::FillTx(bool in_isr)
     if (!queue.Empty())
     {
       const size_t size = queue.AvailableSize();
-      REQUIRE_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
+      DEV_ASSERT_FROM_CALLBACK(size <= dma_buff_tx_.Size(), in_isr);
       queue.PopAll(dma_buff_tx_.PendingBuffer());
       dma_buff_tx_.SetPendingLength(size);
       dma_buff_tx_.EnablePending();
@@ -446,7 +446,7 @@ void CH32UART::TryApplyConfig(bool in_isr)
   if ((uart_mode_ & USART_Mode_Rx) != 0U && dma_buff_rx_.size_ != 0U)
   {
     const size_t remaining = dma_rx_channel_->CNTR;
-    REQUIRE_FROM_CALLBACK(remaining <= dma_buff_rx_.size_, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(remaining <= dma_buff_rx_.size_, in_isr);
     const size_t position =
         remaining == 0U ? dma_buff_rx_.size_ : dma_buff_rx_.size_ - remaining;
     last_rx_pos_ = position == dma_buff_rx_.size_ ? 0U : position;
@@ -459,7 +459,7 @@ void CH32UART::TryApplyConfig(bool in_isr)
 void CH32UART::StartTxDma(bool in_isr)
 {
   const size_t size = dma_buff_tx_.GetActiveLength();
-  REQUIRE_FROM_CALLBACK(size != 0U && size <= dma_buff_tx_.Size(), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(size != 0U && size <= dma_buff_tx_.Size(), in_isr);
 
   DMA_Cmd(dma_tx_channel_, DISABLE);
   dma_tx_channel_->MADDR = reinterpret_cast<uint32_t>(dma_buff_tx_.ActiveBuffer());
@@ -477,10 +477,10 @@ void CH32UART::HandleRxData(bool in_isr)
   }
 
   const size_t remaining = dma_rx_channel_->CNTR;
-  REQUIRE_FROM_CALLBACK(remaining <= dma_size, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(remaining <= dma_size, in_isr);
   const size_t curr_pos = remaining == 0U ? dma_size : dma_size - remaining;
   const size_t last_pos = last_rx_pos_;
-  REQUIRE_FROM_CALLBACK(last_pos < dma_size, in_isr);
+  DEV_ASSERT_FROM_CALLBACK(last_pos < dma_size, in_isr);
 
   if (curr_pos != last_pos)
   {
@@ -495,18 +495,16 @@ void CH32UART::HandleRxData(bool in_isr)
       const size_t first_accepted = std::min(first_size, accepted);
       if (first_accepted != 0U)
       {
-        REQUIRE_FROM_CALLBACK(
-            queue.PushBatch(static_cast<const uint8_t*>(dma_buff_rx_.addr_) + last_pos,
-                            first_accepted) == ErrorCode::OK,
-            in_isr);
+        [[maybe_unused]] const auto push_batch_result = queue.PushBatch(
+            static_cast<const uint8_t*>(dma_buff_rx_.addr_) + last_pos, first_accepted);
+        DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
         accepted -= first_accepted;
       }
       if (accepted != 0U)
       {
-        REQUIRE_FROM_CALLBACK(
-            queue.PushBatch(static_cast<const uint8_t*>(dma_buff_rx_.addr_), accepted) ==
-                ErrorCode::OK,
-            in_isr);
+        [[maybe_unused]] const auto push_batch_result =
+            queue.PushBatch(static_cast<const uint8_t*>(dma_buff_rx_.addr_), accepted);
+        DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
       }
     }
 

@@ -10,6 +10,7 @@
  *          2. Insert/delete redraw suffixes with a non-zero cursor offset.
  */
 #include "terminal_display_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -38,18 +39,18 @@ void TestHistoryDisplayAndRestore()
   fixture.terminal.history_index_ = 0;
   fixture.terminal.offset_ = -3;
   fixture.terminal.ShowHistory();
-  ASSERT(fixture.terminal.offset_ == 0);
-  ASSERT(fixture.FlushOutput() == "\033[2K\rramfs:/$ beta");
+  TEST_ASSERT(fixture.terminal.offset_ == 0);
+  TEST_ASSERT(fixture.FlushOutput() == "\033[2K\rramfs:/$ beta");
 
   fixture.terminal.history_index_ = 1;
   fixture.terminal.ShowHistory();
-  ASSERT(fixture.FlushOutput() == "\033[2K\rramfs:/$ alpha");
+  TEST_ASSERT(fixture.FlushOutput() == "\033[2K\rramfs:/$ alpha");
 
   fixture.terminal.CopyHistoryToInputLine();
-  ASSERT(fixture.terminal.history_index_ == -1);
-  ASSERT(fixture.terminal.offset_ == 0);
-  ASSERT(fixture.terminal.input_line_.Size() == 5);
-  ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "alpha") == 0);
+  TEST_ASSERT(fixture.terminal.history_index_ == -1);
+  TEST_ASSERT(fixture.terminal.offset_ == 0);
+  TEST_ASSERT(fixture.terminal.input_line_.Size() == 5);
+  TEST_ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "alpha") == 0);
 }
 
 /**
@@ -71,12 +72,12 @@ void TestMidLineDisplayEditing()
   FillInputLine(fixture.terminal, "ab");
   fixture.terminal.offset_ = -1;
   fixture.terminal.DisplayChar('X');
-  ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "aXb") == 0);
-  ASSERT(fixture.FlushOutput() == "X\033[s\033[Kb\033[u");
+  TEST_ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "aXb") == 0);
+  TEST_ASSERT(fixture.FlushOutput() == "X\033[s\033[Kb\033[u");
 
   fixture.terminal.DeleteChar();
-  ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "ab") == 0);
-  ASSERT(fixture.FlushOutput() == "\b \b\033[s\033[Kb\033[u");
+  TEST_ASSERT(std::strcmp(&fixture.terminal.input_line_[0], "ab") == 0);
+  TEST_ASSERT(fixture.FlushOutput() == "\b \b\033[s\033[Kb\033[u");
 }
 
 }  // namespace

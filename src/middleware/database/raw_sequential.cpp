@@ -63,17 +63,20 @@ uint32_t DatabaseRawSequential::KeyInfo::GetDataSize() const
 
 void DatabaseRawSequential::ReadFlashOrExit(size_t offset, RawData data)
 {
-  REQUIRE(flash_.Read(offset, data) == ErrorCode::OK);
+  [[maybe_unused]] const auto flash_io_result = flash_.Read(offset, data);
+  REQUIRE(flash_io_result == ErrorCode::OK);
 }
 
 void DatabaseRawSequential::WriteFlashOrExit(size_t offset, ConstRawData data)
 {
-  REQUIRE(flash_.Write(offset, data) == ErrorCode::OK);
+  [[maybe_unused]] const auto flash_io_result = flash_.Write(offset, data);
+  REQUIRE(flash_io_result == ErrorCode::OK);
 }
 
 void DatabaseRawSequential::EraseFlashOrExit(size_t offset, size_t size)
 {
-  REQUIRE(flash_.Erase(offset, size) == ErrorCode::OK);
+  [[maybe_unused]] const auto flash_io_result = flash_.Erase(offset, size);
+  REQUIRE(flash_io_result == ErrorCode::OK);
 }
 
 void DatabaseRawSequential::Init()
@@ -334,7 +337,7 @@ ErrorCode DatabaseRawSequential::SetKey(const char* name, const void* data, size
 
 ErrorCode DatabaseRawSequential::SetKey(size_t offset, const void* data, size_t size)
 {
-  ASSERT(offset != 0);
+  DEV_ASSERT(offset != 0);
 
   KeyInfo key;
   ReadFlashOrExit(offset, key);

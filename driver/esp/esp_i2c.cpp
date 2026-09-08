@@ -151,7 +151,7 @@ ESP32I2C::ESP32I2C(i2c_port_t port_num, int scl_pin, int sda_pin, uint32_t clock
 
   if (InitHardware() != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 }
@@ -182,7 +182,7 @@ size_t ESP32I2C::MemAddrBytes(MemAddrLength mem_addr_size)
 
 void ESP32I2C::EncodeMemAddr(uint16_t mem_addr, size_t mem_len, uint8_t* out)
 {
-  ASSERT(out != nullptr);
+  DEV_ASSERT(out != nullptr);
   if (mem_len == 2U)
   {
     out[0] = static_cast<uint8_t>((mem_addr >> 8) & 0xFFU);
@@ -257,7 +257,6 @@ ErrorCode ESP32I2C::InitHardware()
   _i2c_hal_init(&hal_, static_cast<int>(port_num_));
   if (hal_.dev == nullptr)
   {
-    ASSERT(false);
     return ErrorCode::INIT_ERR;
   }
 
@@ -268,21 +267,18 @@ ErrorCode ESP32I2C::InitHardware()
   ErrorCode err = ConfigurePins();
   if (err != ErrorCode::OK)
   {
-    ASSERT(false);
     return err;
   }
 
   err = InstallInterrupt();
   if (err != ErrorCode::OK)
   {
-    ASSERT(false);
     return err;
   }
 
   err = ApplyConfig();
   if (err != ErrorCode::OK)
   {
-    ASSERT(false);
     return err;
   }
 
@@ -470,7 +466,7 @@ ErrorCode ESP32I2C::KickAsyncTransaction()
       static_cast<uint8_t>((async_slave_addr_ << 1U) | I2C_MASTER_READ);
   const size_t fifo_len = FIFO_LEN;
   const size_t write_chunk_cap = (fifo_len > 1U) ? (fifo_len - 1U) : 0U;
-  ASSERT(write_chunk_cap > 0U);
+  DEV_ASSERT(write_chunk_cap > 0U);
 
   while (true)
   {
@@ -787,7 +783,7 @@ ErrorCode ESP32I2C::ExecuteTransaction(uint16_t slave_addr, const uint8_t* write
   const uint8_t read_addr = static_cast<uint8_t>((slave_addr << 1U) | I2C_MASTER_READ);
   const size_t fifo_len = FIFO_LEN;
   const size_t write_chunk_cap = (fifo_len > 1U) ? (fifo_len - 1U) : 0U;
-  ASSERT(write_chunk_cap > 0U);
+  DEV_ASSERT(write_chunk_cap > 0U);
 
   int cmd_idx = 0;
 

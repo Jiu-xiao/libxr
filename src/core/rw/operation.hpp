@@ -200,13 +200,11 @@ class AsyncBlockWait
    */
   ErrorCode Wait(uint32_t timeout)
   {
-    ASSERT(sem_ != nullptr);
+    DEV_ASSERT(sem_ != nullptr);
     auto wait_ans = sem_->Wait(timeout);
     if (wait_ans == ErrorCode::OK)
     {
-#ifdef LIBXR_DEBUG_BUILD
-      ASSERT(state_.load(std::memory_order_acquire) == State::CLAIMED);
-#endif
+      DEV_ASSERT(state_.load(std::memory_order_acquire) == State::CLAIMED);
       state_.store(State::IDLE, std::memory_order_release);
       return result_;
     }
@@ -219,8 +217,8 @@ class AsyncBlockWait
       return ErrorCode::TIMEOUT;
     }
 
-    ASSERT(expected == State::CLAIMED || expected == State::DETACHED ||
-           expected == State::IDLE);
+    DEV_ASSERT(expected == State::CLAIMED || expected == State::DETACHED ||
+               expected == State::IDLE);
     if (expected == State::DETACHED)
     {
       state_.store(State::IDLE, std::memory_order_release);
@@ -250,14 +248,15 @@ class AsyncBlockWait
    */
   bool TryPost(bool in_isr, ErrorCode ec)
   {
-    ASSERT(sem_ != nullptr);
+    DEV_ASSERT_FROM_CALLBACK(sem_ != nullptr, in_isr);
 
     State expected = State::PENDING;
     if (!state_.compare_exchange_strong(expected, State::CLAIMED,
                                         std::memory_order_acq_rel,
                                         std::memory_order_acquire))
     {
-      ASSERT(expected == State::DETACHED || expected == State::IDLE);
+      DEV_ASSERT_FROM_CALLBACK(expected == State::DETACHED || expected == State::IDLE,
+                               in_isr);
       if (expected == State::DETACHED)
       {
         expected = State::DETACHED;

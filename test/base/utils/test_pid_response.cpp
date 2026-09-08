@@ -4,6 +4,7 @@
  * behavior.
  */
 #include "pid_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试项函数 `RunPidResponseTests`。 Test-item function `RunPidResponseTests`.
@@ -30,17 +31,17 @@ void RunPidResponseTests()
     LibXR::PID<> pid(param);
 
     const double OUT1 = pid.Calculate(1.0, 0.0, 0.1);
-    ASSERT(equal(OUT1, 2.05));
+    TEST_ASSERT(equal(OUT1, 2.05));
 
     const double OUT2 = pid.Calculate(1.0, 0.0, 0.1);
-    ASSERT(equal(OUT2, 2.1));
+    TEST_ASSERT(equal(OUT2, 2.1));
 
     for (int i = 0; i < 50; ++i)
     {
       (void)pid.Calculate(1.0, 0.0, 0.1);
     }
-    ASSERT(std::abs(pid.GetIntegralError()) <= param.i_limit + 1e-6);
-    ASSERT(std::abs(pid.LastOutput()) <= param.out_limit + 1e-6);
+    TEST_ASSERT(std::abs(pid.GetIntegralError()) <= param.i_limit + 1e-6);
+    TEST_ASSERT(std::abs(pid.LastOutput()) <= param.out_limit + 1e-6);
   }
 
   // -----------------------
@@ -58,9 +59,9 @@ void RunPidResponseTests()
     LibXR::PID<> pid(param);
 
     const double OUT = pid.Calculate(1.0, 0.0, 0.1);
-    ASSERT(std::abs(OUT) <= param.out_limit + 1e-6);
-    ASSERT(near(OUT, 1.0, 1e-6));
-    ASSERT(near(pid.LastOutput(), 1.0, 1e-6));
+    TEST_ASSERT(std::abs(OUT) <= param.out_limit + 1e-6);
+    TEST_ASSERT(near(OUT, 1.0, 1e-6));
+    TEST_ASSERT(near(pid.LastOutput(), 1.0, 1e-6));
   }
 
   // ---------------------------------------------------
@@ -84,8 +85,8 @@ void RunPidResponseTests()
 
     // When already saturated, integral update is rejected if it increases saturation
     // magnitude.
-    ASSERT(std::abs(pid.GetIntegralError()) <= 1e-6);
-    ASSERT(std::abs(pid.LastOutput()) <= param.out_limit + 1e-6);
+    TEST_ASSERT(std::abs(pid.GetIntegralError()) <= 1e-6);
+    TEST_ASSERT(std::abs(pid.LastOutput()) <= param.out_limit + 1e-6);
   }
 
   // ---------------------------------------------------
@@ -104,7 +105,7 @@ void RunPidResponseTests()
     pid.SetIntegralError(1.0);  // start saturated from I term
 
     const double OUT0 = pid.Calculate(0.0, 0.0, 0.1);
-    ASSERT(std::abs(OUT0) <= param.out_limit + 1e-6);
+    TEST_ASSERT(std::abs(OUT0) <= param.out_limit + 1e-6);
 
     // Apply negative error to drive integral down (unwind).
     for (int i = 0; i < 10; ++i)
@@ -112,8 +113,8 @@ void RunPidResponseTests()
       (void)pid.Calculate(-1.0, 0.0, 0.1);
     }
 
-    ASSERT(pid.GetIntegralError() < 1.0);
-    ASSERT(std::abs(pid.LastOutput()) <= param.out_limit + 1e-6);
+    TEST_ASSERT(pid.GetIntegralError() < 1.0);
+    TEST_ASSERT(std::abs(pid.LastOutput()) <= param.out_limit + 1e-6);
   }
 
   // -----------------------------------------
@@ -135,7 +136,7 @@ void RunPidResponseTests()
     // D: fb_dot=10 => fb_d_k=10 => d_out = 10*0.1 = 1.0
     // out = p*e_k + i_out - d_out = 2 + 0.05 - 1.0 = 1.05
     const double OUT = pid.Calculate(1.0, 0.0, 10.0, 0.1);
-    ASSERT(near(OUT, 1.05, 1e-6));
+    TEST_ASSERT(near(OUT, 1.05, 1e-6));
   }
 
   // -------------------------------------------------

@@ -25,6 +25,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_color`。 Test entry function `test_color`.
@@ -47,32 +48,37 @@ void test_color()
   static_assert(std::size(LibXR::LIBXR_PRESET_STR) ==
                 static_cast<size_t>(LibXR::Preset::COUNT));
 
-  ASSERT(std::string_view(
-             LibXR::LIBXR_TEXT_STYLE_STR[static_cast<size_t>(LibXR::TextStyle::NONE)]) ==
-         "");
-  ASSERT(std::string_view(
-             LibXR::LIBXR_TEXT_STYLE_STR[static_cast<size_t>(LibXR::TextStyle::BOLD)]) ==
-         "\033[1m");
-  ASSERT(std::string_view(LibXR::LIBXR_TEXT_STYLE_STR[static_cast<size_t>(
-             LibXR::TextStyle::UNDERLINE)]) == "\033[4m");
+  TEST_ASSERT(
+      std::string_view(
+          LibXR::LIBXR_TEXT_STYLE_STR[static_cast<size_t>(LibXR::TextStyle::NONE)]) ==
+      "");
+  TEST_ASSERT(
+      std::string_view(
+          LibXR::LIBXR_TEXT_STYLE_STR[static_cast<size_t>(LibXR::TextStyle::BOLD)]) ==
+      "\033[1m");
+  TEST_ASSERT(std::string_view(LibXR::LIBXR_TEXT_STYLE_STR[static_cast<size_t>(
+                  LibXR::TextStyle::UNDERLINE)]) == "\033[4m");
 
-  ASSERT(std::string_view(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
-             LibXR::TerminalControl::RESET)]) == "\033[m");
-  ASSERT(std::string_view(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
-             LibXR::TerminalControl::ERASE_LINE)]) == "\033[K");
+  TEST_ASSERT(std::string_view(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
+                  LibXR::TerminalControl::RESET)]) == "\033[m");
+  TEST_ASSERT(std::string_view(LibXR::LIBXR_TERMINAL_CONTROL_STR[static_cast<size_t>(
+                  LibXR::TerminalControl::ERASE_LINE)]) == "\033[K");
 
-  ASSERT(
+  TEST_ASSERT(
       std::string_view(
           LibXR::LIBXR_FOREGROUND_STR[static_cast<size_t>(LibXR::Foreground::GREEN)]) ==
       "\033[32m");
-  ASSERT(std::string_view(
-             LibXR::LIBXR_BACKGROUND_STR[static_cast<size_t>(LibXR::Background::BLUE)]) ==
-         "\033[44m");
+  TEST_ASSERT(
+      std::string_view(
+          LibXR::LIBXR_BACKGROUND_STR[static_cast<size_t>(LibXR::Background::BLUE)]) ==
+      "\033[44m");
 
-  ASSERT(std::string_view(
-             LibXR::LIBXR_PRESET_STR[static_cast<size_t>(LibXR::Preset::YELLOW_BOLD)]) ==
-         "\033[33m\033[1m");
-  ASSERT(std::string_view(
-             LibXR::LIBXR_PRESET_STR[static_cast<size_t>(LibXR::Preset::BOLD_ON_RED)]) ==
-         "\033[1m\033[41m");
+  TEST_ASSERT(
+      std::string_view(
+          LibXR::LIBXR_PRESET_STR[static_cast<size_t>(LibXR::Preset::YELLOW_BOLD)]) ==
+      "\033[33m\033[1m");
+  TEST_ASSERT(
+      std::string_view(
+          LibXR::LIBXR_PRESET_STR[static_cast<size_t>(LibXR::Preset::BOLD_ON_RED)]) ==
+      "\033[1m\033[41m");
 }

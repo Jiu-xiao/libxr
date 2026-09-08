@@ -165,7 +165,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   ASSERT(uart_num_ < SOC_UART_HP_NUM);
   ASSERT(rx_isr_buffer_size_ > 0);
   ASSERT(tx_buffer_size > 0);
-  REQUIRE(tx_queue_size > 0U);
+  ASSERT(tx_queue_size > 0U);
 
   INIT_CRIT_SECTION_LOCK_RUNTIME(&irq_lock_);
 
@@ -175,7 +175,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
 
   if (InitUartHardware() != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 
@@ -184,7 +184,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   {
     if (InitDmaBackend() != ErrorCode::OK)
     {
-      ASSERT(false);
+      REQUIRE(false);
       return;
     }
   }
@@ -193,7 +193,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
   {
     if (InstallUartIsr() != ErrorCode::OK)
     {
-      ASSERT(false);
+      REQUIRE(false);
       return;
     }
     ConfigureRxInterruptPath();
@@ -201,7 +201,7 @@ ESP32UART::ESP32UART(uart_port_t uart_num, int tx_pin, int rx_pin, int rts_pin,
 #else
   if (InstallUartIsr() != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
   ConfigureRxInterruptPath();
@@ -272,8 +272,12 @@ ErrorCode ESP32UART::ApplyConfig(const UART::Configuration& config)
 
   uart_word_length_t word_length = UART_DATA_8_BITS;
   uart_stop_bits_t stop_bits = UART_STOP_BITS_1;
-  REQUIRE(ResolveWordLength(config.data_bits, word_length));
-  REQUIRE(ResolveStopBits(config.stop_bits, stop_bits));
+  [[maybe_unused]] const auto resolve_word_length_result =
+      ResolveWordLength(config.data_bits, word_length);
+  DEV_ASSERT(resolve_word_length_result);
+  [[maybe_unused]] const auto resolve_stop_bits_result =
+      ResolveStopBits(config.stop_bits, stop_bits);
+  DEV_ASSERT(resolve_stop_bits_result);
 
   const uart_sclk_t sclk = UART_SCLK_DEFAULT;
   uart_hal_set_sclk(&uart_hal_, static_cast<soc_module_clk_t>(sclk));
@@ -376,7 +380,8 @@ bool IRAM_ATTR ESP32UART::TryApplyPublishedConfig(bool in_isr)
     StopDmaRx(in_isr);
   }
 #endif
-  REQUIRE_FROM_CALLBACK(ApplyConfig(requested_config_) == ErrorCode::OK, in_isr);
+  [[maybe_unused]] const auto apply_config_result = ApplyConfig(requested_config_);
+  REQUIRE_FROM_CALLBACK(apply_config_result == ErrorCode::OK, in_isr);
   config_ = requested_config_;
   config_state_.store(static_cast<uint8_t>(ConfigState::EMPTY),
                       std::memory_order_release);
@@ -724,7 +729,7 @@ bool IRAM_ATTR ESP32UART::LoadActiveTxFromQueue(bool in_isr)
   }
 
   const size_t size = queue.AvailableSize();
-  REQUIRE_FROM_CALLBACK(size <= tx_dma_buffer_.Size(), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(size <= tx_dma_buffer_.Size(), in_isr);
   queue.PopAll(tx_dma_buffer_.ActiveBuffer());
   tx_dma_buffer_.SetActiveLength(size);
   tx_active_length_ = size;
@@ -755,7 +760,7 @@ bool IRAM_ATTR ESP32UART::LoadPendingTxFromQueue(bool in_isr)
   }
 
   const size_t size = queue.AvailableSize();
-  REQUIRE_FROM_CALLBACK(size <= tx_dma_buffer_.Size(), in_isr);
+  DEV_ASSERT_FROM_CALLBACK(size <= tx_dma_buffer_.Size(), in_isr);
   queue.PopAll(tx_dma_buffer_.PendingBuffer());
   tx_dma_buffer_.SetPendingLength(size);
   tx_dma_buffer_.EnablePending();
@@ -843,7 +848,8 @@ void IRAM_ATTR ESP32UART::PushRxBytes(const uint8_t* data, size_t size, bool in_
     }
 
     const size_t chunk = std::min(free_space, size - offset);
-    REQUIRE_FROM_CALLBACK(queue.PushBatch(data + offset, chunk) == ErrorCode::OK, in_isr);
+    [[maybe_unused]] const auto push_batch_result = queue.PushBatch(data + offset, chunk);
+    DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
 
     offset += chunk;
   }
@@ -870,14 +876,20 @@ void IRAM_ATTR ESP32UART::OnTxTransferDone(bool in_isr, ErrorCode result)
 
     if (tx_dma_buffer_.HasPending())
     {
-      REQUIRE_FROM_CALLBACK(PromotePendingTxToActive(), in_isr);
-      REQUIRE_FROM_CALLBACK(StartAndReportActive(in_isr), in_isr);
+      [[maybe_unused]] const auto promote_pending_tx_to_active_result =
+          PromotePendingTxToActive();
+      DEV_ASSERT_FROM_CALLBACK(promote_pending_tx_to_active_result, in_isr);
+      [[maybe_unused]] const auto start_and_report_active_result =
+          StartAndReportActive(in_isr);
+      REQUIRE_FROM_CALLBACK(start_and_report_active_result, in_isr);
     }
     else if (config_state_.load(std::memory_order_acquire) ==
                  static_cast<uint8_t>(ConfigState::EMPTY) &&
              LoadActiveTxFromQueue(in_isr))
     {
-      REQUIRE_FROM_CALLBACK(StartAndReportActive(in_isr), in_isr);
+      [[maybe_unused]] const auto start_and_report_active_result =
+          StartAndReportActive(in_isr);
+      REQUIRE_FROM_CALLBACK(start_and_report_active_result, in_isr);
     }
 
     if (tx_busy_.IsSet() && !tx_dma_buffer_.HasPending() &&

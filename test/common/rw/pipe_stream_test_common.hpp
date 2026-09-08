@@ -5,6 +5,7 @@
 #pragma once
 
 #include "pipe_transfer_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -38,13 +39,13 @@ void VerifyStreamBlockPendingCompletion(LibXR::ErrorCode finish_result,
     if (submit_mode == StreamSubmitMode::COMMIT)
     {
       auto ec = ws.Commit();
-      ASSERT(ec == expected_result);
+      TEST_ASSERT(ec == expected_result);
     }
   }
 
   ExpectWaitOk(done, SHORT_WAIT_MS);
   JoinThreadIfNeeded(finisher);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 /**
@@ -65,17 +66,17 @@ void VerifyStreamBlockTimeout()
   ws << ConstRawData{TX, sizeof(TX)};
 
   auto ec = ws.Commit();
-  ASSERT(ec == ErrorCode::TIMEOUT);
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(ec == ErrorCode::TIMEOUT);
+  TEST_ASSERT(sem.Value() == 0);
 
   {
     auto queue = w.GetWriteQueue(false);
-    ASSERT(!queue.Empty());
+    TEST_ASSERT(!queue.Empty());
     static uint8_t sink[16];
     queue.PopAll(sink);
   }
 
-  ASSERT(sem.Value() == 0);
+  TEST_ASSERT(sem.Value() == 0);
 }
 
 }  // namespace

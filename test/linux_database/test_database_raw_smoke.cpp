@@ -5,6 +5,7 @@
  */
 #include "linux_database_test_common.hpp"
 #include "raw_database_test_groups.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -51,10 +52,10 @@ void TestLinuxDatabaseRawSmoke()
   k3_2.Load();
   k4_2.Load();
 
-  ASSERT(std::memcmp(&data_k1[0], &k1_2.data_[0], sizeof(data_k1)) == 0);
-  ASSERT(std::memcmp(&data_k2[0], &k2_2.data_[0], sizeof(data_k2)) == 0);
-  ASSERT(std::memcmp(&data_k3[0], &k3_2.data_[0], sizeof(data_k3)) == 0);
-  ASSERT(std::memcmp(&data_k4[0], &k4_2.data_[0], sizeof(data_k4)) == 0);
+  TEST_ASSERT(std::memcmp(&data_k1[0], &k1_2.data_[0], sizeof(data_k1)) == 0);
+  TEST_ASSERT(std::memcmp(&data_k2[0], &k2_2.data_[0], sizeof(data_k2)) == 0);
+  TEST_ASSERT(std::memcmp(&data_k3[0], &k3_2.data_[0], sizeof(data_k3)) == 0);
+  TEST_ASSERT(std::memcmp(&data_k4[0], &k4_2.data_[0], sizeof(data_k4)) == 0);
 
   for (size_t i = 0; i < 1000; i++)
   {
@@ -83,10 +84,10 @@ void TestLinuxDatabaseRawSmoke()
     k2_2.Load();
     k3_2.Load();
     k4_2.Load();
-    ASSERT(std::memcmp(&data_k1[0], &k1_2.data_[0], sizeof(data_k1)) == 0);
-    ASSERT(std::memcmp(&data_k2[0], &k2_2.data_[0], sizeof(data_k2)) == 0);
-    ASSERT(std::memcmp(&data_k3[0], &k3_2.data_[0], sizeof(data_k3)) == 0);
-    ASSERT(std::memcmp(&data_k4[0], &k4_2.data_[0], sizeof(data_k4)) == 0);
+    TEST_ASSERT(std::memcmp(&data_k1[0], &k1_2.data_[0], sizeof(data_k1)) == 0);
+    TEST_ASSERT(std::memcmp(&data_k2[0], &k2_2.data_[0], sizeof(data_k2)) == 0);
+    TEST_ASSERT(std::memcmp(&data_k3[0], &k3_2.data_[0], sizeof(data_k3)) == 0);
+    TEST_ASSERT(std::memcmp(&data_k4[0], &k4_2.data_[0], sizeof(data_k4)) == 0);
   }
 }
 
@@ -130,8 +131,8 @@ void TestDatabaseRawSaveCurrentValue()
 
   DatabaseRaw<16>::Key<uint32_t> key(db, "raw", 1);
   key.data_ = 2;
-  ASSERT(key.Save() == ErrorCode::OK);
-  ASSERT(ReopenDatabaseValue(path, 0, "raw") == 2);
+  TEST_ASSERT(key.Save() == ErrorCode::OK);
+  TEST_ASSERT(ReopenDatabaseValue(path, 0, "raw") == 2);
 }
 
 /**
@@ -154,7 +155,7 @@ void TestDatabaseRawRequiresExactStoredSize()
     DatabaseRaw<16> db(flash, 5);
     db.Restore();
     DatabaseRaw<16>::Key<uint32_t> key(db, "shape", 0x11223344U);
-    ASSERT(key.data_ == 0x11223344U);
+    TEST_ASSERT(key.data_ == 0x11223344U);
   }
 
   {
@@ -162,11 +163,11 @@ void TestDatabaseRawRequiresExactStoredSize()
                                                  XR_DB_MIN_WRITE_SIZE, false, true);
     DatabaseRaw<16> db(flash, 5);
     DatabaseRaw<16>::Key<uint64_t> wider_key(db, "shape", 0ULL);
-    ASSERT(wider_key.data_ == 0ULL);
-    ASSERT(wider_key.Load() == ErrorCode::FAILED);
+    TEST_ASSERT(wider_key.data_ == 0ULL);
+    TEST_ASSERT(wider_key.Load() == ErrorCode::FAILED);
   }
 
-  ASSERT(ReopenDatabaseValue(path, 0, "shape") == 0x11223344U);
+  TEST_ASSERT(ReopenDatabaseValue(path, 0, "shape") == 0x11223344U);
 }
 
 }  // namespace

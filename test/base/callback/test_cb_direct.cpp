@@ -11,6 +11,7 @@
  * paths.
  */
 #include "cb_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -31,7 +32,7 @@ void TestEmptyAndDirectCallbacks()
   // with ISR-flag propagation.
   {
     LibXR::Callback<int> empty_cb;
-    ASSERT(empty_cb.Empty());
+    TEST_ASSERT(empty_cb.Empty());
     empty_cb.Run(false, 1);
   }
 
@@ -39,24 +40,24 @@ void TestEmptyAndDirectCallbacks()
     DirectCallbackProbe probe;
     probe.runtime_in_isr = true;
     probe.cb.Run(true, 1);
-    ASSERT(probe.seen_count == 2);
-    ASSERT(probe.seen[0] == 1);
-    ASSERT(probe.seen[1] == 2);
-    ASSERT(probe.seen_in_isr[0] == true);
-    ASSERT(probe.seen_in_isr[1] == true);
-    ASSERT(probe.max_depth == 2);
+    TEST_ASSERT(probe.seen_count == 2);
+    TEST_ASSERT(probe.seen[0] == 1);
+    TEST_ASSERT(probe.seen[1] == 2);
+    TEST_ASSERT(probe.seen_in_isr[0] == true);
+    TEST_ASSERT(probe.seen_in_isr[1] == true);
+    TEST_ASSERT(probe.max_depth == 2);
   }
 
   {
     DirectCallbackProbe probe;
     probe.runtime_in_isr = false;
     probe.cb.Run(false, 1);
-    ASSERT(probe.seen_count == 2);
-    ASSERT(probe.seen[0] == 1);
-    ASSERT(probe.seen[1] == 2);
-    ASSERT(probe.seen_in_isr[0] == false);
-    ASSERT(probe.seen_in_isr[1] == false);
-    ASSERT(probe.max_depth == 2);
+    TEST_ASSERT(probe.seen_count == 2);
+    TEST_ASSERT(probe.seen[0] == 1);
+    TEST_ASSERT(probe.seen[1] == 2);
+    TEST_ASSERT(probe.seen_in_isr[0] == false);
+    TEST_ASSERT(probe.seen_in_isr[1] == false);
+    TEST_ASSERT(probe.max_depth == 2);
   }
 }
 

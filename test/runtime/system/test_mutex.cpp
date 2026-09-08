@@ -21,6 +21,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -41,7 +42,7 @@ struct MutexAcquireContext
  */
 void AcquireMutex(MutexAcquireContext* ctx)
 {
-  ASSERT(ctx->mutex->Lock() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(ctx->mutex->Lock() == LibXR::ErrorCode::OK);
   ctx->acquired->store(true, std::memory_order_release);
   ctx->mutex->Unlock();
   ctx->done->Post();
@@ -64,22 +65,22 @@ void test_mutex()
   std::atomic<bool> acquired(false);
   LibXR::Thread waiter;
 
-  ASSERT(mutex.Lock() == LibXR::ErrorCode::OK);
-  ASSERT(mutex.TryLock() == LibXR::ErrorCode::BUSY);
+  TEST_ASSERT(mutex.Lock() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(mutex.TryLock() == LibXR::ErrorCode::BUSY);
 
   MutexAcquireContext ctx = {&mutex, &acquired, &done};
   waiter.Create<MutexAcquireContext*>(&ctx, AcquireMutex, "mutex_waiter", 1024,
                                       LibXR::Thread::Priority::MEDIUM);
 
   LibXR::Thread::Sleep(20);
-  ASSERT(!acquired.load(std::memory_order_acquire));
+  TEST_ASSERT(!acquired.load(std::memory_order_acquire));
 
   mutex.Unlock();
 
-  ASSERT(done.Wait(500) == LibXR::ErrorCode::OK);
-  ASSERT(waiter.Join() == LibXR::ErrorCode::OK);
-  ASSERT(acquired.load(std::memory_order_acquire));
+  TEST_ASSERT(done.Wait(500) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(waiter.Join() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(acquired.load(std::memory_order_acquire));
 
-  ASSERT(mutex.TryLock() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(mutex.TryLock() == LibXR::ErrorCode::OK);
   mutex.Unlock();
 }

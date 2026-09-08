@@ -17,7 +17,8 @@
  */
 void ReadFlashOrExit(size_t offset, RawData data)
 {
-  REQUIRE(flash_.Read(offset, data) == ErrorCode::OK);
+  [[maybe_unused]] const auto flash_io_result = flash_.Read(offset, data);
+  REQUIRE(flash_io_result == ErrorCode::OK);
 }
 
 /**
@@ -41,7 +42,8 @@ void ReadFlashOrExit(size_t offset, Data& data)
  */
 void WriteFlashOrExit(size_t offset, ConstRawData data)
 {
-  REQUIRE(Write(offset, data) == ErrorCode::OK);
+  [[maybe_unused]] const auto flash_io_result = Write(offset, data);
+  REQUIRE(flash_io_result == ErrorCode::OK);
 }
 
 /**
@@ -65,7 +67,8 @@ void WriteFlashOrExit(size_t offset, const Data& data)
  */
 void EraseFlashOrExit(size_t offset, size_t size)
 {
-  REQUIRE(flash_.Erase(offset, size) == ErrorCode::OK);
+  [[maybe_unused]] const auto flash_io_result = flash_.Erase(offset, size);
+  REQUIRE(flash_io_result == ErrorCode::OK);
 }
 
 /**

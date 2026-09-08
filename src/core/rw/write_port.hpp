@@ -92,7 +92,7 @@ class WritePort
   /// 检查请求容量是否可由状态字表示 / Check that request capacity fits the state word.
   static size_t ValidateQueueSize(size_t queue_size)
   {
-    REQUIRE(queue_size <= MAX_RELEASED_REQUESTS);
+    ASSERT(queue_size <= MAX_RELEASED_REQUESTS);
     return queue_size;
   }
 
@@ -166,7 +166,7 @@ class WritePort
      */
     [[nodiscard]] size_t AvailableSize() const
     {
-      ASSERT_FROM_CALLBACK(popped_size_ <= front_size_, in_isr_);
+      DEV_ASSERT_FROM_CALLBACK(popped_size_ <= front_size_, in_isr_);
       return front_size_ - popped_size_;
     }
 
@@ -226,7 +226,7 @@ class WritePort
               size_t second_size) -> size_t
           {
             const size_t accepted = writer(first, first_size, second, second_size);
-            REQUIRE_FROM_CALLBACK(accepted <= first_size + second_size, in_isr_);
+            ASSERT_FROM_CALLBACK(accepted <= first_size + second_size, in_isr_);
             return accepted;
           });
       popped_size_ += accepted;
@@ -251,7 +251,7 @@ class WritePort
     /// 检查并记录本接口唯一一次出队操作 / Check and record the single permitted action.
     void BeginAction()
     {
-      REQUIRE_FROM_CALLBACK(!action_used_, in_isr_);
+      ASSERT_FROM_CALLBACK(!action_used_, in_isr_);
       action_used_ = true;
     }
 

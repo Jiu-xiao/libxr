@@ -126,12 +126,12 @@ ESP32ADC::ESP32ADC(adc_unit_t unit, const adc_channel_t* channels, uint8_t num_c
 
   if (cont_ans == ContinuousInitResult::FAILED)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 
   const bool oneshot_ok = InitOneshot();
-  ASSERT(oneshot_ok);
+  REQUIRE(oneshot_ok);
   if (!oneshot_ok)
   {
     return;
@@ -167,19 +167,19 @@ float ESP32ADC::ReadChannel(uint8_t idx)
       DrainContinuousFrames(0U);
     }
 #endif
-    ASSERT(channel_ready_[idx]);
+    DEV_ASSERT(channel_ready_[idx]);
     return latest_values_[idx];
   }
 
-  ASSERT(backend_ == Backend::ONESHOT);
-  ASSERT(oneshot_inited_ && (oneshot_hal_ != nullptr));
+  DEV_ASSERT(backend_ == Backend::ONESHOT);
+  DEV_ASSERT(oneshot_inited_ && (oneshot_hal_ != nullptr));
   if (!oneshot_inited_ || (oneshot_hal_ == nullptr))
   {
     return 0.f;
   }
 
   const esp_err_t lock_err = adc_lock_try_acquire(unit_);
-  ASSERT(lock_err == ESP_OK);
+
   if (lock_err != ESP_OK)
   {
     return 0.f;
@@ -194,7 +194,7 @@ float ESP32ADC::ReadChannel(uint8_t idx)
 #if SOC_ADC_DIG_CTRL_SUPPORTED && !SOC_ADC_RTC_CTRL_SUPPORTED
   const esp_err_t clk_on =
       esp_clk_tree_enable_src(static_cast<soc_module_clk_t>(oneshot_hal_->clk_src), true);
-  ASSERT(clk_on == ESP_OK);
+
   clk_src_enabled = (clk_on == ESP_OK);
 #else
   clk_src_enabled = true;
@@ -216,7 +216,7 @@ float ESP32ADC::ReadChannel(uint8_t idx)
   {
     const esp_err_t clk_off = esp_clk_tree_enable_src(
         static_cast<soc_module_clk_t>(oneshot_hal_->clk_src), false);
-    ASSERT(clk_off == ESP_OK);
+
     if (clk_off != ESP_OK)
     {
       converted = false;
@@ -227,13 +227,12 @@ float ESP32ADC::ReadChannel(uint8_t idx)
   portEXIT_CRITICAL(&rtc_spinlock);
 
   const esp_err_t unlock_err = adc_lock_release(unit_);
-  ASSERT(unlock_err == ESP_OK);
+
   if (unlock_err != ESP_OK)
   {
     return 0.f;
   }
 
-  ASSERT(converted);
   if (!converted)
   {
     return 0.f;
@@ -323,7 +322,7 @@ float ESP32ADC::RawToVoltage(uint8_t idx, uint16_t raw) const
     int voltage_mv = 0;
     const esp_err_t err =
         adc_cali_raw_to_voltage(cali_handles_[idx], static_cast<int>(raw), &voltage_mv);
-    ASSERT(err == ESP_OK);
+
     if (err == ESP_OK)
     {
       return static_cast<float>(voltage_mv) / 1000.0f;

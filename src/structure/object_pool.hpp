@@ -216,8 +216,8 @@ class BasicObjectPool
         return;
       }
 
-      const ErrorCode ec = pool_->Release(index_);
-      ASSERT(ec == ErrorCode::OK);
+      [[maybe_unused]] const ErrorCode ec = pool_->Release(index_);
+      DEV_ASSERT(ec == ErrorCode::OK);
       pool_ = nullptr;
       index_ = IndexType{};
     }
@@ -353,7 +353,7 @@ class BasicObjectPool
       return ec;
     }
 
-    ASSERT(static_cast<size_t>(index) < slot_count_);
+    DEV_ASSERT(static_cast<size_t>(index) < slot_count_);
     handle = Handle(this, index);
     return ErrorCode::OK;
   }
@@ -417,7 +417,7 @@ class BasicObjectPool
    */
   ErrorCode Release(IndexType index)
   {
-    ASSERT(static_cast<size_t>(index) < slot_count_);
+    DEV_ASSERT(static_cast<size_t>(index) < slot_count_);
     return free_queue_->Push(index);
   }
 
@@ -453,8 +453,9 @@ class BasicObjectPool
     ASSERT(slot_count_ - 1 <= static_cast<size_t>(std::numeric_limits<IndexType>::max()));
     for (size_t index = 0; index < slot_count_; ++index)
     {
-      const ErrorCode ec = free_queue_->Push(static_cast<IndexType>(index));
-      ASSERT(ec == ErrorCode::OK);
+      [[maybe_unused]] const ErrorCode ec =
+          free_queue_->Push(static_cast<IndexType>(index));
+      DEV_ASSERT(ec == ErrorCode::OK);
     }
   }
 

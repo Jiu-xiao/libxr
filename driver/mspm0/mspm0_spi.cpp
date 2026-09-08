@@ -178,10 +178,10 @@ void MSPM0SPI::StartDmaRxOnly(uint32_t offset, uint32_t count)
 {
   RawData rx = GetRxBuffer();
 
-  ASSERT(offset < rx.size_);
-  ASSERT(count > 0U);
-  ASSERT(count <= RX_ONLY_REPEAT_TX_MAX_FRAMES);
-  ASSERT((offset + count) <= rx.size_);
+  DEV_ASSERT(offset < rx.size_);
+  DEV_ASSERT(count > 0U);
+  DEV_ASSERT(count <= RX_ONLY_REPEAT_TX_MAX_FRAMES);
+  DEV_ASSERT((offset + count) <= rx.size_);
 
   masked_interrupts_for_tx_only_ = 0;
 

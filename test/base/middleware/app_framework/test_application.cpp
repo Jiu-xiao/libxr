@@ -19,6 +19,7 @@
  */
 #include "libxr.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -72,20 +73,20 @@ void test_app_framework_application()
   CountingApp app3(2, &seen_mask, &hit_count);
 
   LibXR::ApplicationManager manager;
-  ASSERT(manager.Size() == 0);
+  TEST_ASSERT(manager.Size() == 0);
 
   manager.Register(app1);
-  ASSERT(manager.Size() == 1);
+  TEST_ASSERT(manager.Size() == 1);
 
   manager.Register(app2);
   manager.Register(app3);
-  ASSERT(manager.Size() == 3);
+  TEST_ASSERT(manager.Size() == 3);
 
   manager.MonitorAll();
-  ASSERT(hit_count == 3);
-  ASSERT(seen_mask == 0x07);
+  TEST_ASSERT(hit_count == 3);
+  TEST_ASSERT(seen_mask == 0x07);
 
   manager.MonitorAll();
-  ASSERT(hit_count == 6);
-  ASSERT(seen_mask == 0x07);
+  TEST_ASSERT(hit_count == 6);
+  TEST_ASSERT(seen_mask == 0x07);
 }

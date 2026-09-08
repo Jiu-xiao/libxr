@@ -152,7 +152,7 @@ class ReadPort
           {
             const size_t produced = writer(static_cast<uint8_t*>(first), first_size,
                                            static_cast<uint8_t*>(second), second_size);
-            REQUIRE_FROM_CALLBACK(produced <= first_size + second_size, in_isr_);
+            ASSERT_FROM_CALLBACK(produced <= first_size + second_size, in_isr_);
             return produced;
           });
       dirty_ = dirty_ || (produced != 0U);

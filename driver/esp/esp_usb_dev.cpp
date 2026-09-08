@@ -115,8 +115,10 @@ void ESP32USBDevice::Start(bool)
   }
 
   EnsureRomUsbCleaned();
-  ASSERT(EnsurePhyReady());
-  ASSERT(EnsureInterruptReady());
+  [[maybe_unused]] const auto ensure_phy_ready_result = EnsurePhyReady();
+  REQUIRE(ensure_phy_ready_result);
+  [[maybe_unused]] const auto ensure_interrupt_ready_result = EnsureInterruptReady();
+  REQUIRE(ensure_interrupt_ready_result);
 
   InitializeCore();
   if (IsInited())
@@ -370,8 +372,9 @@ void ESP32USBDevice::ReloadSetupPacketCount()
     dev->doeptsiz0_reg.xfersize = 3U * SETUP_PACKET_BYTES;
     dev->doeptsiz0_reg.pktcnt = 1U;
     dev->doeptsiz0_reg.supcnt = 3U;
-    ASSERT(
-        ESPUSBDetail::CacheSyncDmaBuffer(setup_packet_, SETUP_DMA_BUFFER_BYTES, false));
+    [[maybe_unused]] const auto cache_sync_dma_buffer_result =
+        ESPUSBDetail::CacheSyncDmaBuffer(setup_packet_, SETUP_DMA_BUFFER_BYTES, false);
+    ASSERT(cache_sync_dma_buffer_result);
     dev->doepdma0_reg.dmaaddr =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(setup_packet_));
     dev->doepctl0_reg.cnak = 1;

@@ -307,7 +307,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     void* const second = second_count == 0U ? nullptr : PayloadPtr(0U);
     const size_t produced =
         writer(PayloadPtr(current_tail), first_count, second, second_count);
-    REQUIRE(produced <= offered);
+    ASSERT(produced <= offered);
     if (produced != 0U)
     {
       tail_.store((current_tail + produced) % capacity, std::memory_order_release);
@@ -455,7 +455,7 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
     const void* const second = second_count == 0U ? nullptr : PayloadPtr(0U);
     const size_t accepted =
         reader(PayloadPtr(current_head), first_count, second, second_count);
-    REQUIRE(accepted <= offered);
+    ASSERT(accepted <= offered);
     if (accepted != 0U)
     {
       head_.store((current_head + accepted) % capacity, std::memory_order_release);

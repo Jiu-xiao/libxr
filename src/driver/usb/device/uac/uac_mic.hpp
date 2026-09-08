@@ -533,7 +533,7 @@ class UAC1MicrophoneQ : public DeviceClass
         default:
           break;
       }
-      ASSERT(false);
+
       return ErrorCode::ARG_ERR;  // 长度不符等 / length mismatch, etc.
     }
 
@@ -547,12 +547,10 @@ class UAC1MicrophoneQ : public DeviceClass
 
     if (ITF != itf_ac_num_ || ENT != ID_FU)
     {
-      ASSERT(false);
       return ErrorCode::NOT_SUPPORT;
     }
     if (CH > CHANNELS)
     {
-      ASSERT(false);
       return ErrorCode::ARG_ERR;
     }
 
@@ -569,7 +567,7 @@ class UAC1MicrophoneQ : public DeviceClass
           r.write_data = ConstRawData{&mute_, 1};
           return ErrorCode::OK;
         }
-        ASSERT(false);
+
         return ErrorCode::ARG_ERR;
 
       case FU_VOLUME:
@@ -619,11 +617,11 @@ class UAC1MicrophoneQ : public DeviceClass
           default:
             break;
         }
-        ASSERT(false);
+
         return ErrorCode::ARG_ERR;
 
       default:
-        ASSERT(false);
+
         return ErrorCode::NOT_SUPPORT;
     }
   }
@@ -659,7 +657,6 @@ class UAC1MicrophoneQ : public DeviceClass
   {
     if (itf != itf_as_num_)
     {
-      ASSERT(false);
       return ErrorCode::NOT_SUPPORT;
     }
     alt = streaming_ ? 1 : 0;
@@ -674,12 +671,11 @@ class UAC1MicrophoneQ : public DeviceClass
   {
     if (itf != itf_as_num_)
     {
-      ASSERT(false);
       return ErrorCode::NOT_SUPPORT;
     }
     if (!ep_iso_in_)
     {
-      ASSERT(false);
+      DEV_ASSERT(false);
       return ErrorCode::FAILED;
     }
 
@@ -701,7 +697,7 @@ class UAC1MicrophoneQ : public DeviceClass
         return ErrorCode::OK;
 
       default:
-        ASSERT(false);
+
         return ErrorCode::ARG_ERR;
     }
   }

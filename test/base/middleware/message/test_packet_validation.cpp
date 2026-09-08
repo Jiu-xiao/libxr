@@ -4,6 +4,7 @@
  * validation-failure scenarios.
  */
 #include "message_packet_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -32,8 +33,8 @@ void TestPacketValidationFailures()
   topic.RegisterCallback(msg_cb);
 
   LibXR::Topic::PackedData<double> packed_data;
-  ASSERT(topic.PackData(77.77, packed_data, LibXR::MicrosecondTimestamp(123456)) ==
-         LibXR::ErrorCode::OK);
+  TEST_ASSERT(topic.PackData(77.77, packed_data, LibXR::MicrosecondTimestamp(123456)) ==
+              LibXR::ErrorCode::OK);
 
   LibXR::Topic::Server topic_server(512);
   topic_server.Register(topic);
@@ -45,7 +46,7 @@ void TestPacketValidationFailures()
                              sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
   unknown_topic_packet.crc8_ =
       LibXR::CRC8::Calculate(&unknown_topic_packet, PACKET_SIZE - sizeof(uint8_t));
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_topic_packet)) == 0);
+  TEST_ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_topic_packet)) == 0);
 
   auto unknown_version_packet = packed_data;
   unknown_version_packet.raw.header_.version ^= 0x5A;
@@ -54,14 +55,14 @@ void TestPacketValidationFailures()
                              sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
   unknown_version_packet.crc8_ =
       LibXR::CRC8::Calculate(&unknown_version_packet, PACKET_SIZE - sizeof(uint8_t));
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_version_packet)) == 0);
+  TEST_ASSERT(topic_server.ParseData(LibXR::ConstRawData(unknown_version_packet)) == 0);
 
   auto truncated_packet = packed_data;
   RewritePacketPayloadLengthForTest(truncated_packet, sizeof(double) - 1);
   rx_value = -1.0;
-  ASSERT(topic_server.ParseData(
-             LibXR::ConstRawData(&truncated_packet, PACKET_SIZE - 1)) == 1);
-  ASSERT(rx_value != 77.77);
+  TEST_ASSERT(topic_server.ParseData(
+                  LibXR::ConstRawData(&truncated_packet, PACKET_SIZE - 1)) == 1);
+  TEST_ASSERT(rx_value != 77.77);
 
   auto legacy_prefix_packet = packed_data;
   legacy_prefix_packet.raw.header_.prefix = 0xA5;
@@ -70,18 +71,18 @@ void TestPacketValidationFailures()
                              sizeof(LibXR::Topic::PackedDataHeader) - sizeof(uint8_t));
   legacy_prefix_packet.crc8_ =
       LibXR::CRC8::Calculate(&legacy_prefix_packet, PACKET_SIZE - sizeof(uint8_t));
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(legacy_prefix_packet)) == 0);
+  TEST_ASSERT(topic_server.ParseData(LibXR::ConstRawData(legacy_prefix_packet)) == 0);
 
   auto bad_header_packet = packed_data;
   bad_header_packet.raw.header_.pack_header_crc8 ^= 0x5A;
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_header_packet)) == 0);
+  TEST_ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_header_packet)) == 0);
 
   auto bad_payload_packet = packed_data;
   bad_payload_packet.crc8_ ^= 0xA5;
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_payload_packet)) == 0);
+  TEST_ASSERT(topic_server.ParseData(LibXR::ConstRawData(bad_payload_packet)) == 0);
 
-  ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
-  ASSERT(rx_value == 77.77);
+  TEST_ASSERT(topic_server.ParseData(LibXR::ConstRawData(packed_data)) == 1);
+  TEST_ASSERT(rx_value == 77.77);
 }
 
 }  // namespace

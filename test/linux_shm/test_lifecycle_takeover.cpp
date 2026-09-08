@@ -9,6 +9,7 @@
  * exits.
  */
 #include "linux_shm_topic_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace LinuxShmTopicTest
 {
@@ -28,7 +29,7 @@ void RunLifecycleTakeoverScenario()
     config.queue_num = 4;
 
     pid_t child = fork();
-    ASSERT(child >= 0);
+    TEST_ASSERT(child >= 0);
 
     if (child == 0)
     {
@@ -51,11 +52,11 @@ void RunLifecycleTakeoverScenario()
     ExpectChildExit(child);
 
     SharedTopic publisher(topic_name, config);
-    ASSERT(publisher.Valid());
+    TEST_ASSERT(publisher.Valid());
 
     IPCFrame frame = {};
     FillFrame(frame, 151);
-    ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(publisher.Publish(frame) == LibXR::ErrorCode::OK);
   }
 }
 

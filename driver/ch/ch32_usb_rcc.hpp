@@ -145,7 +145,9 @@ inline void ConfigureUsbHsPhyFromHse()
   // legal combinations stay explicit and auditable.
   UsbHsPllConfig cfg = {};
   const uint32_t hse_hz = static_cast<uint32_t>(HSE_VALUE);
-  ASSERT(TryGetUsbHsPllConfigForHse(hse_hz, cfg));
+  [[maybe_unused]] const auto try_get_usb_hs_pll_config_for_hse_result =
+      TryGetUsbHsPllConfigForHse(hse_hz, cfg);
+  ASSERT(try_get_usb_hs_pll_config_for_hse_result);
 
   RCC_USBHSPLLCLKConfig(RCC_HSBHSPLLCLKSource_HSE);
   RCC_USBHSConfig(cfg.divider_cfg);

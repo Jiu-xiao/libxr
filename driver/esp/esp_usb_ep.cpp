@@ -338,7 +338,8 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
   {
     const size_t actual =
         device_.DmaEnabled() ? GetCompletedTransferSize() : transfer_actual_size_;
-    ASSERT(FinishOutTransfer(actual));
+    [[maybe_unused]] const auto finish_out_transfer_result = FinishOutTransfer(actual);
+    ASSERT(finish_out_transfer_result);
     if (ep_num == 0U)
     {
       FinishPendingEp0InStatus(in_isr);
@@ -358,8 +359,10 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
   {
     if (device_.DmaEnabled())
     {
-      ASSERT(ESPUSBDetail::CacheSyncDmaBuffer(
-          device_.setup_packet_, ESP32USBDevice::SETUP_DMA_BUFFER_BYTES, false));
+      [[maybe_unused]] const auto cache_sync_dma_buffer_result =
+          ESPUSBDetail::CacheSyncDmaBuffer(device_.setup_packet_,
+                                           ESP32USBDevice::SETUP_DMA_BUFFER_BYTES, false);
+      ASSERT(cache_sync_dma_buffer_result);
     }
     device_.UpdateSetupState(device_.setup_packet_);
     const auto* setup = reinterpret_cast<const USB::SetupPacket*>(device_.setup_packet_);

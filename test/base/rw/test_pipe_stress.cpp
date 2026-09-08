@@ -4,6 +4,7 @@
  * mode scenarios.
  */
 #include "rw_test_common.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_pipe_mode_matrix`。 Test entry function
@@ -60,7 +61,7 @@ void test_pipe_reuse_stress()
 
     if ((iter & 1u) == 0)
     {
-      ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
+      TEST_ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
       read.ExpectPendingSubmitted();
       ExpectCallResult(write, w(ConstRawData{tx.data(), tx.size()}, write.op),
                        ErrorCode::OK);
@@ -73,9 +74,9 @@ void test_pipe_reuse_stress()
       ExpectCallResult(read, r(RawData{rx.data(), rx.size()}, read.op), ErrorCode::OK);
     }
 
-    ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-    ASSERT(r.Size() == 0);
-    ASSERT(w.Size() == 0);
+    TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+    TEST_ASSERT(r.Size() == 0);
+    TEST_ASSERT(w.Size() == 0);
   }
 }
 
@@ -117,7 +118,7 @@ void test_pipe_block_reuse_stress()
       Thread writer;
       StartDelayedPipeWriter(writer, ctx, "pipe_block_async");
 
-      ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
+      TEST_ASSERT(r(RawData{rx.data(), rx.size()}, read.op) == ErrorCode::OK);
       ExpectWaitOk(write_done);
       JoinThreadIfNeeded(writer);
       ExpectCallResult(write, ctx.result, ErrorCode::OK);
@@ -129,9 +130,9 @@ void test_pipe_block_reuse_stress()
       ExpectCallResult(read, r(RawData{rx.data(), rx.size()}, read.op), ErrorCode::OK);
     }
 
-    ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
-    ASSERT(r.Size() == 0);
-    ASSERT(w.Size() == 0);
+    TEST_ASSERT(std::memcmp(rx.data(), tx.data(), tx.size()) == 0);
+    TEST_ASSERT(r.Size() == 0);
+    TEST_ASSERT(w.Size() == 0);
   }
 }
 

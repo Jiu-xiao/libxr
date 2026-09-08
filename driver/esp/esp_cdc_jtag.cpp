@@ -37,14 +37,15 @@ ESP32CDCJtag::ESP32CDCJtag(size_t rx_buffer_size, size_t tx_buffer_size,
       _read_port(rx_buffer_size, *this),
       _write_port(tx_queue_size, tx_buffer_size)
 {
-  REQUIRE(rx_buffer_size > 0U);
-  REQUIRE(tx_buffer_size > 0U);
-  REQUIRE(tx_queue_size > 0U);
+  ASSERT(rx_buffer_size > 0U);
+  ASSERT(tx_buffer_size > 0U);
+  ASSERT(tx_queue_size > 0U);
 
   INIT_CRIT_SECTION_LOCK_RUNTIME(&irq_lock_);
 
-  REQUIRE(IsConfigSupported(config));
-  REQUIRE(InitHardware() == ErrorCode::OK);
+  ASSERT(IsConfigSupported(config));
+  [[maybe_unused]] const auto init_hardware_result = InitHardware();
+  REQUIRE(init_hardware_result == ErrorCode::OK);
 
   _write_port = WriteFun;
 }
@@ -120,7 +121,8 @@ void ESP32CDCJtag::ServiceEvents(uint32_t events, bool in_isr)
 void ESP32CDCJtag::PushRxBytes(ReadPort::ReadQueue& queue, const uint8_t* data,
                                size_t size, bool in_isr)
 {
-  REQUIRE_FROM_CALLBACK(queue.PushBatch(data, size) == ErrorCode::OK, in_isr);
+  [[maybe_unused]] const auto push_batch_result = queue.PushBatch(data, size);
+  DEV_ASSERT_FROM_CALLBACK(push_batch_result == ErrorCode::OK, in_isr);
 }
 
 void ESP32CDCJtag::DrainRxToQueue(ReadPort::ReadQueue& queue, bool in_isr)
@@ -141,7 +143,7 @@ void ESP32CDCJtag::DrainRxToQueue(ReadPort::ReadQueue& queue, bool in_isr)
     {
       return;
     }
-    REQUIRE_FROM_CALLBACK(static_cast<size_t>(got) <= read_size, in_isr);
+    DEV_ASSERT_FROM_CALLBACK(static_cast<size_t>(got) <= read_size, in_isr);
     PushRxBytes(queue, rx_tmp, static_cast<size_t>(got), in_isr);
   }
 }
@@ -205,7 +207,7 @@ size_t ESP32CDCJtag::FillTxFifo(WritePort::WriteQueue& queue, bool in_isr)
           const int written =
               usb_serial_jtag_ll_write_txfifo(data, static_cast<uint32_t>(size));
           REQUIRE_FROM_CALLBACK(written >= 0, in_isr);
-          REQUIRE_FROM_CALLBACK(static_cast<size_t>(written) <= size, in_isr);
+          DEV_ASSERT_FROM_CALLBACK(static_cast<size_t>(written) <= size, in_isr);
           return written > 0 ? static_cast<size_t>(written) : 0U;
         };
 

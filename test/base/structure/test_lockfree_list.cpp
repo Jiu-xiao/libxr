@@ -21,6 +21,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_lockfree_list`。 Test entry function `test_lockfree_list`.
@@ -41,18 +42,18 @@ void test_lockfree_list()
   list.Add(node2);
   list.Add(node3);
 
-  ASSERT(list.Size() == 3);
+  TEST_ASSERT(list.Size() == 3);
 
   const int expected[] = {30, 20, 10};
   uint32_t index = 0;
-  ASSERT(list.Foreach<int>(
-             [&](int& value)
-             {
-               ASSERT(value == expected[index]);
-               ++index;
-               return LibXR::ErrorCode::OK;
-             }) == LibXR::ErrorCode::OK);
-  ASSERT(index == 3);
+  TEST_ASSERT(list.Foreach<int>(
+                  [&](int& value)
+                  {
+                    TEST_ASSERT(value == expected[index]);
+                    ++index;
+                    return LibXR::ErrorCode::OK;
+                  }) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(index == 3);
 
   index = 0;
   const auto stop_result = list.Foreach<int>(
@@ -61,6 +62,6 @@ void test_lockfree_list()
         ++index;
         return value == 20 ? LibXR::ErrorCode::BUSY : LibXR::ErrorCode::OK;
       });
-  ASSERT(stop_result == LibXR::ErrorCode::BUSY);
-  ASSERT(index == 2);
+  TEST_ASSERT(stop_result == LibXR::ErrorCode::BUSY);
+  TEST_ASSERT(index == 2);
 }

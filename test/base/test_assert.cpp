@@ -18,6 +18,8 @@
  * side effects after a real dispatch to confirm both registration and parameter
  * forwarding paths.
  */
+#include "test_assert.hpp"
+
 #include <cstdint>
 #include <string_view>
 
@@ -68,7 +70,7 @@ void test_assert()
   // Test item: register the probe callback and verify the public getter reports a
   // non-empty fatal callback.
   LibXR::Assert::RegisterFatalErrorCallback(callback);
-  ASSERT(!LibXR::Assert::FatalErrorCallback().Empty());
+  TEST_ASSERT(!LibXR::Assert::FatalErrorCallback().Empty());
 
   // 测试项：通过封装后的执行入口触发 fatal 回调，而不是直接访问全局存储。
   // Test item: dispatch through the wrapped run entry instead of reaching into global
@@ -78,10 +80,10 @@ void test_assert()
   // 测试项：确认回调只执行一次，并且 ISR 标志、文件名、行号都原样透传。
   // Test item: verify one callback hit and exact propagation of ISR flag, file name, and
   // line number.
-  ASSERT(probe.hit_count == 1);
-  ASSERT(!probe.in_isr);
-  ASSERT(probe.file == "test_assert.cpp");
-  ASSERT(probe.line == 42);
+  TEST_ASSERT(probe.hit_count == 1);
+  TEST_ASSERT(!probe.in_isr);
+  TEST_ASSERT(probe.file == "test_assert.cpp");
+  TEST_ASSERT(probe.line == 42);
 
   // 测试项：恢复进入本测试前的 fatal 回调，保持测试入口的全局状态契约。
   // Test item: restore the fatal callback that was active before this test to preserve

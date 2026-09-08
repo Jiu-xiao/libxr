@@ -19,6 +19,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 /**
  * @brief 测试入口函数 `test_kinematic`。 Test entry function `test_kinematic`.
@@ -84,7 +85,7 @@ void test_kinematic()
   auto error_pos = object_endpoint.GetPositionError();
   auto error_quat = object_endpoint.GetQuaternionError();
 
-  ASSERT(error_pos.norm() < 1e-3);
-  ASSERT(std::abs(error_quat.x()) < 1e-2 && std::abs(error_quat.y()) < 1e-2 &&
-         std::abs(error_quat.z()) < 1e-2 && std::abs(error_quat.w() - 1.0) < 1e-2);
+  TEST_ASSERT(error_pos.norm() < 1e-3);
+  TEST_ASSERT(std::abs(error_quat.x()) < 1e-2 && std::abs(error_quat.y()) < 1e-2 &&
+              std::abs(error_quat.z()) < 1e-2 && std::abs(error_quat.w() - 1.0) < 1e-2);
 }

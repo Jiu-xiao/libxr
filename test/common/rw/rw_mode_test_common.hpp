@@ -11,6 +11,7 @@
 #include "libxr_pipe.hpp"
 #include "libxr_rw.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace LibXRTest
 {
@@ -82,11 +83,12 @@ struct ModeHarness
   {
     if (mode == TestMode::POLLING)
     {
-      ASSERT(polling_status.load(std::memory_order_acquire) == PollingStatus::RUNNING);
+      TEST_ASSERT(polling_status.load(std::memory_order_acquire) ==
+                  PollingStatus::RUNNING);
     }
     else if (mode == TestMode::CALLBACK)
     {
-      ASSERT(probe.count.load(std::memory_order_acquire) == 0);
+      TEST_ASSERT(probe.count.load(std::memory_order_acquire) == 0);
     }
   }
 
@@ -100,15 +102,15 @@ struct ModeHarness
       case TestMode::NONE:
         return;
       case TestMode::POLLING:
-        ASSERT(polling_status.load(std::memory_order_acquire) ==
-               ((expected == LibXR::ErrorCode::OK) ? PollingStatus::DONE
-                                                   : PollingStatus::ERROR));
+        TEST_ASSERT(polling_status.load(std::memory_order_acquire) ==
+                    ((expected == LibXR::ErrorCode::OK) ? PollingStatus::DONE
+                                                        : PollingStatus::ERROR));
         return;
       case TestMode::CALLBACK:
-        ASSERT(probe.sem.Wait(ASYNC_TIMEOUT_MS) == LibXR::ErrorCode::OK);
-        ASSERT(probe.count.load(std::memory_order_acquire) == 1);
-        ASSERT(static_cast<LibXR::ErrorCode>(
-                   probe.last.load(std::memory_order_acquire)) == expected);
+        TEST_ASSERT(probe.sem.Wait(ASYNC_TIMEOUT_MS) == LibXR::ErrorCode::OK);
+        TEST_ASSERT(probe.count.load(std::memory_order_acquire) == 1);
+        TEST_ASSERT(static_cast<LibXR::ErrorCode>(
+                        probe.last.load(std::memory_order_acquire)) == expected);
         return;
       case TestMode::BLOCK:
         return;

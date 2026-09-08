@@ -16,6 +16,7 @@
 
 #include "linux_uart.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -30,7 +31,7 @@ void WaitUntil(Predicate predicate)
   const auto deadline = Clock::now() + WAIT_LIMIT;
   while (!predicate())
   {
-    ASSERT(Clock::now() < deadline);
+    TEST_ASSERT(Clock::now() < deadline);
     Thread::Sleep(1);
   }
 }
@@ -40,20 +41,20 @@ struct Pty
   Pty()
   {
     master = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
-    ASSERT(master >= 0);
-    ASSERT(grantpt(master) == 0);
-    ASSERT(unlockpt(master) == 0);
+    TEST_ASSERT(master >= 0);
+    TEST_ASSERT(grantpt(master) == 0);
+    TEST_ASSERT(unlockpt(master) == 0);
     char* name = ptsname(master);
-    ASSERT(name != nullptr);
+    TEST_ASSERT(name != nullptr);
     path = name;
     observer = open(path.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
-    ASSERT(observer >= 0);
+    TEST_ASSERT(observer >= 0);
   }
 
   uint32_t Baudrate() const
   {
     termios2 config{};
-    ASSERT(ioctl(observer, TCGETS2, &config) == 0);
+    TEST_ASSERT(ioctl(observer, TCGETS2, &config) == 0);
     return config.c_ospeed;
   }
 
@@ -69,8 +70,8 @@ struct Pty
         offset += static_cast<size_t>(count);
         continue;
       }
-      ASSERT(count < 0 && (errno == EINTR || errno == EAGAIN));
-      ASSERT(Clock::now() < deadline);
+      TEST_ASSERT(count < 0 && (errno == EINTR || errno == EAGAIN));
+      TEST_ASSERT(Clock::now() < deadline);
       Thread::Sleep(1);
     }
   }
@@ -88,8 +89,8 @@ struct Pty
         offset += static_cast<size_t>(count);
         continue;
       }
-      ASSERT(count < 0 && (errno == EINTR || errno == EAGAIN));
-      ASSERT(Clock::now() < deadline);
+      TEST_ASSERT(count < 0 && (errno == EINTR || errno == EAGAIN));
+      TEST_ASSERT(Clock::now() < deadline);
       Thread::Sleep(1);
     }
     return data;
@@ -98,7 +99,7 @@ struct Pty
   void ExpectNoOutput()
   {
     pollfd item{master, POLLIN, 0};
-    ASSERT(poll(&item, 1, 20) == 0);
+    TEST_ASSERT(poll(&item, 1, 20) == 0);
   }
 
   int master = -1;
@@ -130,7 +131,7 @@ struct DevicePath
 {
   explicit DevicePath(const Pty* initial = nullptr)
   {
-    ASSERT(mkdtemp(directory) != nullptr);
+    TEST_ASSERT(mkdtemp(directory) != nullptr);
     path = std::string(directory) + "/uart";
     if (initial != nullptr)
     {
@@ -141,25 +142,28 @@ struct DevicePath
       // 普通文件可打开，但无法配置为串口，用于验证首次打开恢复。
       // A regular file opens but rejects TTY configuration, exercising initial recovery.
       const int fd = open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0600);
-      ASSERT(fd >= 0);
-      ASSERT(close(fd) == 0);
+      TEST_ASSERT(fd >= 0);
+      TEST_ASSERT(close(fd) == 0);
     }
   }
 
   ~DevicePath()
   {
     Remove();
-    ASSERT(rmdir(directory) == 0);
+    TEST_ASSERT(rmdir(directory) == 0);
   }
 
-  void Remove() { ASSERT(unlink(path.c_str()) == 0); }
-  void Connect(const Pty& pty) { ASSERT(symlink(pty.path.c_str(), path.c_str()) == 0); }
+  void Remove() { TEST_ASSERT(unlink(path.c_str()) == 0); }
+  void Connect(const Pty& pty)
+  {
+    TEST_ASSERT(symlink(pty.path.c_str(), path.c_str()) == 0);
+  }
 
   void Disconnect(const Pty& pty)
   {
     Remove();
-    ASSERT(close(pty.observer) == 0);
-    ASSERT(close(pty.master) == 0);
+    TEST_ASSERT(close(pty.observer) == 0);
+    TEST_ASSERT(close(pty.master) == 0);
   }
 
   char directory[sizeof("/tmp/libxr-uart-test-XXXXXX")] = "/tmp/libxr-uart-test-XXXXXX";
@@ -184,7 +188,7 @@ struct Fixture
   {
     uart = new LinuxUART(pty.path.c_str(), 115200, UART::Parity::NO_PARITY, 8, 1, 8,
                          capacity);
-    ASSERT(pty.Baudrate() == 115200);
+    TEST_ASSERT(pty.Baudrate() == 115200);
   }
 
   Pty pty;
@@ -209,11 +213,12 @@ void test_linux_uart_rx_backpressure()
     std::array<uint8_t, 64> chunk{};
     Semaphore sem;
     ReadOperation op(sem, 1000);
-    ASSERT(fixture->uart->Read(RawData{chunk.data(), chunk.size()}, op) == ErrorCode::OK);
+    TEST_ASSERT(fixture->uart->Read(RawData{chunk.data(), chunk.size()}, op) ==
+                ErrorCode::OK);
     received.insert(received.end(), chunk.begin(), chunk.end());
   }
-  ASSERT(received == expected);
-  ASSERT(fixture->uart->read_port_->Size() == 0);
+  TEST_ASSERT(received == expected);
+  TEST_ASSERT(fixture->uart->read_port_->Size() == 0);
 }
 
 /**
@@ -224,27 +229,27 @@ void test_linux_uart_tx_backpressure()
   constexpr size_t PAYLOAD_SIZE = 256 * 1024;
   auto* fixture = new Fixture(PAYLOAD_SIZE + 64);
   auto expected = Pattern(PAYLOAD_SIZE);
-  ASSERT(fixture->uart->Write(ConstRawData{expected.data(), expected.size()},
-                              fixture->completion.op) == ErrorCode::OK);
+  TEST_ASSERT(fixture->uart->Write(ConstRawData{expected.data(), expected.size()},
+                                   fixture->completion.op) == ErrorCode::OK);
   WaitUntil(
       [&]
       {
         const auto remaining = fixture->uart->write_port_->Size();
         return remaining > 0 && remaining < PAYLOAD_SIZE;
       });
-  ASSERT(fixture->completion.Is(PollingStatus::RUNNING));
+  TEST_ASSERT(fixture->completion.Is(PollingStatus::RUNNING));
   const UART::Configuration config{57600, UART::Parity::NO_PARITY, 8, 1};
-  ASSERT(fixture->uart->SetConfig(config) == ErrorCode::OK);
-  ASSERT(fixture->pty.Baudrate() == 115200);
+  TEST_ASSERT(fixture->uart->SetConfig(config) == ErrorCode::OK);
+  TEST_ASSERT(fixture->pty.Baudrate() == 115200);
 
   const std::vector<uint8_t> suffix{0, 0xFF, '\r', '\n', 0x11, 0x13};
   auto* suffix_completion = new Completion;
-  ASSERT(fixture->uart->Write(ConstRawData{suffix.data(), suffix.size()},
-                              suffix_completion->op) == ErrorCode::OK);
+  TEST_ASSERT(fixture->uart->Write(ConstRawData{suffix.data(), suffix.size()},
+                                   suffix_completion->op) == ErrorCode::OK);
   expected.insert(expected.end(), suffix.begin(), suffix.end());
-  ASSERT(fixture->pty.Receive(expected.size()) == expected);
+  TEST_ASSERT(fixture->pty.Receive(expected.size()) == expected);
   suffix_completion->Wait();
-  ASSERT(fixture->completion.Is(PollingStatus::DONE));
+  TEST_ASSERT(fixture->completion.Is(PollingStatus::DONE));
   WaitUntil([&] { return fixture->pty.Baudrate() == config.baudrate; });
 }
 
@@ -258,12 +263,12 @@ void test_linux_uart_block_timeout()
   const auto expected = Pattern(256 * 1024);
   auto* sem = new Semaphore;
   WriteOperation op(*sem, 30);
-  ASSERT(fixture->uart->Write(ConstRawData{expected.data(), expected.size()}, op) ==
-         ErrorCode::TIMEOUT);
-  ASSERT(fixture->uart->write_port_->Size() > 0);
-  ASSERT(fixture->pty.Receive(expected.size()) == expected);
+  TEST_ASSERT(fixture->uart->Write(ConstRawData{expected.data(), expected.size()}, op) ==
+              ErrorCode::TIMEOUT);
+  TEST_ASSERT(fixture->uart->write_port_->Size() > 0);
+  TEST_ASSERT(fixture->pty.Receive(expected.size()) == expected);
   WaitUntil([&] { return fixture->uart->write_port_->Size() == 0; });
-  ASSERT(sem->Value() == 0);
+  TEST_ASSERT(sem->Value() == 0);
 }
 
 /**
@@ -282,7 +287,7 @@ void test_linux_uart_callback_write()
   auto* callback = new WriteOperation::Callback(WriteOperation::Callback::Create(
       [](bool in_isr, Context* self, ErrorCode result)
       {
-        ASSERT(!in_isr && result == ErrorCode::OK);
+        TEST_ASSERT(!in_isr && result == ErrorCode::OK);
         self->submit_result = self->fixture.uart->Write(
             ConstRawData{self->second.data(), self->second.size()},
             self->fixture.completion.op);
@@ -291,12 +296,12 @@ void test_linux_uart_callback_write()
       ctx));
   WriteOperation op(*callback);
   const std::array<uint8_t, 3> first{1, 2, 3};
-  ASSERT(ctx->fixture.uart->Write(ConstRawData{first.data(), first.size()}, op) ==
-         ErrorCode::OK);
-  ASSERT(ctx->fixture.pty.Receive(6) == std::vector<uint8_t>({1, 2, 3, 4, 5, 6}));
+  TEST_ASSERT(ctx->fixture.uart->Write(ConstRawData{first.data(), first.size()}, op) ==
+              ErrorCode::OK);
+  TEST_ASSERT(ctx->fixture.pty.Receive(6) == std::vector<uint8_t>({1, 2, 3, 4, 5, 6}));
   ctx->fixture.completion.Wait();
-  ASSERT(ctx->calls.load(std::memory_order_acquire) == 1);
-  ASSERT(ctx->submit_result == ErrorCode::OK);
+  TEST_ASSERT(ctx->calls.load(std::memory_order_acquire) == 1);
+  TEST_ASSERT(ctx->submit_result == ErrorCode::OK);
 }
 
 /**
@@ -309,17 +314,18 @@ void test_linux_uart_stream_config()
   auto* stream =
       new WritePort::Stream(fixture->uart->write_port_, fixture->completion.op);
   const auto expected = Pattern(32);
-  ASSERT(stream->Write(ConstRawData{expected.data(), expected.size()}) == ErrorCode::OK);
+  TEST_ASSERT(stream->Write(ConstRawData{expected.data(), expected.size()}) ==
+              ErrorCode::OK);
   fixture->pty.ExpectNoOutput();
   UART::Configuration config{57600, UART::Parity::NO_PARITY, 8, 1};
-  ASSERT(fixture->uart->SetConfig(config) == ErrorCode::OK);
+  TEST_ASSERT(fixture->uart->SetConfig(config) == ErrorCode::OK);
   WaitUntil([&] { return fixture->pty.Baudrate() == config.baudrate; });
   fixture->pty.ExpectNoOutput();
-  ASSERT(stream->Commit() == ErrorCode::OK);
-  ASSERT(fixture->pty.Receive(expected.size()) == expected);
+  TEST_ASSERT(stream->Commit() == ErrorCode::OK);
+  TEST_ASSERT(fixture->pty.Receive(expected.size()) == expected);
   fixture->completion.Wait();
   config.baudrate = 0;
-  ASSERT(fixture->uart->SetConfig(config) == ErrorCode::ARG_ERR);
+  TEST_ASSERT(fixture->uart->SetConfig(config) == ErrorCode::ARG_ERR);
 }
 
 /**
@@ -332,7 +338,7 @@ void test_linux_uart_reconnect()
   auto* next_pty = new Pty;
   DevicePath device(old_pty);
   auto* uart = new LinuxUART(device.path.c_str());
-  ASSERT(old_pty->Baudrate() == 115200);
+  TEST_ASSERT(old_pty->Baudrate() == 115200);
   device.Disconnect(*old_pty);
 
   // 先确认旧 fd 已关闭，再提交尚未尝试发送的新请求。
@@ -353,23 +359,23 @@ void test_linux_uart_reconnect()
       });
   auto* completion = new Completion;
   const auto expected = Pattern(48);
-  ASSERT(uart->Write(ConstRawData{expected.data(), expected.size()}, completion->op) ==
-         ErrorCode::OK);
+  TEST_ASSERT(uart->Write(ConstRawData{expected.data(), expected.size()},
+                          completion->op) == ErrorCode::OK);
   const UART::Configuration config{38400, UART::Parity::NO_PARITY, 8, 1};
-  ASSERT(uart->SetConfig(config) == ErrorCode::OK);
-  ASSERT(uart->SetConfig(config) == ErrorCode::BUSY);
+  TEST_ASSERT(uart->SetConfig(config) == ErrorCode::OK);
+  TEST_ASSERT(uart->SetConfig(config) == ErrorCode::BUSY);
   auto* received = new std::array<uint8_t, 48>;
   auto* read_completion = new Completion;
-  ASSERT(uart->Read(RawData{received->data(), received->size()}, read_completion->op) ==
-         ErrorCode::OK);
+  TEST_ASSERT(uart->Read(RawData{received->data(), received->size()},
+                         read_completion->op) == ErrorCode::OK);
 
   device.Connect(*next_pty);
-  ASSERT(next_pty->Receive(expected.size()) == expected);
-  ASSERT(next_pty->Baudrate() == config.baudrate);
+  TEST_ASSERT(next_pty->Receive(expected.size()) == expected);
+  TEST_ASSERT(next_pty->Baudrate() == config.baudrate);
   next_pty->Send(expected);
   read_completion->Wait();
-  ASSERT(std::memcmp(received->data(), expected.data(), expected.size()) == 0);
-  ASSERT(completion->Is(PollingStatus::DONE));
+  TEST_ASSERT(std::memcmp(received->data(), expected.data(), expected.size()) == 0);
+  TEST_ASSERT(completion->Is(PollingStatus::DONE));
 }
 
 /**
@@ -385,8 +391,8 @@ void test_linux_uart_partial_disconnect()
                              8, PAYLOAD_SIZE + 64);
   const auto first = Pattern(PAYLOAD_SIZE);
   auto* first_completion = new Completion;
-  ASSERT(uart->Write(ConstRawData{first.data(), first.size()}, first_completion->op) ==
-         ErrorCode::OK);
+  TEST_ASSERT(uart->Write(ConstRawData{first.data(), first.size()},
+                          first_completion->op) == ErrorCode::OK);
   WaitUntil(
       [&]
       {
@@ -395,14 +401,14 @@ void test_linux_uart_partial_disconnect()
       });
   const auto second = Pattern(32);
   auto* second_completion = new Completion;
-  ASSERT(uart->Write(ConstRawData{second.data(), second.size()}, second_completion->op) ==
-         ErrorCode::OK);
+  TEST_ASSERT(uart->Write(ConstRawData{second.data(), second.size()},
+                          second_completion->op) == ErrorCode::OK);
 
   device.Disconnect(*old_pty);
   first_completion->Wait(PollingStatus::ERROR);
-  ASSERT(second_completion->Is(PollingStatus::RUNNING));
+  TEST_ASSERT(second_completion->Is(PollingStatus::RUNNING));
   device.Connect(*next_pty);
-  ASSERT(next_pty->Receive(second.size()) == second);
+  TEST_ASSERT(next_pty->Receive(second.size()) == second);
   second_completion->Wait();
   next_pty->ExpectNoOutput();
 }
@@ -417,10 +423,10 @@ void test_linux_uart_initial_open_recovery()
   auto* uart = new LinuxUART(device.path.c_str());
   auto* completion = new Completion;
   const auto expected = Pattern(32);
-  ASSERT(uart->Write(ConstRawData{expected.data(), expected.size()}, completion->op) ==
-         ErrorCode::OK);
+  TEST_ASSERT(uart->Write(ConstRawData{expected.data(), expected.size()},
+                          completion->op) == ErrorCode::OK);
   device.Remove();
   device.Connect(*pty);
-  ASSERT(pty->Receive(expected.size()) == expected);
+  TEST_ASSERT(pty->Receive(expected.size()) == expected);
   completion->Wait();
 }

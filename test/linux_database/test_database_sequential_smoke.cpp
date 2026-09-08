@@ -10,6 +10,7 @@
  *          2. `Save()` persists the key object's current value.
  */
 #include "linux_database_test_common.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -48,17 +49,17 @@ void TestLinuxDatabaseSequentialSmoke()
     k3.Load();
     k4.Load();
 
-    ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
-    ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
-    ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
-    ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
+    TEST_ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
+    TEST_ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
+    TEST_ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
+    TEST_ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
 
     for (int j = 0; j < Thread::GetTime() % 100; j++)
     {
       data_k4[1] = Thread::GetTime() + j;
       k4 = data_k4;
       k4.Load();
-      ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
+      TEST_ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
     }
 
     for (int j = 0; j < Thread::GetTime() % 100; j++)
@@ -66,7 +67,7 @@ void TestLinuxDatabaseSequentialSmoke()
       data_k1[0] = Thread::GetTime() + j;
       k1 = data_k1;
       k1.Load();
-      ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
+      TEST_ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
     }
 
     for (int j = 0; j < Thread::GetTime() % 100; ++j)
@@ -75,10 +76,10 @@ void TestLinuxDatabaseSequentialSmoke()
       k2.Load();
       k3.Load();
       k4.Load();
-      ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
-      ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
-      ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
-      ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
+      TEST_ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
+      TEST_ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
+      TEST_ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
+      TEST_ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
     }
 
     for (int j = 0; j < Thread::GetTime() % 100; j++)
@@ -87,13 +88,13 @@ void TestLinuxDatabaseSequentialSmoke()
       data_k2[1] = LibXR::Timebase::GetMilliseconds();
       k2 = data_k2;
       k2.Load();
-      ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
+      TEST_ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
     }
 
-    ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
-    ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
-    ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
-    ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
+    TEST_ASSERT(std::memcmp(data_k1.data(), k1.data_.data(), sizeof(data_k1)) == 0);
+    TEST_ASSERT(std::memcmp(data_k2.data(), k2.data_.data(), sizeof(data_k2)) == 0);
+    TEST_ASSERT(std::memcmp(data_k3.data(), k3.data_.data(), sizeof(data_k3)) == 0);
+    TEST_ASSERT(std::memcmp(data_k4.data(), k4.data_.data(), sizeof(data_k4)) == 0);
   }
 }
 
@@ -109,8 +110,8 @@ void TestDatabaseSequentialSaveCurrentValue()
 
   DatabaseRawSequential::Key<uint32_t> key(db, "seq", 1);
   key.data_ = 2;
-  ASSERT(key.Save() == ErrorCode::OK);
-  ASSERT(ReopenSequentialDatabaseValue(path, 0, "seq") == 2);
+  TEST_ASSERT(key.Save() == ErrorCode::OK);
+  TEST_ASSERT(ReopenSequentialDatabaseValue(path, 0, "seq") == 2);
 }
 
 }  // namespace

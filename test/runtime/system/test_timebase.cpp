@@ -17,6 +17,7 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
 #include "test.hpp"
+#include "test_assert.hpp"
 
 namespace
 {
@@ -61,16 +62,16 @@ void test_timebase()
   end_us = LibXR::Timebase::GetMicroseconds();
   end_ms = LibXR::Timebase::GetMilliseconds();
 
-  ASSERT(std::fabs((end_ms - start_ms).ToMillisecond() - 100.0f) < 10);
-  ASSERT(std::fabs((end_us - start_us).ToMicrosecond() - 100000.0f) < 10000);
+  TEST_ASSERT(std::fabs((end_ms - start_ms).ToMillisecond() - 100.0f) < 10);
+  TEST_ASSERT(std::fabs((end_us - start_us).ToMicrosecond() - 100000.0f) < 10000);
 
   TimebaseWrapProbe::Set(old_max_valid_us, 999u);
-  ASSERT((LibXR::MillisecondTimestamp(3u) - LibXR::MillisecondTimestamp(998u))
-             .ToMillisecond() == 5u);
+  TEST_ASSERT((LibXR::MillisecondTimestamp(3u) - LibXR::MillisecondTimestamp(998u))
+                  .ToMillisecond() == 5u);
 
   TimebaseWrapProbe::Set(999999u, 999u);
-  ASSERT((LibXR::MicrosecondTimestamp(7u) - LibXR::MicrosecondTimestamp(999995u))
-             .ToMicrosecond() == 12u);
+  TEST_ASSERT((LibXR::MicrosecondTimestamp(7u) - LibXR::MicrosecondTimestamp(999995u))
+                  .ToMicrosecond() == 12u);
 
   TimebaseWrapProbe::Set(old_max_valid_us, old_max_valid_ms);
 }

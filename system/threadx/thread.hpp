@@ -87,7 +87,7 @@ class Thread
         thread_handle_, const_cast<char*>(name), ThreadBlock::Port, ULONG(block),
         stack_buffer, stack_depth, static_cast<UINT>(priority),
         static_cast<UINT>(priority), TX_NO_TIME_SLICE, TX_AUTO_START);
-    ASSERT(status == TX_SUCCESS);
+    REQUIRE(status == TX_SUCCESS);
   }
 
   /**
