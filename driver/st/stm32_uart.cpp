@@ -240,15 +240,27 @@ void STM32UART::HandleTxService(uint32_t events, bool in_isr)
     }
   }
 
-  if ((events & TX_EVENT_DONE) != 0U)
+  if (abort_pending_)
   {
-    HandleTxDone(in_isr);
-  }
-
-  if ((events & TX_EVENT_ABORT) != 0U)
-  {
+    if ((events & TX_EVENT_ABORT) == 0U)
+    {
+      return;
+    }
     last_rx_pos_ = 0U;
     SetRxDMA(in_isr);
+    HandleTxDone(in_isr);
+    abort_pending_ = false;
+  }
+  else if ((events & TX_EVENT_ERROR) != 0U)
+  {
+    // 中止可能同步完成，调用 HAL 前先记录等待状态。
+    // Record the wait before calling HAL, which may complete the abort synchronously.
+    abort_pending_ = true;
+    REQUIRE_FROM_CALLBACK(HAL_UART_Abort_IT(uart_handle_) == HAL_OK, in_isr);
+    return;
+  }
+  else if ((events & TX_EVENT_DONE) != 0U)
+  {
     HandleTxDone(in_isr);
   }
 
@@ -549,6 +561,12 @@ void STM32UART::RxEventIRQHandler()
                      { HandleTxService(events, in_isr); });
 }
 
+void STM32UART::ErrorIRQHandler()
+{
+  tx_service_.Invoke(TX_EVENT_ERROR, true, [this](uint32_t events, bool in_isr)
+                     { HandleTxService(events, in_isr); });
+}
+
 void STM32UART::AbortCompleteIRQHandler()
 {
   tx_service_.Invoke(TX_EVENT_ABORT, true, [this](uint32_t events, bool in_isr)
@@ -582,7 +600,16 @@ extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
 
 extern "C" __attribute__((used)) void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
-  HAL_UART_Abort_IT(huart);
+  const auto id = stm32_uart_get_id(huart->Instance);
+  if (id == STM32_UART_ID_ERROR)
+  {
+    return;
+  }
+  auto* uart = STM32UART::map[id];
+  if (uart != nullptr)
+  {
+    uart->ErrorIRQHandler();
+  }
 }
 
 extern "C" void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)

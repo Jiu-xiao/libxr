@@ -165,6 +165,8 @@ class STM32UART : public UART
   void TxCompleteIRQHandler();
   /// 通知接收位置变化 / Notify RX position changes.
   void RxEventIRQHandler();
+  /// 通知错误，由后端处理器启动中止 / Report an error; the service initiates the abort.
+  void ErrorIRQHandler();
   /// 通知 HAL 中止完成，由后端恢复收发 / Notify HAL abort completion for backend
   /// recovery.
   void AbortCompleteIRQHandler();
@@ -205,6 +207,7 @@ class STM32UART : public UART
   static constexpr uint32_t TX_EVENT_CONFIG = 1U << 2U;
   static constexpr uint32_t TX_EVENT_RX_WORK = 1U << 3U;
   static constexpr uint32_t TX_EVENT_ABORT = 1U << 4U;
+  static constexpr uint32_t TX_EVENT_ERROR = 1U << 5U;
 
   /// 串行处理收发和配置通知 / Serialize RX, TX, and configuration progress.
   void HandleTxService(uint32_t events, bool in_isr);
@@ -223,6 +226,10 @@ class STM32UART : public UART
 
   /// 共享的收发与配置处理器 / Shared RX, TX, and configuration service.
   SerializedService tx_service_;
+  /// 中止完成前保留发送半区并暂停硬件操作，仅处理器访问。
+  /// Retain the TX half and defer hardware operations until abort completion;
+  /// service-only.
+  bool abort_pending_ = false;
   /// 配置槽的并发发布状态 / Concurrent configuration slot state.
   std::atomic<ConfigState> config_state_{ConfigState::EMPTY};
   /// 由调用者发布、后端应用的配置 / Caller-published configuration for backend
