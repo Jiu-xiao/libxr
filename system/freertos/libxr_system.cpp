@@ -42,7 +42,7 @@ void* operator new(std::size_t size)
 {
   if (size == 0)
   {
-    return pvPortMalloc(size);
+    size = sizeof(std::size_t);
   }
 
 #ifdef LIBXR_DEBUG_BUILD
