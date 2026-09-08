@@ -3,6 +3,8 @@
  * @brief `LinuxSharedTopic` attach/queue 语义子验证。 Split verification unit for
  * `LinuxSharedTopic` attach and queue semantics.
  */
+#include <thread>
+
 #include "linux_shm_topic_test_common.hpp"
 #include "test_assert.hpp"
 
@@ -86,6 +88,25 @@ void RunAttachQueueScenarios()
                 static_cast<uint64_t>(timestamp2));
     TEST_ASSERT(subscriber.GetPendingNum() == 0);
     subscriber.Release();
+
+    // 消费完一批消息后，旧唤醒提示不能被当成仍有消息。
+    // A wake hint left by a drained batch must not report another message.
+    TEST_ASSERT(subscriber.Wait(2) == LibXR::ErrorCode::TIMEOUT);
+    std::thread next_publish(
+        [&publisher]()
+        {
+          LibXR::Thread::Sleep(10);
+          SharedData next;
+          TEST_ASSERT(publisher.CreateData(next) == LibXR::ErrorCode::OK);
+          FillFrame(*next.GetData(), 103);
+          TEST_ASSERT(publisher.Publish(next) == LibXR::ErrorCode::OK);
+        });
+    const auto wait_result = subscriber.Wait(LONG_WAIT_MS);
+    next_publish.join();
+    TEST_ASSERT(wait_result == LibXR::ErrorCode::OK);
+    AssertFrame(*subscriber.GetData(), 103);
+    subscriber.Release();
+    TEST_ASSERT(subscriber.Wait(2) == LibXR::ErrorCode::TIMEOUT);
   }
   // BROADCAST_FULL should fail publish when the subscriber queue is saturated.
   UNUSED(SharedTopic::Remove(topic_name));

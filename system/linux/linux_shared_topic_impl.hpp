@@ -449,7 +449,7 @@ class LinuxSharedTopic : public Topic
         {
           topic.subscribers_[i].queue_head.store(0, std::memory_order_release);
           topic.subscribers_[i].queue_tail.store(0, std::memory_order_release);
-          topic.subscribers_[i].ready_sem_count.store(0, std::memory_order_release);
+          topic.subscribers_[i].ready_signal.store(0, std::memory_order_release);
           topic.subscribers_[i].dropped_messages.store(0, std::memory_order_release);
           topic.subscribers_[i].owner_pid.store(topic.self_identity_.pid,
                                                 std::memory_order_release);
@@ -949,7 +949,8 @@ class LinuxSharedTopic : public Topic
     std::atomic<uint32_t> mode;
     std::atomic<uint32_t> queue_head;
     std::atomic<uint32_t> queue_tail;
-    std::atomic<uint32_t> ready_sem_count;
+    std::atomic<uint32_t>
+        ready_signal;  ///< 唤醒提示，不表示队列长度 / Wake hint, not size.
     std::atomic<uint64_t> dropped_messages;
     std::atomic<uint32_t> owner_pid;
     std::atomic<uint64_t> owner_starttime;
@@ -968,7 +969,7 @@ class LinuxSharedTopic : public Topic
   };
 
   static constexpr uint64_t MAGIC = 0x4c58524950435348ULL;
-  static constexpr uint32_t VERSION = 2;
+  static constexpr uint32_t VERSION = 3;
   static constexpr uint32_t INIT_READY = 1;
   static constexpr uint32_t INVALID_INDEX = UINT32_MAX;
 
@@ -1261,7 +1262,7 @@ class LinuxSharedTopic : public Topic
           std::memory_order_release);
       subscribers_[i].queue_head.store(0, std::memory_order_release);
       subscribers_[i].queue_tail.store(0, std::memory_order_release);
-      subscribers_[i].ready_sem_count.store(0, std::memory_order_release);
+      subscribers_[i].ready_signal.store(0, std::memory_order_release);
       subscribers_[i].dropped_messages.store(0, std::memory_order_release);
       subscribers_[i].owner_pid.store(0, std::memory_order_release);
       subscribers_[i].owner_starttime.store(0, std::memory_order_release);
@@ -1637,20 +1638,19 @@ class LinuxSharedTopic : public Topic
 
   static void PostReady(SubscriberControl& control)
   {
-    control.ready_sem_count.fetch_add(1, std::memory_order_release);
-    FutexWake(&control.ready_sem_count);
+    control.ready_signal.store(1, std::memory_order_release);
+    FutexWake(&control.ready_signal);
   }
 
-  static void ConsumeReady(SubscriberControl& control)
+  static bool HasQueuedData(const SubscriberControl& control)
   {
-    [[maybe_unused]] const uint32_t prev =
-        control.ready_sem_count.fetch_sub(1, std::memory_order_acq_rel);
-    DEV_ASSERT(prev > 0);
+    return control.queue_head.load(std::memory_order_acquire) !=
+           control.queue_tail.load(std::memory_order_acquire);
   }
 
   static ErrorCode WaitReady(SubscriberControl& control, uint32_t timeout_ms)
   {
-    if (control.ready_sem_count.load(std::memory_order_acquire) != 0)
+    if (HasQueuedData(control))
     {
       return ErrorCode::OK;
     }
@@ -1660,7 +1660,10 @@ class LinuxSharedTopic : public Topic
 
     while (true)
     {
-      if (control.ready_sem_count.load(std::memory_order_acquire) != 0)
+      // 先清提示再检查队列，覆盖检查与进入 futex 等待之间的发布。
+      // Clear the hint before checking the queue so a later publication prevents sleep.
+      control.ready_signal.exchange(0, std::memory_order_acq_rel);
+      if (HasQueuedData(control))
       {
         return ErrorCode::OK;
       }
@@ -1677,7 +1680,7 @@ class LinuxSharedTopic : public Topic
 
       wait_ms = MonotonicTime::WaitSliceMilliseconds(wait_ms);
 
-      const int futex_ans = FutexWait(&control.ready_sem_count, 0, wait_ms);
+      const int futex_ans = FutexWait(&control.ready_signal, 0, wait_ms);
       if (futex_ans == 0 || errno == EAGAIN || errno == EINTR)
       {
         continue;
@@ -1690,7 +1693,7 @@ class LinuxSharedTopic : public Topic
           continue;
         }
         if (MonotonicTime::RemainingMilliseconds(deadline_ms) == 0 &&
-            control.ready_sem_count.load(std::memory_order_acquire) == 0)
+            !HasQueuedData(control))
         {
           return ErrorCode::TIMEOUT;
         }
@@ -1763,7 +1766,6 @@ class LinuxSharedTopic : public Topic
       if (control.queue_head.compare_exchange_weak(
               head, next_head, std::memory_order_acq_rel, std::memory_order_relaxed))
       {
-        ConsumeReady(control);
         return ErrorCode::OK;
       }
     }
@@ -1789,7 +1791,6 @@ class LinuxSharedTopic : public Topic
               head, next_head, std::memory_order_acq_rel, std::memory_order_relaxed))
       {
         control.dropped_messages.fetch_add(1, std::memory_order_relaxed);
-        ConsumeReady(control);
         ReleaseSlot(descriptor.slot_index);
         return ErrorCode::OK;
       }
