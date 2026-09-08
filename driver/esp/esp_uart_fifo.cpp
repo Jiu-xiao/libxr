@@ -6,21 +6,22 @@
 
 namespace
 {
-// FIFO RX interrupt reasons handled by the non-DMA path.
 // 非 DMA 路径处理的 FIFO RX 中断原因。
+// FIFO RX interrupt reasons handled by the non-DMA path.
 constexpr uint32_t UART_RX_INTR_MASK =
     UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_RXFIFO_OVF;
 
-// FIFO TX interrupt reason handled by the non-DMA path.
 // 非 DMA 路径处理的 FIFO TX 中断原因。
+// FIFO TX interrupt reason handled by the non-DMA path.
 constexpr uint32_t UART_TX_INTR_MASK = UART_INTR_TXFIFO_EMPTY;
+constexpr uint32_t UART_TX_IDLE_INTR_MASK = UART_INTR_TX_DONE;
 }  // namespace
 
 namespace LibXR
 {
 
-// ISR entry only forwards control into the object instance.
 // ISR 入口只负责把控制转发给对象实例。
+// ISR entry only forwards control into the object instance.
 void IRAM_ATTR ESP32UART::UartIsrEntry(void* arg)
 {
   auto* self = static_cast<ESP32UART*>(arg);
@@ -30,11 +31,6 @@ void IRAM_ATTR ESP32UART::UartIsrEntry(void* arg)
   }
 }
 
-// FIFO mode relies on a UART peripheral interrupt instead of the UHCI/GDMA
-// backend, and some classic ESP targets cannot safely keep this interrupt in
-// IRAM because the write-side queue path still touches flash-resident code.
-// FIFO 模式依赖 UART 外设中断而不是 UHCI/GDMA 后端；同时某些经典 ESP 目标
-// 由于写侧队列路径仍会触碰 flash 代码，因此不能安全地把该中断放入 IRAM。
 ErrorCode ESP32UART::InstallUartIsr()
 {
   if (uart_isr_installed_)
@@ -42,13 +38,9 @@ ErrorCode ESP32UART::InstallUartIsr()
     return ErrorCode::OK;
   }
 
-#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S3
-  // Classic ESP32/S3 can enter cache-disabled flash windows while UART IRQ is active.
-  // The current WritePort path is not fully IRAM-safe, so keep this IRQ non-IRAM.
+  // RW 接口和用户回调可能位于 Flash，缓存关闭时由 SDK 暂缓处理中断。
+  // RW methods and user callbacks may reside in flash; defer IRQs while cache is off.
   constexpr int UART_INTR_FLAGS = 0;
-#else
-  constexpr int UART_INTR_FLAGS = ESP_INTR_FLAG_IRAM;
-#endif
 
   const esp_err_t err = esp_intr_alloc(uart_periph_signal[uart_num_].irq, UART_INTR_FLAGS,
                                        UartIsrEntry, this, &uart_intr_handle_);
@@ -61,171 +53,147 @@ ErrorCode ESP32UART::InstallUartIsr()
   return ErrorCode::OK;
 }
 
-// FIFO TX path streams bytes directly from the queue into the hardware FIFO.
-// Unlike DMA mode, it does not stage a second payload block.
 // FIFO TX 路径会直接把字节从队列流式写入硬件 FIFO；与 DMA 模式不同，它不
 // 会暂存第二块 payload。
+// FIFO TX path streams bytes directly from the queue into the hardware FIFO.
+// Unlike DMA mode, it does not stage a second payload block.
 void IRAM_ATTR ESP32UART::FillTxFifo(bool in_isr)
 {
-  if (!tx_active_valid_)
+  const uint32_t fifo_space = uart_hal_get_txfifo_len(&uart_hal_);
+  if (fifo_space == 0U)
   {
+    if (_write_port.Size() != 0U)
+    {
+      EnableUartInterrupt(UART_INTR_TXFIFO_EMPTY);
+    }
     return;
   }
 
-  while (tx_active_offset_ < tx_active_length_)
+  size_t accepted = 0U;
   {
-    const uint32_t fifo_space = uart_hal_get_txfifo_len(&uart_hal_);
-    if (fifo_space == 0U)
+    auto queue = _write_port.GetWriteQueue(in_isr);
+    if (queue.Empty())
     {
-      break;
+      DisableUartInterrupt(UART_INTR_TXFIFO_EMPTY);
+      return;
     }
 
-    const size_t remaining = tx_active_length_ - tx_active_offset_;
-    const size_t chunk_size = std::min<size_t>(remaining, fifo_space);
-
-    const ErrorCode pop_ec = write_port_->queue_data_->PopWithReader(
-        chunk_size,
-        [this](const uint8_t* src, size_t size) -> ErrorCode
+    accepted = queue.PopWithWriter(
+        std::min<size_t>(fifo_space, queue.AvailableSize()),
+        [this](const uint8_t* first, size_t first_size, const uint8_t* second,
+               size_t second_size) -> size_t
         {
-          uint32_t write_size = 0;
-          uart_hal_write_txfifo(&uart_hal_, src, static_cast<uint32_t>(size),
-                                &write_size);
-          return (write_size == static_cast<uint32_t>(size)) ? ErrorCode::OK
-                                                             : ErrorCode::EMPTY;
+          size_t written = 0U;
+          if (first_size != 0U)
+          {
+            uint32_t first_written = 0U;
+            uart_hal_write_txfifo(&uart_hal_, first, static_cast<uint32_t>(first_size),
+                                  &first_written);
+            written = std::min<size_t>(first_written, first_size);
+            if (written != first_size)
+            {
+              return written;
+            }
+          }
+          if (second_size != 0U)
+          {
+            uint32_t second_written = 0U;
+            uart_hal_write_txfifo(&uart_hal_, second, static_cast<uint32_t>(second_size),
+                                  &second_written);
+            written += std::min<size_t>(second_written, second_size);
+          }
+          return written;
         });
-    if (pop_ec != ErrorCode::OK)
-    {
-      ASSERT(false);
-      break;
-    }
-
-    tx_active_offset_ += chunk_size;
   }
 
-  if ((tx_active_offset_ < tx_active_length_) || !in_isr)
+  if (accepted == 0U || _write_port.Size() != 0U)
   {
-    return;
+    EnableUartInterrupt(UART_INTR_TXFIFO_EMPTY);
   }
-
-  uart_hal_disable_intr_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
-  OnTxTransferDone(true, ErrorCode::OK);
+  else
+  {
+    DisableUartInterrupt(UART_INTR_TXFIFO_EMPTY);
+  }
 }
 
-// RX FIFO draining is best-effort: read as much as the software queue can
-// absorb, then stop without resetting the whole hardware FIFO.
 // RX FIFO 清空采用尽力而为策略：尽量读取软件队列还能容纳的部分，然后停止，
 // 不会粗暴重置整个硬件 FIFO。
+// RX FIFO draining is best-effort: read as much as the software queue can
+// absorb, then stop without resetting the whole hardware FIFO.
 void IRAM_ATTR ESP32UART::DrainRxFifo(bool in_isr)
 {
-  if (rx_fifo_draining_.TestAndSet())
-  {
-    return;
-  }
-
-  bool pushed_any = false;
+  auto queue = _read_port.GetReadQueue(in_isr);
   while (uart_hal_get_rxfifo_len(&uart_hal_) > 0U)
   {
-    const size_t fifo_len = uart_hal_get_rxfifo_len(&uart_hal_);
-    const size_t write_len = std::min(fifo_len, read_port_->queue_data_->EmptySize());
-    if (write_len == 0U)
+    const size_t free_space = queue.EmptySize();
+    if (free_space == 0U)
     {
       break;
     }
 
-    const ErrorCode push_ec = read_port_->queue_data_->PushWithWriter(
-        write_len,
-        [this](uint8_t* buffer, size_t chunk_size) -> ErrorCode
-        {
-          int read_len = static_cast<int>(chunk_size);
-          uart_hal_read_rxfifo(&uart_hal_, buffer, &read_len);
-          return (read_len == static_cast<int>(chunk_size)) ? ErrorCode::OK
-                                                            : ErrorCode::EMPTY;
-        });
-
-    if ((push_ec == ErrorCode::FULL) || (push_ec == ErrorCode::EMPTY))
-    {
-      break;
-    }
-    if (push_ec != ErrorCode::OK)
-    {
-      ASSERT(false);
-      break;
-    }
-
-    pushed_any = true;
+    const size_t chunk =
+        std::min({free_space, rx_isr_buffer_size_,
+                  static_cast<size_t>(uart_hal_get_rxfifo_len(&uart_hal_))});
+    REQUIRE_FROM_CALLBACK(chunk != 0U, in_isr);
+    int read_size = static_cast<int>(chunk);
+    uart_hal_read_rxfifo(&uart_hal_, rx_isr_buffer_, &read_size);
+    REQUIRE_FROM_CALLBACK(read_size > 0 && static_cast<size_t>(read_size) <= chunk,
+                          in_isr);
+    REQUIRE_FROM_CALLBACK(
+        queue.PushBatch(rx_isr_buffer_, static_cast<size_t>(read_size)) == ErrorCode::OK,
+        in_isr);
   }
 
-  if (pushed_any)
+  queue.Publish();
+  if (queue.EmptySize() == 0U)
   {
-    read_port_->ProcessPendingReads(in_isr);
+    DisableUartInterrupt(UART_RX_INTR_MASK);
   }
-
-  rx_fifo_draining_.Clear();
+  else
+  {
+    EnableUartInterrupt(UART_RX_INTR_MASK);
+  }
 }
 
-// RX interrupt handling distinguishes overflow from ordinary data-ready events
-// so that overflow can be acknowledged without discarding remaining FIFO bytes.
-// RX 中断处理区分 overflow 和普通 data-ready 事件，以便在确认 overflow
-// 的同时保留剩余 FIFO 字节。
-void IRAM_ATTR ESP32UART::HandleRxInterrupt(uint32_t uart_intr_status)
-{
-  const bool has_overflow = (uart_intr_status & UART_INTR_RXFIFO_OVF) != 0U;
-  const bool has_rx_data =
-      (uart_intr_status & (UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT)) != 0U;
-
-  if (!has_overflow && !has_rx_data)
-  {
-    return;
-  }
-
-  if (has_overflow)
-  {
-    // Overrun means at least one incoming byte was dropped. Keep remaining FIFO
-    // bytes to minimize extra loss instead of resetting the whole RX FIFO.
-    uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_OVF);
-  }
-
-  DrainRxFifo(true);
-  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
-}
-
-// TX interrupt handling enters the FIFO refill path under a scoped reentry
-// guard so that queue callbacks cannot recursively restart TX.
-// TX 中断处理在受控的重入保护下进入 FIFO 补料路径，避免队列回调递归重启 TX。
-void IRAM_ATTR ESP32UART::HandleTxInterrupt(uint32_t uart_intr_status)
-{
-  if ((uart_intr_status & UART_INTR_TXFIFO_EMPTY) == 0U)
-  {
-    return;
-  }
-
-  Flag::ScopedRestore tx_flag(in_tx_isr_);
-  FillTxFifo(true);
-  uart_hal_clr_intsts_mask(&uart_hal_, UART_INTR_TXFIFO_EMPTY);
-}
-
-// The FIFO backend drains all currently pending UART interrupt reasons before
-// leaving the ISR to avoid orphaning a same-cycle RX/TX event.
 // FIFO 后端会在离开 ISR 前排空当前所有待处理 UART 中断原因，避免同周期的
 // RX/TX 事件被遗留。
+// The FIFO backend drains all currently pending UART interrupt reasons before
+// leaving the ISR to avoid orphaning a same-cycle RX/TX event.
 void IRAM_ATTR ESP32UART::HandleUartInterrupt()
 {
-  uint32_t uart_intr_status = uart_hal_get_intsts_mask(&uart_hal_);
-
-  while (uart_intr_status != 0)
+  const uint32_t handled_mask =
+      UART_RX_INTR_MASK | UART_TX_INTR_MASK | UART_TX_IDLE_INTR_MASK;
+  uint32_t handled = CaptureUartInterrupt(handled_mask);
+  while (handled != 0U)
   {
-    if (uart_intr_status & UART_RX_INTR_MASK)
+    uint32_t events = 0U;
+    if ((handled & UART_RX_INTR_MASK) != 0U)
     {
-      HandleRxInterrupt(uart_intr_status);
+      events |= EVENT_RX_WORK;
     }
-
-    if (uart_intr_status & UART_TX_INTR_MASK)
+    if ((handled & (UART_TX_INTR_MASK | UART_TX_IDLE_INTR_MASK)) != 0U)
     {
-      HandleTxInterrupt(uart_intr_status);
+      events |= EVENT_TX_WORK;
     }
-
-    uart_intr_status = uart_hal_get_intsts_mask(&uart_hal_);
+    service_.Invoke(events, true, [this](uint32_t owner_events, bool owner_isr)
+                    { ServiceEvents(owner_events, owner_isr); });
+    handled = CaptureUartInterrupt(handled_mask);
   }
+}
+
+uint32_t IRAM_ATTR ESP32UART::CaptureUartInterrupt(uint32_t mask)
+{
+  esp_os_enter_critical_safe(&irq_lock_);
+  const uint32_t handled = uart_hal_get_intsts_mask(&uart_hal_) & mask;
+  if (handled != 0U)
+  {
+    uart_hal_disable_intr_mask(&uart_hal_, handled);
+    // 在中断使能寄存器仍受保护时确认本次快照。
+    // Acknowledge the snapshot while the enable register is still protected.
+    uart_hal_clr_intsts_mask(&uart_hal_, handled);
+  }
+  esp_os_exit_critical_safe(&irq_lock_);
+  return handled;
 }
 
 }  // namespace LibXR
