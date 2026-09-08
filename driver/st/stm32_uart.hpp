@@ -193,7 +193,7 @@ class STM32UART : public UART
 
  private:
   /// 待应用配置的发布阶段 / Pending configuration publication phase.
-  enum class ConfigState : uint8_t
+  enum class ConfigState : uint32_t
   {
     EMPTY = 0U,
     RESERVED = 1U,
