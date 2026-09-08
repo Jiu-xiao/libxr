@@ -143,7 +143,7 @@ class STM32USBDeviceOtgHS : public STM32USBDevice
 };
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
 
 #if defined(PMA_END_ADDR)
 #define LIBXR_STM32_USB_PMA_SIZE PMA_END_ADDR
