@@ -9,8 +9,8 @@
 namespace LibXR
 {
 /**
- * @brief  线程管理类，封装 FreeRTOS 任务创建和调度
- *         Thread management class encapsulating FreeRTOS task creation and scheduling
+ * @brief  线程管理类，封装 ThreadX 任务创建和调度
+ *         Thread management class encapsulating ThreadX task creation and scheduling
  */
 class Thread
 {
@@ -36,9 +36,9 @@ class Thread
   Thread() : thread_handle_(nullptr) {};
 
   /**
-   * @brief  通过 FreeRTOS 线程句柄创建线程对象
-   *         Constructor to create a thread object from a FreeRTOS thread handle
-   * @param  handle FreeRTOS 线程句柄 FreeRTOS thread handle
+   * @brief  通过 ThreadX 线程句柄创建线程对象
+   *         Constructor to create a thread object from a ThreadX thread handle
+   * @param  handle ThreadX 线程句柄 ThreadX thread handle
    */
   Thread(TX_THREAD* handle) : thread_handle_(handle) {};
 
@@ -53,13 +53,13 @@ class Thread
    * @param  priority 线程优先级 Thread priority
    *
    * @details
-   * 该方法基于 FreeRTOS `xTaskCreate()` 创建新线程，执行 `function` 并传递 `arg`
-   * 作为参数。 线程优先级 `priority` 必须符合 FreeRTOS 配置的 `configMAX_PRIORITIES`
+   * 该方法基于 ThreadX `tx_thread_create()` 创建新线程，执行 `function` 并传递 `arg`
+   * 作为参数。 线程优先级 `priority` 必须符合 ThreadX 配置的 `TX_MAX_PRIORITIES`
    * 约束。
    *
-   * This method creates a new thread using FreeRTOS `xTaskCreate()`, executing `function`
-   * with `arg` as the argument. The thread priority `priority` must adhere to FreeRTOS
-   * configuration constraints defined by `configMAX_PRIORITIES`.
+   * This method creates a new thread using ThreadX `tx_thread_create()`, executing
+   * `function` with `arg` as the argument. The thread priority `priority` must adhere to
+   * ThreadX configuration constraints defined by `TX_MAX_PRIORITIES`.
    */
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
@@ -108,16 +108,24 @@ class Thread
    * @brief  让线程进入休眠状态
    *         Puts the thread to sleep
    * @param  milliseconds 休眠时间（毫秒） Sleep duration in milliseconds
+   * @note 向上取整到 tick，超出单次范围时取 TX_WAIT_FOREVER - 1 个 tick。
+   *       Round up to ticks, saturating at TX_WAIT_FOREVER - 1 ticks.
    */
   static void Sleep(uint32_t milliseconds);
 
   /**
    * @brief  让线程休眠直到指定时间点
    *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 Last wake-up time
+   * @param  last_wakeup_time 上次唤醒时间 Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
+   * @pre 用 GetTime 初始化计划时间；目标位于当前时间前后 2^31 毫秒以内。
+   *      Initialize the schedule with GetTime. The target must be less than 2^31
+   *      milliseconds before or after now for unambiguous modular ordering.
+   * @note 保留计划唤醒时间；错过期限时不休眠，下一次仍按原周期推进。
+   *       Keep the scheduled wake time; overdue calls do not sleep and retain the
+   * cadence.
    */
-  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp& last_wakeup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程
@@ -126,9 +134,9 @@ class Thread
   static void Yield();
 
   /**
-   * @brief  线程对象转换为 FreeRTOS 线程句柄
-   *         Converts the thread object to a FreeRTOS thread handle
-   * @return FreeRTOS 线程句柄 FreeRTOS thread handle
+   * @brief  线程对象转换为 ThreadX 线程句柄
+   *         Converts the thread object to a ThreadX thread handle
+   * @return ThreadX 线程句柄 ThreadX thread handle
    */
   operator TX_THREAD*() { return thread_handle_; }
 
