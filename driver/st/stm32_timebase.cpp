@@ -16,24 +16,33 @@ MicrosecondTimestamp GetSysTickMicroseconds()
 {
   do
   {
-    uint32_t tick_old = HAL_GetTick();
-    uint32_t cnt_old = SysTick->VAL;
-    uint32_t tick_new = HAL_GetTick();
-    uint32_t cnt_new = SysTick->VAL;
-
-    const auto time_diff = tick_new - tick_old;
-    const uint32_t tick_load = SysTick->LOAD + 1U;
-    switch (time_diff)
+    const uint32_t tick_before = HAL_GetTick();
+    const uint32_t counter_before = SysTick->VAL;
+    // 读取挂起位，不通过 CTRL 读取并清除 COUNTFLAG。
+    // Read the pending bit without reading and clearing COUNTFLAG through CTRL.
+    const bool pending = (SCB->ICSR & SCB_ICSR_PENDSTSET_Msk) != 0U;
+    const uint32_t counter_after = SysTick->VAL;
+    const uint32_t tick_after = HAL_GetTick();
+    if (tick_before != tick_after)
     {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL + 1000ULL -
-                                    static_cast<uint64_t>(cnt_old) * 1000ULL / tick_load);
-      case 1:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL + 1000ULL -
-                                    static_cast<uint64_t>(cnt_new) * 1000ULL / tick_load);
-      default:
-        continue;
+      continue;
     }
+
+    const bool crossed_zero =
+        counter_before != 0U && (counter_after == 0U || counter_after > counter_before);
+    uint32_t logical_tick = tick_after + static_cast<uint32_t>(pending || crossed_zero);
+    const uint64_t period_counts = static_cast<uint64_t>(SysTick->LOAD) + 1U;
+    uint64_t fraction = 0U;
+    if (counter_after != 0U)
+    {
+      fraction = 1000U - static_cast<uint64_t>(counter_after) * 1000U / period_counts;
+      if (fraction == 1000U)
+      {
+        ++logical_tick;
+        fraction = 0U;
+      }
+    }
+    return MicrosecondTimestamp(static_cast<uint64_t>(logical_tick) * 1000U + fraction);
   } while (true);
 }
 
@@ -44,26 +53,23 @@ MicrosecondTimestamp GetTimerMicroseconds(TIM_HandleTypeDef* htim)
 
   do
   {
-    uint32_t tick_old = HAL_GetTick();
-    uint32_t cnt_old = __HAL_TIM_GET_COUNTER(htim);
-    uint32_t tick_new = HAL_GetTick();
-    uint32_t cnt_new = __HAL_TIM_GET_COUNTER(htim);
-
-    const uint32_t autoreload = __HAL_TIM_GET_AUTORELOAD(htim) + 1U;
-    const uint32_t delta_ms = tick_new - tick_old;
-    switch (delta_ms)
+    const uint32_t tick_before = HAL_GetTick();
+    const uint32_t counter_before = __HAL_TIM_GET_COUNTER(htim);
+    const bool pending = __HAL_TIM_GET_FLAG(htim, TIM_FLAG_UPDATE) != 0U;
+    const uint32_t counter_after = __HAL_TIM_GET_COUNTER(htim);
+    const uint32_t tick_after = HAL_GetTick();
+    if (tick_before != tick_after)
     {
-      case 0:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL +
-                                    static_cast<uint64_t>(cnt_old) * 1000ULL /
-                                        autoreload);
-      case 1:
-        return MicrosecondTimestamp(static_cast<uint64_t>(tick_new) * 1000ULL +
-                                    static_cast<uint64_t>(cnt_new) * 1000ULL /
-                                        autoreload);
-      default:
-        continue;
+      continue;
     }
+
+    const bool period_elapsed = pending || counter_after < counter_before;
+    const uint32_t logical_tick = tick_after + static_cast<uint32_t>(period_elapsed);
+    const uint64_t period_counts =
+        static_cast<uint64_t>(__HAL_TIM_GET_AUTORELOAD(htim)) + 1U;
+    const uint64_t fraction =
+        static_cast<uint64_t>(counter_after) * 1000U / period_counts;
+    return MicrosecondTimestamp(static_cast<uint64_t>(logical_tick) * 1000U + fraction);
   } while (true);
 }
 
