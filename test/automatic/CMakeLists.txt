@@ -37,6 +37,32 @@ foreach(debug RANGE 0 1)
   endforeach()
 endforeach()
 
+# 用实际裸机后端验证协作式 ASync；时钟由测试控制，不链接 Linux xr 库。
+# Test cooperative ASync with the actual bare-metal backend and a controlled clock.
+add_executable(
+  test_async_cooperative
+  system/async/test_async_cooperative.cpp
+  ../../src/system/async.cpp
+  ../../src/system/timer.cpp
+  ../../src/structure/lockfree_list.cpp
+  ../../system/none/libxr_system.cpp
+  ../../system/none/semaphore.cpp
+  ../../system/none/thread.cpp
+)
+target_include_directories(
+  test_async_cooperative PRIVATE . .. ../../system/none
+                                 $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
+)
+get_target_property(_xr_async_test_definitions xr INTERFACE_COMPILE_DEFINITIONS)
+list(FILTER _xr_async_test_definitions EXCLUDE REGEX "^LIBXR_SYSTEM_|^LIBXR_SINGLE_CORE=")
+target_compile_definitions(
+  test_async_cooperative PRIVATE ${_xr_async_test_definitions}
+                                 LIBXR_NOT_SUPPORT_MUTI_THREAD=1 LIBXR_SINGLE_CORE=1
+)
+target_compile_features(test_async_cooperative PRIVATE cxx_std_20)
+add_test(NAME test_async_cooperative COMMAND test_async_cooperative)
+set_tests_properties(test_async_cooperative PROPERTIES TIMEOUT 10)
+
 add_executable(
   libxr_test
   main.cpp
