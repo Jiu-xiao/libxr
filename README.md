@@ -178,6 +178,19 @@ Enable this option to build unit tests on the Linux platform.
 set(LIBXR_TEST_BUILD True)
 ```
 
+Automatic tests mirror source directories and file ownership in `test/automatic/`. Build and run the
+complete suite from the repository root:
+
+```sh
+cmake -S . -B build -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel 8
+ctest --test-dir build --output-on-failure --no-tests=error
+```
+
+CTest provides the pseudo-terminal required by the runtime runner through the
+util-linux `script` program. See [test/README.md](test/README.md) for the build
+matrix, compile probes, and reserved manual-test directories.
+
 ## Others
 
 ### STM32 C++ Code Generator
