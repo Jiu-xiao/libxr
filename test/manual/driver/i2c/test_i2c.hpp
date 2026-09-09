@@ -8,12 +8,12 @@
  */
 #pragma once
 
-#include <atomic>
 #include <cstring>
 
 #include "i2c.hpp"
 #include "test_assert.hpp"
 #include "thread.hpp"
+#include "transfer_wait.hpp"
 
 namespace LibXR::Test
 {
@@ -58,91 +58,6 @@ inline void CheckI2CData(ConstRawData expected, RawData buffer)
   }
 }
 
-/** @brief 两项 I2C 测试共用的完成通知 / Completion state shared by the two I2C tests. */
-class I2CTestCompletion
-{
-  using Transfer = Operation<ErrorCode>;
-  using Status = Transfer::OperationPollingStatus;
-  using Mode = Transfer::OperationType;
-
- public:
-  explicit I2CTestCompletion(uint32_t timeout_ms)
-      : callback_(Transfer::Callback::Create(
-            [](bool, I2CTestCompletion* self, ErrorCode result)
-            {
-              if (result != ErrorCode::OK)
-              {
-                self->failed_.store(1, std::memory_order_relaxed);
-              }
-              // 最后一次访问上下文才发布完成；ISR 中不打印或断言。
-              // Publish on the last context access; no logging or assertions in ISR.
-              self->calls_.fetch_add(1, std::memory_order_release);
-            },
-            this)),
-        operations_{Transfer(semaphore_, timeout_ms), Transfer(status_),
-                    Transfer(callback_)},
-        timeout_ms_(timeout_ms)
-  {
-    TEST_ASSERT(timeout_ms > 0 && timeout_ms < UINT32_MAX / 2U);
-  }
-
-  template <typename Submit>
-  void Run(unsigned mode_index, Submit submit)
-  {
-    auto& operation = operations_[mode_index];
-    const Mode mode = operation.type;
-    Check();
-    status_.store(Status::READY, std::memory_order_relaxed);
-    if (mode == Mode::CALLBACK)
-    {
-      ++expected_calls_;
-    }
-    TEST_ASSERT(submit(operation) == ErrorCode::OK);
-    const uint32_t start = Thread::GetTime();
-    for (;;)
-    {
-      bool done = mode == Mode::BLOCK;
-      if (mode == Mode::POLLING)
-      {
-        const auto status = status_.load(std::memory_order_acquire);
-        TEST_ASSERT(status != Status::ERROR);
-        done = status == Status::DONE;
-      }
-      else if (mode == Mode::CALLBACK)
-      {
-        const uint32_t calls = calls_.load(std::memory_order_acquire);
-        TEST_ASSERT(calls <= expected_calls_);
-        done = calls == expected_calls_;
-      }
-      TEST_ASSERT(failed_.load(std::memory_order_relaxed) == 0);
-      // 同步完成时直接继续；不要求必须观察到 RUNNING。
-      // Continue immediately for inline completion; observing RUNNING is not required.
-      if (done)
-      {
-        break;
-      }
-      TEST_ASSERT(Thread::GetTime() - start < timeout_ms_);
-      Thread::Sleep(1);
-    }
-    Check();
-  }
-
-  void Check() const
-  {
-    TEST_ASSERT(calls_.load(std::memory_order_acquire) == expected_calls_);
-    TEST_ASSERT(failed_.load(std::memory_order_relaxed) == 0);
-  }
-
- private:
-  Semaphore semaphore_;
-  std::atomic<Status> status_{Status::READY};
-  std::atomic<uint32_t> calls_{0};
-  std::atomic<uint32_t> failed_{0};
-  Transfer::Callback callback_;
-  Transfer operations_[3];
-  uint32_t timeout_ms_;
-  uint32_t expected_calls_ = 0;
-};
 }  // namespace Detail
 
 /**
@@ -171,7 +86,7 @@ inline void TestI2CMemRead(I2C& i2c, uint16_t slave_addr, uint16_t mem_addr,
   Detail::CheckI2CRegister(slave_addr, mem_addr, addr_length);
   Detail::CheckI2CBuffers(expected, buffer);
   TEST_ASSERT(iterations > 0);
-  Detail::I2CTestCompletion completion(timeout_ms);
+  Detail::TransferTestCompletion completion(timeout_ms);
   const RawData read_buffer{buffer.addr_, expected.size_};
   for (uint32_t round = 0; round < iterations; ++round)
   {
@@ -226,7 +141,7 @@ inline void TestI2CMemWriteRead(I2C& i2c, uint16_t slave_addr, uint16_t mem_addr
   TEST_ASSERT(std::memcmp(first.addr_, second.addr_, first.size_) != 0);
   TEST_ASSERT(settle_ms < UINT32_MAX / 2U && iterations > 0 &&
               iterations <= UINT32_MAX / 4U);
-  Detail::I2CTestCompletion completion(timeout_ms);
+  Detail::TransferTestCompletion completion(timeout_ms);
   const ConstRawData patterns[] = {first, second};
   const RawData read_buffer{buffer.addr_, first.size_};
   for (uint32_t round = 0; round < iterations; ++round)
