@@ -27,7 +27,7 @@ static void ThreadFun(Terminal* term)
     {
       term->write_mutex_->Lock();
       term->Parse(buffer);
-      term->write_stream_.Commit();
+      (void)term->write_stream_.Commit();
       term->write_mutex_->Unlock();
     }
   }
@@ -74,7 +74,7 @@ static void TaskFun(Terminal* term)
         term->write_mutex_->Lock();
         auto buffer = RawData(term->read_buff_, term->request_read_size_);
         term->Parse(buffer);
-        term->write_stream_.Commit();
+        (void)term->write_stream_.Commit();
         term->write_mutex_->Unlock();
         start_read();
         return;
