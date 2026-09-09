@@ -25,7 +25,7 @@ foreach(debug RANGE 0 1)
   foreach(dev RANGE 0 1)
     set(mode_target test_assert_${debug}_${dev})
     add_executable(${mode_target} core/assert/libxr_assert/assert_modes.cpp)
-    target_include_directories(${mode_target} PRIVATE . ../../src/core)
+    target_include_directories(${mode_target} PRIVATE . .. ../../src/core)
     if(debug)
       target_compile_definitions(${mode_target} PRIVATE LIBXR_DEBUG_BUILD)
     endif()
@@ -139,7 +139,9 @@ add_executable(
 )
 set_target_properties(libxr_test PROPERTIES OUTPUT_NAME test)
 target_link_libraries(libxr_test PRIVATE xr)
-target_include_directories(libxr_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(
+  libxr_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
 
 find_program(XR_TEST_SCRIPT_EXECUTABLE script)
 if(NOT XR_TEST_SCRIPT_EXECUTABLE)
