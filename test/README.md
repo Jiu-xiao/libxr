@@ -21,9 +21,9 @@ cmake --build build --parallel 8
 ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
-CTest 会运行完整测试程序和断言宏测试。终端相关测试需要伪终端，CTest 已通过 `script` 处理，无需另外打开串口。任何测试失败都会使 CTest 返回失败；完整程序的超时为 300 秒。
+CTest 会运行已登记的自动测试。终端相关测试需要伪终端，CTest 已通过 `script` 处理，无需另外打开串口。任何测试失败都会使 CTest 返回失败；完整程序的超时为 300 秒。
 
-CTest runs the full test program and the assertion macro tests. It uses `script` to provide the pseudo-terminal needed by terminal tests; no serial device is required. Any failed test makes CTest fail. The full program has a 300-second timeout.
+CTest runs the registered automatic tests. It uses `script` to provide the pseudo-terminal needed by terminal tests; no serial device is required. Any failed test makes CTest fail. The full program has a 300-second timeout.
 
 只运行一组测试时，用 `--case` 指定名称。例如：
 

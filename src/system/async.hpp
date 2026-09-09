@@ -11,12 +11,23 @@ namespace LibXR
 {
 
 /**
- * @brief 异步任务处理类。
- *        Asynchronous task processing class.
+ * @brief 单任务异步执行器 / Single-job asynchronous executor.
  *
- * 该类用于管理异步任务的执行，提供任务分配、状态管理以及线程执行功能。
- * This class manages the execution of asynchronous tasks, providing task assignment,
- * status management, and thread execution functionalities.
+ * 有线程时由工作线程执行；无多线程支持时，由软件 Timer 推进。
+ * 任务完成后保持 DONE，GetStatus 取走完成状态后恢复 READY。
+ *
+ * Threaded systems use a worker; cooperative systems use a software Timer.
+ * Completion stays DONE until GetStatus acknowledges it and restores READY.
+ *
+ * 对象保留到工作线程退出或系统复位；回调数据保留到任务完成，任务不得抛异常。
+ *
+ * Keep the object until its worker exits or the system resets. Keep callback data
+ * until completion. Jobs must not throw.
+ *
+ * 裸机从普通上下文推进 Timer；长任务会拖延其他回调，也不能等待同一 Timer 的其他任务。
+ *
+ * Drive a bare-metal Timer in normal context. Long jobs delay other callbacks
+ * and cannot wait for work on the same Timer.
  */
 class ASync
 {
@@ -28,18 +39,18 @@ class ASync
   enum class Status : uint32_t
   {
     READY = 0,         ///< 任务已准备就绪。 Task is ready.
-    BUSY = 1,          ///< 任务正在执行中。 Task is currently running.
-    DONE = UINT32_MAX  ///< 任务已完成。 Task is completed.
+    BUSY = 1,          ///< 任务已接收或正在执行。 Job accepted or running.
+    DONE = UINT32_MAX  ///< 任务已完成，尚未取走状态。 Completed, awaiting acknowledgment.
   };
 
   /**
-   * @brief 构造 `ASync` 对象并初始化任务线程。
-   *        Constructs an `ASync` object and initializes the task thread.
+   * @brief 构造 `ASync` 并初始化线程或软件 Timer。
+   *        Constructs an `ASync` and initializes its worker or software Timer.
    *
-   * @param stack_depth 线程栈深度。
-   *                    Stack depth for the thread.
-   * @param priority 线程优先级。
-   *                 Priority of the thread.
+   * @param stack_depth 线程栈深度，无线程后端忽略。
+   *                    Worker stack depth; ignored by cooperative backends.
+   * @param priority 线程优先级，无线程后端忽略。
+   *                 Worker priority; ignored by cooperative backends.
    */
   ASync(size_t stack_depth, Thread::Priority priority);
 
@@ -56,17 +67,7 @@ class ASync
    * @param async 指向 `ASync` 实例的指针。
    *              Pointer to the `ASync` instance.
    */
-  static void ThreadFun(ASync* async)
-  {
-    while (true)
-    {
-      if (async->sem_.Wait() == ErrorCode::OK)
-      {
-        async->job_.Run(false, async);
-        async->status_.store(Status::DONE, std::memory_order_release);
-      }
-    }
-  }
+  static void ThreadFun(ASync* async);
 
   std::atomic<Status> status_ = Status::READY;  ///< 当前异步任务状态
 
@@ -89,53 +90,55 @@ class ASync
     {
       return cur;
     }
-    status_.store(Status::READY, std::memory_order_relaxed);
-    return Status::DONE;
+    // 只允许一个观察者取走 DONE；迟到的观察者不能覆盖下一次提交的 BUSY。
+    // Consume DONE once; a late observer must not overwrite the next submission's BUSY.
+    if (status_.compare_exchange_strong(cur, Status::READY, std::memory_order_acq_rel,
+                                        std::memory_order_acquire))
+    {
+      return Status::DONE;
+    }
+    return cur;
   }
 
   using Job = LibXR::Callback<ASync*>;
 
   /**
-   * @brief 分配一个异步任务并准备执行。
-   *        Assigns an asynchronous job and prepares for execution.
-   *
-   * 该函数用于设置 `job_` 回调，并将任务状态置为 `BUSY`。
-   * This function sets the `job_` callback and updates the task status to `BUSY`.
-   *
-   * @param job 需要执行的回调任务。
-   *            The callback job to be executed.
-   * @return 返回 `ErrorCode`，指示操作是否成功。
-   *         Returns an `ErrorCode` indicating whether the operation was successful.
+   * @brief 提交任务 / Submit a job.
+   * @param job 预先创建的任务回调 / Previously created job callback.
+   * @return READY 时接收并返回 OK，否则返回 BUSY，保留原任务和完成状态。
+   *         OK if READY; otherwise BUSY, preserving the existing job and completion.
+   * @note 成功表示已接收，任务可能在本调用返回前完成。提交不会同步调用任务。
+   *       Success means admission; execution may finish before this call returns.
+   *       Submission does not invoke the job inline.
    */
   ErrorCode AssignJob(Job job);
 
   /**
-   * @brief 在回调环境中分配任务，并通知任务线程执行。
-   *        Assigns a job from a callback environment and notifies the task thread.
-   *
-   * 该函数适用于中断上下文或回调环境，
-   * 直接修改 `job_` 并设置状态为 `BUSY`，然后通过信号量通知任务线程。
-   * This function is designed for use in an interrupt context or callback environment,
-   * directly modifying `job_`, setting the status to `BUSY`,
-   * and signaling the task thread via a semaphore.
-   *
-   * @param job 需要执行的回调任务。
-   *            The callback job to be executed.
-   * @param in_isr 是否在中断上下文中调用。
-   *               Indicates whether the function is called within an interrupt service
-   * routine.
+   * @brief 从回调上下文提交任务 / Submit a job from callback context.
+   * @param job 预先创建的任务回调 / Previously created job callback.
+   * @param in_isr 当前是否处于 ISR；线程后端据此选择通知方式。
+   *               Whether the caller is in an ISR; selects the worker notification path.
+   * @return 与 AssignJob 相同：OK 表示接收，BUSY 表示原任务尚未释放。
+   *         Same as AssignJob: OK admits the job; BUSY leaves the existing job intact.
+   * @note 任务由工作线程或软件 Timer 执行，任务回调收到的 in_isr 为 false。
+   *       The worker or software Timer executes the job with in_isr=false.
    */
-  void AssignJobFromCallback(Job job, bool in_isr)
-  {
-    job_ = job;
-    status_.store(Status::BUSY, std::memory_order_relaxed);
-    sem_.PostFromCallback(in_isr);
-  }
+  ErrorCode AssignJobFromCallback(Job job, bool in_isr);
 
   Job job_;  ///< 存储分配的异步任务回调。 Stores the assigned asynchronous job callback.
   Semaphore sem_;  ///< 控制任务执行的信号量。 Semaphore controlling task execution.
 
   Thread thread_handle_;  ///< 处理异步任务的线程。 Thread handling asynchronous tasks.
+
+ private:
+  void RunJob();
+
+#ifdef LIBXR_NOT_SUPPORT_MUTI_THREAD
+  // BUSY 在写入 job_ 前置位；独立标记只在任务完整写入后发布。
+  // BUSY precedes the job_ write; publish this flag only after the complete job is
+  // stored.
+  std::atomic<uint32_t> pending_{0U};
+#endif
 };
 
 }  // namespace LibXR
