@@ -8,7 +8,7 @@ cd "${REPO_ROOT}"
 usage() {
   cat <<'EOF'
 Usage:
-  tools/format_cmake_files.sh [--check]
+  tools/format_cmake_files.sh [--check] [files...]
 
 Description:
   Format tracked project-owned CMake files using cmake-format.
@@ -16,6 +16,7 @@ Description:
 
 Options:
   --check   Run cmake-format in check mode without rewriting files.
+  files     Optional explicit file list, including untracked files.
   -h, --help
 EOF
 }
@@ -27,17 +28,25 @@ case "${1:-}" in
     ;;
   --check)
     MODE="check"
+    shift
     ;;
   -h|--help)
     usage
     exit 0
     ;;
-  *)
+  -*)
     echo "Unknown option: ${1}" >&2
     usage >&2
     exit 2
     ;;
 esac
+
+for cmake_file in "$@"; do
+  if [[ ! -f "$cmake_file" ]]; then
+    echo "Not a regular file: $cmake_file" >&2
+    exit 1
+  fi
+done
 
 CMAKE_FORMAT_BIN="${CMAKE_FORMAT_BIN:-}"
 if [[ -z "${CMAKE_FORMAT_BIN}" ]]; then
@@ -76,6 +85,10 @@ EOF
 fi
 
 list_cmake_files() {
+  if (( $# > 0 )); then
+    printf '%s\0' "$@"
+    return
+  fi
   git ls-files -z -- \
     'CMakeLists.txt' \
     ':(glob)**/CMakeLists.txt' \
@@ -84,13 +97,13 @@ list_cmake_files() {
 }
 
 if [[ "${MODE}" == "check" ]]; then
-  list_cmake_files | xargs -0 -r "${CMAKE_FORMAT_BIN}" \
+  list_cmake_files "$@" | xargs -0 -r "${CMAKE_FORMAT_BIN}" \
     --check \
     --config-files "${REPO_ROOT}/.cmake-format.yaml"
-  echo "cmake-format check passed for tracked project-owned CMake files."
+  echo "cmake-format check passed for selected project-owned CMake files."
 else
-  list_cmake_files | xargs -0 -r "${CMAKE_FORMAT_BIN}" \
+  list_cmake_files "$@" | xargs -0 -r "${CMAKE_FORMAT_BIN}" \
     -i \
     --config-files "${REPO_ROOT}/.cmake-format.yaml"
-  echo "Formatted tracked project-owned CMake files."
+  echo "Formatted selected project-owned CMake files."
 fi

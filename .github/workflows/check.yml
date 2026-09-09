@@ -30,10 +30,8 @@ jobs:
       run: cmake -S . -B build -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=${{ matrix.dev_assert }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
     - name: make
       run: cd build && cmake --build . -j"$(nproc)"
-    - name: check
-      run: script -q -e -c "./build/test/test" /dev/null
-    - name: assertion modes
-      run: ctest --test-dir build/test --output-on-failure
+    - name: automatic tests
+      run: ctest --test-dir build --output-on-failure --no-tests=error
 
   clang-format:
     needs: build
