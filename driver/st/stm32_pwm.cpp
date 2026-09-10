@@ -21,6 +21,23 @@ uint32_t GetH5TimerClock(uint32_t peripheral_clock, uint32_t apb_prescaler)
 }  // namespace
 #endif
 
+#if defined(STM32H7)
+namespace
+{
+uint32_t GetH7TimerClock(uint32_t peripheral_clock)
+{
+  const uint32_t hclk = HAL_RCC_GetHCLKFreq();
+  const uint32_t multiplier = (RCC->CFGR & RCC_CFGR_TIMPRE) != 0U ? 4U : 2U;
+  // APB 分频为 1/2/4/8/16；TIMPRE 倍频后的时钟不超过 HCLK。
+  // APB divisors are 1/2/4/8/16; the TIMPRE multiplier is capped at HCLK.
+  // 使用 HAL 解析 PCLK，兼容 D2CFGR 和 CDCFGR 的 H7 型号。
+  // Let HAL resolve PCLK for both D2CFGR and CDCFGR H7 variants.
+  const uint32_t timer_clock = peripheral_clock * multiplier;
+  return timer_clock < hclk ? timer_clock : hclk;
+}
+}  // namespace
+#endif
+
 STM32PWM::STM32PWM(TIM_HandleTypeDef* htim, uint32_t channel, bool complementary)
     : htim_(htim), channel_(channel), complementary_(complementary)
 {
@@ -92,6 +109,8 @@ ErrorCode STM32PWM::SetConfig(Configuration config)
 #if defined(STM32H5)
     clock_freq = GetH5TimerClock(clock_freq,
                                  (RCC->CFGR2 & RCC_CFGR2_PPRE2) >> RCC_CFGR2_PPRE2_Pos);
+#elif defined(STM32H7)
+    clock_freq = GetH7TimerClock(clock_freq);
 #elif defined(RCC_CFGR_PPRE2)
     if ((RCC->CFGR & RCC_CFGR_PPRE2) != RCC_CFGR_PPRE2_DIV1)
     {
@@ -133,6 +152,8 @@ ErrorCode STM32PWM::SetConfig(Configuration config)
 #if defined(STM32H5)
     clock_freq = GetH5TimerClock(clock_freq,
                                  (RCC->CFGR2 & RCC_CFGR2_PPRE1) >> RCC_CFGR2_PPRE1_Pos);
+#elif defined(STM32H7)
+    clock_freq = GetH7TimerClock(clock_freq);
 #elif defined(RCC_CFGR_PPRE1)
     if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1)
     {
