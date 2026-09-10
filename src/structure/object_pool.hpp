@@ -466,7 +466,9 @@ class BasicObjectPool
   }
 
  private:
-  /// @brief 保留已存活的引用，禁止引用数溢出。 Retain a live reference without overflow.
+  /// @brief 保留已存活的引用。 Retain an existing live reference.
+  /// @pre 调用方须保证新增引用不会使计数溢出；断言不是运行时溢出防护。
+  ///      The caller must prevent count overflow; assertions are not a runtime guard.
   void Retain(IndexType index) noexcept
   {
     DEV_ASSERT(static_cast<size_t>(index) < slot_count_);

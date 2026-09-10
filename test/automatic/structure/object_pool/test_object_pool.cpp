@@ -245,6 +245,66 @@ void RunResidentStorageChecks()
   TEST_ASSERT(destructions == 2);
 }
 
+template <size_t WorkerCount>
+void RunSameSlotReleaseChecks()
+{
+  using Pool = LibXR::MPMCObjectPool<Payload>;
+  constexpr size_t rounds = 64;
+  Pool pool(2);
+  Pool::Handle held_slot;
+  TEST_ASSERT(pool.Acquire(held_slot) == LibXR::ErrorCode::OK);
+  std::array<Pool::ConstHandle, WorkerCount> readers;
+  std::array<std::thread, WorkerCount> workers;
+  std::barrier start(static_cast<std::ptrdiff_t>(WorkerCount + 1U));
+  std::barrier done(static_cast<std::ptrdiff_t>(WorkerCount + 1U));
+
+  for (size_t i = 0; i < WorkerCount; ++i)
+  {
+    workers[i] = std::thread(
+        [&, i]()
+        {
+          for (size_t round = 0; round < rounds; ++round)
+          {
+            start.arrive_and_wait();
+            readers[i].Reset();
+            done.arrive_and_wait();
+          }
+        });
+  }
+
+  for (size_t round = 0; round < rounds; ++round)
+  {
+    Pool::Handle owner;
+    TEST_ASSERT(pool.Acquire(owner) == LibXR::ErrorCode::OK);
+    const auto index = owner.Index();
+    TEST_ASSERT(index != held_slot.Index());
+    owner->value = static_cast<int>(round);
+    for (auto& reader : readers) reader = owner;
+    owner.Reset();
+    TEST_ASSERT(pool.EmptySize() == 0U);
+
+    // All workers now decrement the same counter, without ordering their releases.
+    start.arrive_and_wait();
+    done.arrive_and_wait();
+
+    for (const auto& reader : readers) TEST_ASSERT(!reader.Valid());
+    TEST_ASSERT(pool.EmptySize() == 1U);
+    Pool::Handle returned;
+    TEST_ASSERT(pool.Acquire(returned) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(returned.Index() == index);
+    TEST_ASSERT(returned->value == static_cast<int>(round));
+    Pool::Handle duplicate;
+    TEST_ASSERT(pool.Acquire(duplicate) == LibXR::ErrorCode::EMPTY);
+    TEST_ASSERT(!duplicate.Valid());
+    returned.Reset();
+  }
+
+  for (auto& worker : workers) worker.join();
+  TEST_ASSERT(pool.EmptySize() == 1U);
+  held_slot.Reset();
+  TEST_ASSERT(pool.EmptySize() == 2U);
+}
+
 void RunConcurrentReturnChecks()
 {
   using Pool = LibXR::MPMCObjectPool<Payload>;
@@ -316,6 +376,8 @@ void test_object_pool()
   RunSharedHandleChecks<LibXR::SPSCObjectPool<Payload>>();
   RunSharedHandleChecks<LibXR::MPMCObjectPool<Payload>>();
   RunResidentStorageChecks();
+  RunSameSlotReleaseChecks<8>();
+  RunSameSlotReleaseChecks<32>();
   RunConcurrentReturnChecks();
   // Basic acquire/release using the ordinary FIFO queue as free-index storage.
   {
