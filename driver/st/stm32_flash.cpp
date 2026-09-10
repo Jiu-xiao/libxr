@@ -4,6 +4,85 @@
 
 using namespace LibXR;
 
+namespace
+{
+/** @brief Flash 擦写期间的缓存状态与写锁管理 / Cache state and write lock for Flash
+ * operations. */
+class FlashOperationGuard
+{
+ public:
+  FlashOperationGuard()
+  {
+#if defined(ICACHE) && defined(ICACHE_CR_EN) && defined(ICACHE_SR_BUSYF)
+    standalone_enabled_ = (ICACHE->CR & ICACHE_CR_EN) != 0U;
+    if (standalone_enabled_)
+    {
+      // 关闭独立 ICACHE 会自动失效；等硬件空闲，不消费共享的完成标志。
+      // Disabling standalone ICACHE invalidates it; wait for idle without consuming
+      // the shared completion flag.
+      CLEAR_BIT(ICACHE->CR, ICACHE_CR_EN);
+      __DSB();
+      __ISB();
+      const uint32_t start = HAL_GetTick();
+      while ((ICACHE->CR & ICACHE_CR_EN) != 0U || (ICACHE->SR & ICACHE_SR_BUSYF) != 0U)
+      {
+        if (static_cast<uint32_t>(HAL_GetTick() - start) > 1U)
+        {
+          // 抢占期间可能已完成，超时报错前重新确认。
+          // Completion may occur during preemption; recheck before failing.
+          REQUIRE((ICACHE->CR & ICACHE_CR_EN) == 0U &&
+                  (ICACHE->SR & ICACHE_SR_BUSYF) == 0U);
+        }
+      }
+    }
+#endif
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+    i_cache_enabled_ = (SCB->CCR & SCB_CCR_IC_Msk) != 0U;
+    if (i_cache_enabled_) SCB_DisableICache();
+#endif
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+    d_cache_enabled_ = (SCB->CCR & SCB_CCR_DC_Msk) != 0U;
+    if (d_cache_enabled_) SCB_DisableDCache();
+#endif
+    HAL_FLASH_Unlock();
+  }
+
+  ~FlashOperationGuard()
+  {
+    HAL_FLASH_Lock();
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+    if (i_cache_enabled_) SCB_EnableICache();
+#endif
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+    if (d_cache_enabled_) SCB_EnableDCache();
+#endif
+#if defined(ICACHE) && defined(ICACHE_CR_EN) && defined(ICACHE_SR_BUSYF)
+    if (standalone_enabled_)
+    {
+      __DSB();
+      SET_BIT(ICACHE->CR, ICACHE_CR_EN);
+      __DSB();
+      __ISB();
+    }
+#endif
+  }
+
+  FlashOperationGuard(const FlashOperationGuard&) = delete;
+  FlashOperationGuard& operator=(const FlashOperationGuard&) = delete;
+
+ private:
+#if defined(ICACHE) && defined(ICACHE_CR_EN) && defined(ICACHE_SR_BUSYF)
+  bool standalone_enabled_ = false;
+#endif
+#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
+  bool i_cache_enabled_ = false;
+#endif
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+  bool d_cache_enabled_ = false;
+#endif
+};
+}  // namespace
+
 STM32Flash::STM32Flash(const FlashSector* sectors, size_t sector_count,
                        size_t start_sector)
     : Flash(sectors[start_sector - 1].size, DetermineMinWriteSize(),
@@ -27,23 +106,7 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
   uint32_t start_addr = base_address_ + offset;
   uint32_t end_addr = start_addr + size;
 
-#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
-  bool i_cache_enabled = ((SCB->CCR & SCB_CCR_IC_Msk) != 0U);
-  if (i_cache_enabled)
-  {
-    SCB_DisableICache();
-  }
-#endif
-
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  bool d_cache_enabled = ((SCB->CCR & SCB_CCR_DC_Msk) != 0U);
-  if (d_cache_enabled)
-  {
-    SCB_DisableDCache();
-  }
-#endif
-
-  HAL_FLASH_Unlock();
+  FlashOperationGuard operation;
 
   for (size_t i = 0; i < sector_count_; ++i)
   {
@@ -87,27 +150,9 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
     HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase_init, &error);
     if (status != HAL_OK || error != 0xFFFFFFFFU)
     {
-      HAL_FLASH_Lock();
       return ErrorCode::FAILED;
     }
   }
-
-  HAL_FLASH_Lock();
-
-#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
-  if (i_cache_enabled)
-  {
-    SCB_EnableICache();
-  }
-#endif
-
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-
-  if (d_cache_enabled)
-  {
-    SCB_EnableDCache();
-  }
-#endif
 
   return ErrorCode::OK;
 }
@@ -125,23 +170,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
     return ErrorCode::OUT_OF_RANGE;
   }
 
-#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
-  bool i_cache_enabled = ((SCB->CCR & SCB_CCR_IC_Msk) != 0U);
-  if (i_cache_enabled)
-  {
-    SCB_DisableICache();
-  }
-#endif
-
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  bool d_cache_enabled = ((SCB->CCR & SCB_CCR_DC_Msk) != 0U);
-  if (d_cache_enabled)
-  {
-    SCB_DisableDCache();
-  }
-#endif
-
-  HAL_FLASH_Unlock();
+  FlashOperationGuard operation;
 
   const uint8_t* src = reinterpret_cast<const uint8_t*>(data.addr_);
   size_t written = 0;
@@ -166,7 +195,6 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
     if (HAL_FLASH_Program(program_type_, addr + written,
                           reinterpret_cast<uint32_t>(flash_word_buffer)) != HAL_OK)
     {
-      HAL_FLASH_Lock();
       return ErrorCode::FAILED;
     }
 
@@ -190,27 +218,10 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
 
     if (HAL_FLASH_Program(program_type_, addr + written, word) != HAL_OK)
     {
-      HAL_FLASH_Lock();
       return ErrorCode::FAILED;
     }
 
     written += chunk_size;
-  }
-#endif
-
-  HAL_FLASH_Lock();
-
-#if defined(__ICACHE_PRESENT) && (__ICACHE_PRESENT == 1U)
-  if (i_cache_enabled)
-  {
-    SCB_EnableICache();
-  }
-#endif
-
-#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-  if (d_cache_enabled)
-  {
-    SCB_EnableDCache();
   }
 #endif
 
