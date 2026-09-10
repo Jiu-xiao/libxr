@@ -1,8 +1,8 @@
 # 驱动手动测试 / Manual driver tests
 
-这里用于需要真实外设的测试，例如 UART 收发、ADC 采样和 Flash 读写。目前提供 [GPIO 读写和中断测试](gpio/README.md)、[PWM 回读测试](pwm/README.md)、[ADC 读数测试](adc/README.md)、[DAC 回读测试](dac/README.md)、[Flash 擦写测试](flash/README.md)、[I2C 寄存器读写测试](i2c/README.md)、[SPI 回环测试](spi/README.md)及 [CAN / CAN FD 内部回环测试](can/README.md)，不由 CI 执行。
+这里用于需要真实外设的测试，例如 UART 收发、ADC 采样和 Flash 读写。目前提供 [GPIO 读写和中断测试](gpio/README.md)、[PWM 回读测试](pwm/README.md)、[ADC 读数测试](adc/README.md)、[DAC 回读测试](dac/README.md)、[Flash 擦写测试](flash/README.md)、[I2C 寄存器读写测试](i2c/README.md)、[SPI 回环测试](spi/README.md)、[CAN / CAN FD 内部回环测试](can/README.md)及 [UART 回环测试](uart/README.md)，不由 CI 执行。
 
-This directory is for tests that need real peripherals, such as UART transfers, ADC sampling and Flash access. [GPIO loopback and interrupt tests](gpio/README.md), [PWM readback tests](pwm/README.md), [ADC sampling tests](adc/README.md), [DAC readback tests](dac/README.md), [Flash erase/program tests](flash/README.md), [I2C register read/write tests](i2c/README.md), [SPI loopback tests](spi/README.md) and [CAN / CAN FD internal loopback tests](can/README.md) are available. CI does not run them.
+This directory is for tests that need real peripherals, such as UART transfers, ADC sampling and Flash access. [GPIO loopback and interrupt tests](gpio/README.md), [PWM readback tests](pwm/README.md), [ADC sampling tests](adc/README.md), [DAC readback tests](dac/README.md), [Flash erase/program tests](flash/README.md), [I2C register read/write tests](i2c/README.md), [SPI loopback tests](spi/README.md), [CAN / CAN FD internal loopback tests](can/README.md) and [UART loopback tests](uart/README.md) are available. CI does not run them.
 
 调用方完成设备初始化和接线，准备所需资源，再把设备对象传给测试函数。测试通过 LibXR 公共驱动接口操作设备，检查失败时立即停止。
 

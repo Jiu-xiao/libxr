@@ -47,26 +47,39 @@ class TransferTestCompletion
   template <typename Submit>
   void Run(unsigned mode_index, Submit submit)
   {
+    Start(mode_index, submit);
+    Wait();
+  }
+
+  // 分开提交和等待，允许先挂接收再发送；同一实例须完成后才能再次提交。
+  // Split submission from waiting to arm RX before TX; finish before reusing an instance.
+  template <typename Submit>
+  void Start(unsigned mode_index, Submit submit)
+  {
     auto& operation = operations_[mode_index];
-    const Mode mode = operation.type;
+    mode_ = operation.type;
     Check();
     status_.store(Status::READY, std::memory_order_relaxed);
-    if (mode == Mode::CALLBACK)
+    if (mode_ == Mode::CALLBACK)
     {
       ++expected_calls_;
     }
     TEST_ASSERT(submit(operation) == ErrorCode::OK);
-    const uint32_t start = Thread::GetTime();
+    started_ = Thread::GetTime();
+  }
+
+  void Wait()
+  {
     for (;;)
     {
-      bool done = mode == Mode::BLOCK;
-      if (mode == Mode::POLLING)
+      bool done = mode_ == Mode::BLOCK;
+      if (mode_ == Mode::POLLING)
       {
         const auto status = status_.load(std::memory_order_acquire);
         TEST_ASSERT(status != Status::ERROR);
         done = status == Status::DONE;
       }
-      else if (mode == Mode::CALLBACK)
+      else if (mode_ == Mode::CALLBACK)
       {
         const uint32_t calls = calls_.load(std::memory_order_acquire);
         TEST_ASSERT(calls <= expected_calls_);
@@ -79,7 +92,7 @@ class TransferTestCompletion
       {
         break;
       }
-      TEST_ASSERT(Thread::GetTime() - start < timeout_ms_);
+      TEST_ASSERT(Thread::GetTime() - started_ < timeout_ms_);
       Thread::Sleep(1);
     }
     Check();
@@ -100,5 +113,7 @@ class TransferTestCompletion
   Transfer operations_[3];
   uint32_t timeout_ms_;
   uint32_t expected_calls_ = 0;
+  uint32_t started_ = 0;
+  Mode mode_ = Mode::BLOCK;
 };
 }  // namespace LibXR::Test::Detail

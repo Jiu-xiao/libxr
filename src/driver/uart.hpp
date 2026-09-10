@@ -44,8 +44,11 @@ class UART
   {
     uint32_t baudrate;  ///< 波特率 / Baud rate
     // TODO: Mark, Space
-    Parity parity;      ///< 校验模式 / Parity mode
-    uint8_t data_bits;  ///< 数据位长度 / Number of data bits
+    Parity parity;  ///< 校验模式 / Parity mode
+    /// 有效数据位数。按字节接收时仅低 data_bits 位有效，高位由调用方按需屏蔽。
+    /// Number of valid data bits. For byte-wise RX, only the low data_bits bits are
+    /// valid; callers mask the unspecified upper bits when needed.
+    uint8_t data_bits;
     // TODO: 0.5 1.5
     uint8_t stop_bits;  ///< 停止位长度 / Number of stop bits
   };
