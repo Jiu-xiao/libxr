@@ -6,8 +6,8 @@ There are two kinds of tests:
 
 - **automatic**：在 Linux 上运行，由 CI 自动执行。测试核心功能和 Linux 能验证的系统、驱动行为。
   Runs on Linux in CI. Checks core functionality and system or driver behavior that can be tested on Linux.
-- **manual**：需要具体系统或外设，由用户准备环境后调用。[system](manual/system/README.md) 已提供可调用的系统测试；[driver](manual/driver/README.md) 提供 GPIO、PWM、ADC、DAC、Flash、I2C 和 SPI 测试。
-  Needs a particular system or peripheral and is called after the user sets it up. [system](manual/system/README.md) provides callable system tests; [driver](manual/driver/README.md) provides GPIO, PWM, ADC, DAC, Flash, I2C and SPI tests.
+- **manual**：需要具体系统或外设，由用户准备环境后调用。[system](manual/system/README.md) 已提供可调用的系统测试；[driver](manual/driver/README.md) 提供 GPIO、PWM、ADC、DAC、Flash、I2C、SPI 和 CAN / CAN FD 测试。
+  Needs a particular system or peripheral and is called after the user sets it up. [system](manual/system/README.md) provides callable system tests; [driver](manual/driver/README.md) provides GPIO, PWM, ADC, DAC, Flash, I2C, SPI and CAN / CAN FD tests.
 
 ## 构建并运行 / Build and run
 
