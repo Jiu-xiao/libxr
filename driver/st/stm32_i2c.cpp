@@ -409,17 +409,33 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
 ErrorCode STM32I2C::SetConfig(Configuration config)
 {
-  if (HasClockSpeed<decltype(i2c_handle_)>::value)
+  if (i2c_handle_->State != HAL_I2C_STATE_READY)
   {
-    SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
+    return ErrorCode::BUSY;
   }
-  else
+
+  if (!HasClockSpeed<decltype(i2c_handle_)>::value)
   {
     return ErrorCode::NOT_SUPPORT;
   }
 
+  const auto old_init = i2c_handle_->Init;
+  SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
+
+  // Reinitialization clears a controller BUSY state left by the previous timing.
+  // 重新初始化会清除旧时序留下的控制器 BUSY 状态。
+  if (HAL_I2C_DeInit(i2c_handle_) != HAL_OK)
+  {
+    i2c_handle_->Init = old_init;
+    return ErrorCode::INIT_ERR;
+  }
   if (HAL_I2C_Init(i2c_handle_) != HAL_OK)
   {
+    // Keep the previous usable configuration when the new one is rejected.
+    // 新配置被 HAL 拒绝时恢复之前可用的配置。
+    (void)HAL_I2C_DeInit(i2c_handle_);
+    i2c_handle_->Init = old_init;
+    (void)HAL_I2C_Init(i2c_handle_);
     return ErrorCode::INIT_ERR;
   }
   return ErrorCode::OK;

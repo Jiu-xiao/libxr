@@ -93,6 +93,14 @@ class STM32I2C : public I2C
     i2c_handle->Init.ClockSpeed = config.clock_speed;
   }
 
+  /**
+   * @brief 重新配置 I2C 时序 / Reconfigure I2C timing
+   * @pre 总线空闲，且调用方已将配置与读写操作串行化。
+   *      The bus must be idle, and the caller must serialize configuration with I2C
+   * transfers.
+   * @return 配置结果；活动事务返回 BUSY / Configuration result; BUSY for an active
+   * transfer.
+   */
   ErrorCode SetConfig(Configuration config) override;
 
   stm32_i2c_id_t id_;
