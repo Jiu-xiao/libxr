@@ -1,6 +1,6 @@
 #include "ch32_usbcan_shared.hpp"
 
-#if defined(RCC_APB1Periph_USB) && defined(CAN1) && !defined(CAN2)
+#if defined(RCC_APB1Periph_USB) && defined(CAN1)
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void

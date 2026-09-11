@@ -6,7 +6,7 @@ using namespace LibXR;
 
 CH32CAN* CH32CAN::map[CH32_CAN_NUMBER] = {nullptr};
 
-#if defined(CAN1) && !defined(CAN2)
+#if defined(CAN1) && defined(RCC_APB1Periph_USB)
 static void can1_rx0_thunk()
 {
   if (auto* can = LibXR::CH32CAN::map[CH32_CAN1])
@@ -205,12 +205,15 @@ ErrorCode CH32CAN::Init()
   // Enable NVIC for this CAN instance.
   ch32_can_enable_nvic(id_, fifo_);
 
-  if constexpr (LibXR::CH32UsbCanShared::usb_can_share_enabled())
+  if constexpr (LibXR::CH32UsbCanShared::usb_can_irq_share_enabled())
   {
-#if defined(CAN1) && !defined(CAN2)
-    LibXR::CH32UsbCanShared::register_can1_rx0(&can1_rx0_thunk);
-    LibXR::CH32UsbCanShared::register_can1_tx(&can1_tx_thunk);
-    LibXR::CH32UsbCanShared::can1_inited.store(true, std::memory_order_release);
+#if defined(CAN1) && defined(RCC_APB1Periph_USB)
+    if (id_ == CH32_CAN1)
+    {
+      LibXR::CH32UsbCanShared::register_can1_rx0(&can1_rx0_thunk);
+      LibXR::CH32UsbCanShared::register_can1_tx(&can1_tx_thunk);
+      LibXR::CH32UsbCanShared::can1_inited.store(true, std::memory_order_release);
+    }
 #endif
   }
 
