@@ -85,11 +85,15 @@ class Thread
 
     auto block = new ThreadBlock(function, arg);
 
-    uint32_t stack_size = stack_depth / 4;
-
-    if (stack_depth % 4 != 0)
+    // LibXR 栈深度使用字节；xTaskCreate() 接收 StackType_t 个数。
+    // LibXR stack depth is in bytes; xTaskCreate() consumes StackType_t units.
+    // ESP-IDF 将 StackType_t 定义为 uint8_t，因此同一换算自然保留字节语义。
+    // ESP-IDF defines StackType_t as uint8_t, so the same conversion preserves byte
+    // units.
+    uint32_t stack_size = static_cast<uint32_t>(stack_depth / sizeof(StackType_t));
+    if ((stack_depth % sizeof(StackType_t)) != 0U)
     {
-      stack_size += 1;
+      stack_size += 1U;
     }
 
     auto ans = xTaskCreate(block->Port, name, stack_size, block,
