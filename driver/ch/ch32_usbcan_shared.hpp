@@ -39,8 +39,14 @@ inline constexpr bool K_HAS_CAN2 = false;
 #endif
 
 inline constexpr bool K_SINGLE_CAN1 = K_HAS_CAN1 && !K_HAS_CAN2;
+// CAN1 uses the USB-named IRQ vectors even on dual-CAN devices.
+// CAN1 在双 CAN 器件上仍使用 USB 命名的共享中断向量。
+inline constexpr bool K_USB_CAN_IRQ_SHARE = K_HAS_USB_DEV_FS && K_HAS_CAN1;
+// PMA/resource sharing is limited to the original single-CAN topology.
+// PMA/资源共享仍只适用于原来的单 CAN 拓扑。
 inline constexpr bool K_USB_CAN_SHARE = K_HAS_USB_DEV_FS && K_SINGLE_CAN1;
 
+inline constexpr bool usb_can_irq_share_enabled() { return K_USB_CAN_IRQ_SHARE; }
 inline constexpr bool usb_can_share_enabled() { return K_USB_CAN_SHARE; }
 
 inline uint16_t usb_pma_limit_bytes()
@@ -65,7 +71,7 @@ inline void register_usb_irq(IrqFn fn)
 
 inline void register_can1_rx0(IrqFn fn)
 {
-  if constexpr (K_USB_CAN_SHARE)
+  if constexpr (K_USB_CAN_IRQ_SHARE)
   {
     can1_rx0_cb.store(fn, std::memory_order_release);
   }
@@ -77,7 +83,7 @@ inline void register_can1_rx0(IrqFn fn)
 
 inline void register_can1_tx(IrqFn fn)
 {
-  if constexpr (K_USB_CAN_SHARE)
+  if constexpr (K_USB_CAN_IRQ_SHARE)
   {
     can1_tx_cb.store(fn, std::memory_order_release);
   }
@@ -89,7 +95,7 @@ inline void register_can1_tx(IrqFn fn)
 
 inline bool can1_active()
 {
-  if constexpr (!K_USB_CAN_SHARE)
+  if constexpr (!K_USB_CAN_IRQ_SHARE)
   {
     return false;
   }
