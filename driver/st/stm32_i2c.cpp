@@ -151,6 +151,43 @@ static inline ErrorCode WaitBlockResultAndRecoverTimeout(STM32I2C* i2c, uint32_t
   return ans;
 }
 
+static bool ResetI2CPeripheral(I2C_TypeDef* instance)
+{
+#if defined(I2C1) && defined(__HAL_RCC_I2C1_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C1_RELEASE_RESET)
+  if (instance == I2C1)
+  {
+    __HAL_RCC_I2C1_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C1_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C2) && defined(__HAL_RCC_I2C2_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C2_RELEASE_RESET)
+  if (instance == I2C2)
+  {
+    __HAL_RCC_I2C2_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C2_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C3) && defined(__HAL_RCC_I2C3_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C3_RELEASE_RESET)
+  if (instance == I2C3)
+  {
+    __HAL_RCC_I2C3_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C3_RELEASE_RESET();
+    return true;
+  }
+#endif
+  return false;
+}
+
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
@@ -409,17 +446,29 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
 ErrorCode STM32I2C::SetConfig(Configuration config)
 {
-  if (HasClockSpeed<decltype(i2c_handle_)>::value)
-  {
-    SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
-  }
-  else
+  if (!HasClockSpeed<decltype(i2c_handle_)>::value)
   {
     return ErrorCode::NOT_SUPPORT;
   }
+  if (i2c_handle_->State != HAL_I2C_STATE_READY)
+  {
+    return ErrorCode::BUSY;
+  }
 
+  const auto old_init = i2c_handle_->Init;
+  SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
+  if (!ResetI2CPeripheral(i2c_handle_->Instance))
+  {
+    i2c_handle_->Init = old_init;
+    return ErrorCode::NOT_SUPPORT;
+  }
   if (HAL_I2C_Init(i2c_handle_) != HAL_OK)
   {
+    i2c_handle_->Init = old_init;
+    if (ResetI2CPeripheral(i2c_handle_->Instance))
+    {
+      (void)HAL_I2C_Init(i2c_handle_);
+    }
     return ErrorCode::INIT_ERR;
   }
   return ErrorCode::OK;
