@@ -151,6 +151,182 @@ static inline ErrorCode WaitBlockResultAndRecoverTimeout(STM32I2C* i2c, uint32_t
   return ans;
 }
 
+static bool ResetI2CPeripheral(I2C_TypeDef* instance)
+{
+#if defined(I2C1) && defined(__HAL_RCC_I2C1_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C1_RELEASE_RESET)
+  if (instance == I2C1)
+  {
+    __HAL_RCC_I2C1_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C1_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C2) && defined(__HAL_RCC_I2C2_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C2_RELEASE_RESET)
+  if (instance == I2C2)
+  {
+    __HAL_RCC_I2C2_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C2_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C3) && defined(__HAL_RCC_I2C3_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C3_RELEASE_RESET)
+  if (instance == I2C3)
+  {
+    __HAL_RCC_I2C3_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C3_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C4) && defined(__HAL_RCC_I2C4_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C4_RELEASE_RESET)
+  if (instance == I2C4)
+  {
+    __HAL_RCC_I2C4_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C4_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C5) && defined(__HAL_RCC_I2C5_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C5_RELEASE_RESET)
+  if (instance == I2C5)
+  {
+    __HAL_RCC_I2C5_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C5_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C6) && defined(__HAL_RCC_I2C6_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C6_RELEASE_RESET)
+  if (instance == I2C6)
+  {
+    __HAL_RCC_I2C6_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C6_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C7) && defined(__HAL_RCC_I2C7_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C7_RELEASE_RESET)
+  if (instance == I2C7)
+  {
+    __HAL_RCC_I2C7_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C7_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C8) && defined(__HAL_RCC_I2C8_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C8_RELEASE_RESET)
+  if (instance == I2C8)
+  {
+    __HAL_RCC_I2C8_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C8_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+  return false;
+}
+
+static uint32_t GetI2CClock(I2C_TypeDef* instance)
+{
+#if defined(HAL_RCC_MODULE_ENABLED)
+#if defined(RCC_PERIPHCLK_I2C4) && defined(I2C4)
+  if (instance == I2C4)
+  {
+    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C4);
+  }
+#endif
+#if defined(RCC_PERIPHCLK_I2C2) && defined(I2C2)
+  if (instance == I2C2)
+  {
+    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C2);
+  }
+#endif
+#if defined(RCC_PERIPHCLK_I2C3) && defined(I2C3)
+  if (instance == I2C3)
+  {
+    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C3);
+  }
+#endif
+#if defined(RCC_PERIPHCLK_I2C1) && defined(I2C1)
+  if (instance == I2C1)
+  {
+    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1);
+  }
+#endif
+#if defined(RCC_PERIPHCLK_I2C1235)
+  return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1235);
+#endif
+#endif
+  return HAL_RCC_GetPCLK1Freq();
+}
+
+static bool ComputeTiming(uint32_t clock_hz, uint32_t speed_hz, uint32_t& timing)
+{
+  if (clock_hz == 0U || speed_hz == 0U || speed_hz > 1000000U)
+  {
+    return false;
+  }
+  const uint64_t clock_period = (1000000000ULL + clock_hz - 1U) / clock_hz;
+  const uint64_t target_period = 1000000000ULL / speed_hz;
+  const uint64_t rise = speed_hz <= 100000U ? 1000U : 300U;
+  const uint64_t fall = speed_hz <= 100000U ? 300U : 300U;
+  const uint64_t setup = speed_hz <= 100000U ? 250U : 100U;
+  const uint64_t hold = speed_hz <= 100000U ? 0U : 0U;
+  uint64_t best_error = UINT64_MAX;
+  uint32_t best = 0U;
+  for (uint32_t presc = 0; presc < 16U; ++presc)
+  {
+    const uint64_t tpresc = (presc + 1U) * clock_period;
+    for (uint32_t scldel = 0; scldel < 16U; ++scldel)
+    {
+      if ((scldel + 1U) * tpresc < rise + setup) continue;
+      for (uint32_t sdadel = 0; sdadel < 16U; ++sdadel)
+      {
+        if (sdadel * tpresc + hold < 50U) continue;
+        for (uint32_t scll = 0; scll < 256U; ++scll)
+        {
+          const uint64_t low = (scll + 1U) * tpresc + fall;
+          if (low < (speed_hz <= 100000U ? 4700U : 1300U)) continue;
+          const uint64_t high_target = target_period > low ? target_period - low : 0U;
+          const uint32_t sclh = high_target > tpresc
+                                    ? static_cast<uint32_t>(high_target / tpresc) - 1U
+                                    : 0U;
+          if (sclh > 255U) continue;
+          const uint64_t actual = low + (sclh + 1U) * tpresc + rise;
+          const uint64_t error =
+              actual > target_period ? actual - target_period : target_period - actual;
+          if (error < best_error)
+          {
+            best_error = error;
+            best = (presc << 28) | (scldel << 20) | (sdadel << 16) | (sclh << 8) | scll;
+          }
+        }
+      }
+    }
+  }
+  if (best_error == UINT64_MAX || best_error > target_period / 5U) return false;
+  timing = best;
+  return true;
+}
+
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
@@ -161,6 +337,12 @@ STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
       dma_enable_min_size_(dma_enable_min_size),
       dma_buff_(dma_buff)
 {
+  ASSERT(id_ != STM32_I2C_ID_ERROR);
+  ASSERT(id_ < STM32_I2C_NUMBER);
+  if (id_ == STM32_I2C_ID_ERROR || id_ >= STM32_I2C_NUMBER)
+  {
+    return;
+  }
   map[id_] = this;
 }
 
@@ -409,17 +591,41 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
 ErrorCode STM32I2C::SetConfig(Configuration config)
 {
-  if (HasClockSpeed<decltype(i2c_handle_)>::value)
+  if (i2c_handle_->State != HAL_I2C_STATE_READY)
+  {
+    return ErrorCode::BUSY;
+  }
+
+  const auto old_init = i2c_handle_->Init;
+  if constexpr (HasClockSpeed<decltype(i2c_handle_)>::value)
   {
     SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
+  }
+  else if constexpr (HasTiming<decltype(i2c_handle_)>::value)
+  {
+    uint32_t timing = 0U;
+    if (!ComputeTiming(GetI2CClock(i2c_handle_->Instance), config.clock_speed, timing))
+    {
+      return ErrorCode::NOT_SUPPORT;
+    }
+    SetTiming<decltype(i2c_handle_)>(i2c_handle_, timing);
   }
   else
   {
     return ErrorCode::NOT_SUPPORT;
   }
-
+  if (!ResetI2CPeripheral(i2c_handle_->Instance))
+  {
+    i2c_handle_->Init = old_init;
+    return ErrorCode::NOT_SUPPORT;
+  }
   if (HAL_I2C_Init(i2c_handle_) != HAL_OK)
   {
+    i2c_handle_->Init = old_init;
+    if (ResetI2CPeripheral(i2c_handle_->Instance))
+    {
+      (void)HAL_I2C_Init(i2c_handle_);
+    }
     return ErrorCode::INIT_ERR;
   }
   return ErrorCode::OK;
