@@ -4,7 +4,7 @@
 #include "libxr_time.hpp"
 #include "tx_api.h"
 
-#define LIBXR_PRIORITY_STEP ((TX_MAX_PRIORITIES - 1) / 5)
+#define LIBXR_PRIORITY_STEP ((TX_MAX_PRIORITIES - 1U) / 5U)
 
 namespace LibXR
 {
@@ -16,17 +16,17 @@ class Thread
 {
  public:
   /**
-   * @brief  线程优先级枚举
-   *         Enumeration for thread priorities
+   * @brief 线程优先级枚举（ThreadX 数值越小优先级越高）
+   *         Thread priority levels; ThreadX uses smaller values for higher priority
    */
-  enum class Priority : uint8_t
+  enum class Priority : UINT
   {
-    IDLE = 1,                            ///< 空闲优先级 Idle priority
-    LOW = LIBXR_PRIORITY_STEP * 1,       ///< 低优先级 Low priority
-    MEDIUM = LIBXR_PRIORITY_STEP * 2,    ///< 中等优先级 Medium priority
-    HIGH = LIBXR_PRIORITY_STEP * 3,      ///< 高优先级 High priority
-    REALTIME = LIBXR_PRIORITY_STEP * 4,  ///< 实时优先级 Realtime priority
-    NUMBER = 5                           ///< 优先级数量 Number of priority levels
+    IDLE = LIBXR_PRIORITY_STEP * 4U,    ///< 空闲优先级 Idle priority
+    LOW = LIBXR_PRIORITY_STEP * 3U,     ///< 低优先级 Low priority
+    MEDIUM = LIBXR_PRIORITY_STEP * 2U,  ///< 中等优先级 Medium priority
+    HIGH = LIBXR_PRIORITY_STEP * 1U,    ///< 高优先级 High priority
+    REALTIME = 1U,                      ///< 实时优先级 Realtime priority
+    NUMBER = 5                          ///< 优先级数量 Number of priority levels
   };
 
   /**
