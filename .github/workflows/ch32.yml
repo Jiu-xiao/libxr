@@ -1,0 +1,33 @@
+name: CH32 contracts
+
+on:
+  push:
+    branches: ["master", "dev"]
+  pull_request:
+
+jobs:
+  uart-mapping:
+    name: UART DMA family matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: openwch/ch32v20x
+          ref: 77eea7caa1b802268857486af5fafa20f3844dfb
+          path: .sdk/ch32v20x
+          sparse-checkout: |
+            EVT/EXAM/SRC
+            EVT/EXAM/USART/USART_DMA/User
+      - uses: actions/checkout@v4
+        with:
+          repository: openwch/ch32v307
+          ref: 080af2e52055334eaa6af0f7ad7df527b4ef5a66
+          path: .sdk/ch32v307
+          sparse-checkout: |
+            EVT/EXAM/SRC
+            EVT/EXAM/USART/USART_DMA/User
+      - name: Check all UART table entries and V20x DMA2-symbol isolation
+        run: >-
+          python3 tools/check_ch32_uart_mapping.py --repo .
+          --v20-sdk .sdk/ch32v20x --v30-sdk .sdk/ch32v307
