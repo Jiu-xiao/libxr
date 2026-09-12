@@ -52,7 +52,8 @@ int main() {
     CHECK(default_hits==0);
     CHECK(usb_hits==(USE_USB?2:0));
     CHECK(rx_hits==(USE_CAN1?1:0) && tx_hits==(USE_CAN1?1:0));
-    // Both CAN instances, or CAN2 alone, reserve the upper 256 PMA bytes.
+    // CAN2 conservatively selects the dual-controller 256-byte reservation;
+    // the manual does not specify a separate CAN2-only application-object mode.
     can2_inited.store(true);
     CHECK(usb_pma_limit_bytes()==(TEST_DUAL?256:USE_CAN1?384:512));
     can2_inited.store(USE_CAN2);
@@ -95,6 +96,22 @@ def main():
     ap.add_argument('--output',type=Path)
     args=ap.parse_args()
     results=[]
+
+    # PMA exhaustion is a runtime invariant, not a debug-only assertion. Keep a
+    # cheap source-contract check here because the allocator itself is target-MMIO
+    # code and is not executed by this host harness.
+    endpoint_source=(args.repo/'driver/ch/ch32_usb_endpoint_devfs.cpp').read_text()
+    release_guards=(
+        'REQUIRE(g_pma_next <= g_pma_limit);',
+        'REQUIRE(bytes <= g_pma_limit);',
+        'REQUIRE(END <= g_pma_limit);',
+        'REQUIRE(ADDR >= PMA_ALLOC_BASE);',
+    )
+    for guard in release_guards:
+        if guard not in endpoint_source:
+            raise RuntimeError('missing always-on PMA guard: '+guard)
+    results.append({'pma_release_guards':len(release_guards),'pass':True})
+
     source=(args.repo/'driver/ch/ch32_usbcan_shared.cpp').read_text()
     source=source.replace('__attribute__((interrupt("WCH-Interrupt-fast")))','')
     with tempfile.TemporaryDirectory(prefix='ch32-shared-irq-') as tmp:
