@@ -282,6 +282,9 @@ void CH32EndpointDevFs::ResetPMAAllocator()
 
 static inline uint16_t alloc_pma(size_t bytes)
 {
+  // Init may allocate endpoints before the first USB bus reset.
+  // 首次 USB reset 前也可能分配端点，必须立即使用当前 CAN 预留后的上限。
+  g_pma_limit = LibXR::CH32UsbCanShared::usb_pma_limit_bytes();
   const uint16_t ADDR = g_pma_next;
   const uint16_t INC = static_cast<uint16_t>((bytes + 1U) & ~1U);
 
@@ -292,6 +295,7 @@ static inline uint16_t alloc_pma(size_t bytes)
     return 0;
   }
 
+  LibXR::CH32UsbCanShared::usb_pma_configured.store(true, std::memory_order_release);
   g_pma_next = static_cast<uint16_t>(END);
   return ADDR;
 }

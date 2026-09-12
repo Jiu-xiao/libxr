@@ -1,0 +1,15 @@
+name: CH32 shared IRQ contracts
+
+on:
+  push:
+    branches: ["master", "dev"]
+  pull_request:
+
+jobs:
+  shared-irq:
+    name: Shared IRQ archive and callback matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check weak startup handlers, LTO, callbacks and PMA policy
+        run: python3 tools/check_ch32_shared_irq.py --repo .
