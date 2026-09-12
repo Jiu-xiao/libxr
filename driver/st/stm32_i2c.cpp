@@ -1,6 +1,7 @@
 #include "stm32_i2c.hpp"
 
 #include "stm32_dcache.hpp"
+#include "stm32_i2c_timing.hpp"
 #ifdef HAL_I2C_MODULE_ENABLED
 
 using namespace LibXR;
@@ -278,55 +279,19 @@ static uint32_t GetI2CClock(I2C_TypeDef* instance)
   return HAL_RCC_GetPCLK1Freq();
 }
 
-static bool ComputeTiming(uint32_t clock_hz, uint32_t speed_hz, uint32_t& timing)
+static bool ComputeTiming(I2C_HandleTypeDef* handle, uint32_t speed_hz, uint32_t& timing)
 {
-  if (clock_hz == 0U || speed_hz == 0U || speed_hz > 1000000U)
-  {
-    return false;
-  }
-  const uint64_t clock_period = (1000000000ULL + clock_hz - 1U) / clock_hz;
-  const uint64_t target_period = 1000000000ULL / speed_hz;
-  const uint64_t rise = speed_hz <= 100000U ? 1000U : 300U;
-  const uint64_t fall = speed_hz <= 100000U ? 300U : 300U;
-  const uint64_t setup = speed_hz <= 100000U ? 250U : 100U;
-  const uint64_t hold = speed_hz <= 100000U ? 0U : 0U;
-  uint64_t best_error = UINT64_MAX;
-  uint32_t best = 0U;
-  for (uint32_t presc = 0; presc < 16U; ++presc)
-  {
-    const uint64_t tpresc = (presc + 1U) * clock_period;
-    for (uint32_t scldel = 0; scldel < 16U; ++scldel)
-    {
-      if ((scldel + 1U) * tpresc < rise + setup) continue;
-      for (uint32_t sdadel = 0; sdadel < 16U; ++sdadel)
-      {
-        if (sdadel * tpresc + hold < 50U) continue;
-        for (uint32_t scll = 0; scll < 256U; ++scll)
-        {
-          const uint64_t low = (scll + 1U) * tpresc + fall;
-          if (low < (speed_hz <= 100000U ? 4700U : 1300U)) continue;
-          const uint64_t high_target = target_period > low ? target_period - low : 0U;
-          const uint32_t sclh = high_target > tpresc
-                                    ? static_cast<uint32_t>(high_target / tpresc) - 1U
-                                    : 0U;
-          if (sclh > 255U) continue;
-          const uint64_t actual = low + (sclh + 1U) * tpresc + rise;
-          const uint64_t error =
-              actual > target_period ? actual - target_period : target_period - actual;
-          if (error < best_error)
-          {
-            best_error = error;
-            best = (presc << 28) | (scldel << 20) | (sdadel << 16) | (sclh << 8) | scll;
-          }
-        }
-      }
-    }
-  }
-  if (best_error == UINT64_MAX || best_error > target_period / 5U) return false;
-  timing = best;
-  return true;
+  uint32_t digital_filter = 0;
+  bool analog_filter = true;
+#if defined(I2C_CR1_DNF)
+  digital_filter = (handle->Instance->CR1 & I2C_CR1_DNF) >> I2C_CR1_DNF_Pos;
+#endif
+#if defined(I2C_CR1_ANFOFF)
+  analog_filter = (handle->Instance->CR1 & I2C_CR1_ANFOFF) == 0U;
+#endif
+  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz, analog_filter,
+                                 digital_filter, timing);
 }
-
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
@@ -604,7 +569,7 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
   else if constexpr (HasTiming<decltype(i2c_handle_)>::value)
   {
     uint32_t timing = 0U;
-    if (!ComputeTiming(GetI2CClock(i2c_handle_->Instance), config.clock_speed, timing))
+    if (!ComputeTiming(i2c_handle_, config.clock_speed, timing))
     {
       return ErrorCode::NOT_SUPPORT;
     }
