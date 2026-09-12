@@ -1,6 +1,83 @@
 #include "stm32_i2c.hpp"
 
 #include "stm32_dcache.hpp"
+#include "stm32_i2c_timing.hpp"
+#if defined(STM32C0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32c0xx_ll_rcc.h"
+#endif
+#if defined(STM32F0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32f0xx_ll_rcc.h"
+#endif
+#if defined(STM32F3)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32f3xx_ll_rcc.h"
+#endif
+#if defined(STM32F7)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32f7xx_ll_rcc.h"
+#endif
+#if defined(STM32G0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32g0xx_ll_rcc.h"
+#endif
+#if defined(STM32G4)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32g4xx_ll_rcc.h"
+#endif
+#if defined(STM32H5)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32h5xx_ll_rcc.h"
+#endif
+#if defined(STM32H7)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32h7xx_ll_rcc.h"
+#endif
+#if defined(STM32H7RS)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32h7rsxx_ll_rcc.h"
+#endif
+#if defined(STM32L0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32l0xx_ll_rcc.h"
+#endif
+#if defined(STM32L4)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32l4xx_ll_rcc.h"
+#endif
+#if defined(STM32L5)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32l5xx_ll_rcc.h"
+#endif
+#if defined(STM32U0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32u0xx_ll_rcc.h"
+#endif
+#if defined(STM32U3)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32u3xx_ll_rcc.h"
+#endif
+#if defined(STM32U5)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32u5xx_ll_rcc.h"
+#endif
+#if defined(STM32N6)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32n6xx_ll_rcc.h"
+#endif
+#if defined(STM32WB)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32wbxx_ll_rcc.h"
+#endif
+#if defined(STM32WBA)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32wbaxx_ll_rcc.h"
+#endif
+#if defined(STM32WL)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32wlxx_ll_rcc.h"
+#endif
 #ifdef HAL_I2C_MODULE_ENABLED
 
 using namespace LibXR;
@@ -151,6 +228,171 @@ static inline ErrorCode WaitBlockResultAndRecoverTimeout(STM32I2C* i2c, uint32_t
   return ans;
 }
 
+static bool ResetI2CPeripheral(I2C_TypeDef* instance)
+{
+#if defined(I2C1) && defined(__HAL_RCC_I2C1_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C1_RELEASE_RESET)
+  if (instance == I2C1)
+  {
+    __HAL_RCC_I2C1_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C1_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C2) && defined(__HAL_RCC_I2C2_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C2_RELEASE_RESET)
+  if (instance == I2C2)
+  {
+    __HAL_RCC_I2C2_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C2_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C3) && defined(__HAL_RCC_I2C3_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C3_RELEASE_RESET)
+  if (instance == I2C3)
+  {
+    __HAL_RCC_I2C3_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C3_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C4) && defined(__HAL_RCC_I2C4_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C4_RELEASE_RESET)
+  if (instance == I2C4)
+  {
+    __HAL_RCC_I2C4_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C4_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C5) && defined(__HAL_RCC_I2C5_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C5_RELEASE_RESET)
+  if (instance == I2C5)
+  {
+    __HAL_RCC_I2C5_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C5_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C6) && defined(__HAL_RCC_I2C6_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C6_RELEASE_RESET)
+  if (instance == I2C6)
+  {
+    __HAL_RCC_I2C6_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C6_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C7) && defined(__HAL_RCC_I2C7_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C7_RELEASE_RESET)
+  if (instance == I2C7)
+  {
+    __HAL_RCC_I2C7_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C7_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+#if defined(I2C8) && defined(__HAL_RCC_I2C8_FORCE_RESET) && \
+    defined(__HAL_RCC_I2C8_RELEASE_RESET)
+  if (instance == I2C8)
+  {
+    __HAL_RCC_I2C8_FORCE_RESET();
+    __NOP();
+    __HAL_RCC_I2C8_RELEASE_RESET();
+    return true;
+  }
+#endif
+
+  return false;
+}
+
+static uint32_t NormalizeI2CClock(uint32_t frequency)
+{
+  if (frequency != 0U)
+  {
+    return frequency;
+  }
+#if defined(RCC_D2CCIP2R_I2C123SEL) && defined(RCC_I2C123CLKSOURCE_D2PCLK1)
+  if ((RCC->D2CCIP2R & RCC_D2CCIP2R_I2C123SEL) == RCC_I2C123CLKSOURCE_D2PCLK1)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+#if defined(RCC_D3CCIPR_I2C4SEL) && defined(RCC_I2C4CLKSOURCE_D3PCLK1)
+  if ((RCC->D3CCIPR & RCC_D3CCIPR_I2C4SEL) == RCC_I2C4CLKSOURCE_D3PCLK1)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+  return 0U;
+}
+
+static uint32_t GetI2CClock(I2C_TypeDef* instance)
+{
+#if defined(LIBXR_STM32_HAS_LL_RCC)
+#if defined(I2C1) && defined(LL_RCC_I2C1_CLKSOURCE)
+  if (instance == I2C1)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C1_CLKSOURCE);
+  }
+#endif
+#if defined(I2C2) && defined(LL_RCC_I2C2_CLKSOURCE)
+  if (instance == I2C2)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C2_CLKSOURCE);
+  }
+#endif
+#if defined(I2C3) && defined(LL_RCC_I2C3_CLKSOURCE)
+  if (instance == I2C3)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C3_CLKSOURCE);
+  }
+#endif
+#if defined(I2C4) && defined(LL_RCC_I2C4_CLKSOURCE)
+  if (instance == I2C4)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C4_CLKSOURCE);
+  }
+#endif
+#if defined(I2C5) && defined(LL_RCC_I2C5_CLKSOURCE)
+  if (instance == I2C5)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C5_CLKSOURCE);
+  }
+#endif
+#if defined(I2C6) && defined(LL_RCC_I2C6_CLKSOURCE)
+  if (instance == I2C6)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C6_CLKSOURCE);
+  }
+#endif
+#endif
+  return HAL_RCC_GetPCLK1Freq();
+}
+
+static bool ComputeTiming(I2C_HandleTypeDef* handle, uint32_t speed_hz, uint32_t& timing)
+{
+  // RCC reset restores the Timing-mode peripheral defaults: analog filter on,
+  // digital filter disabled. HAL Timing structures on supported families do not
+  // expose these filter fields.
+  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz, true, 0,
+                                 timing);
+}
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
@@ -161,6 +403,12 @@ STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
       dma_enable_min_size_(dma_enable_min_size),
       dma_buff_(dma_buff)
 {
+  ASSERT(id_ != STM32_I2C_ID_ERROR);
+  ASSERT(id_ < STM32_I2C_NUMBER);
+  if (id_ == STM32_I2C_ID_ERROR || id_ >= STM32_I2C_NUMBER)
+  {
+    return;
+  }
   map[id_] = this;
 }
 
@@ -409,17 +657,41 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
 ErrorCode STM32I2C::SetConfig(Configuration config)
 {
-  if (HasClockSpeed<decltype(i2c_handle_)>::value)
+  if (i2c_handle_->State != HAL_I2C_STATE_READY)
+  {
+    return ErrorCode::BUSY;
+  }
+
+  const auto old_init = i2c_handle_->Init;
+  if constexpr (HasClockSpeed<decltype(i2c_handle_)>::value)
   {
     SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
+  }
+  else if constexpr (HasTiming<decltype(i2c_handle_)>::value)
+  {
+    uint32_t timing = 0U;
+    if (!ComputeTiming(i2c_handle_, config.clock_speed, timing))
+    {
+      return ErrorCode::NOT_SUPPORT;
+    }
+    SetTiming<decltype(i2c_handle_)>(i2c_handle_, timing);
   }
   else
   {
     return ErrorCode::NOT_SUPPORT;
   }
-
+  if (!ResetI2CPeripheral(i2c_handle_->Instance))
+  {
+    i2c_handle_->Init = old_init;
+    return ErrorCode::NOT_SUPPORT;
+  }
   if (HAL_I2C_Init(i2c_handle_) != HAL_OK)
   {
+    i2c_handle_->Init = old_init;
+    if (ResetI2CPeripheral(i2c_handle_->Instance))
+    {
+      (void)HAL_I2C_Init(i2c_handle_);
+    }
     return ErrorCode::INIT_ERR;
   }
   return ErrorCode::OK;
