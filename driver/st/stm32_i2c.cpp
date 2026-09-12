@@ -2,6 +2,82 @@
 
 #include "stm32_dcache.hpp"
 #include "stm32_i2c_timing.hpp"
+#if defined(STM32C0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32c0xx_ll_rcc.h"
+#endif
+#if defined(STM32F0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32f0xx_ll_rcc.h"
+#endif
+#if defined(STM32F3)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32f3xx_ll_rcc.h"
+#endif
+#if defined(STM32F7)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32f7xx_ll_rcc.h"
+#endif
+#if defined(STM32G0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32g0xx_ll_rcc.h"
+#endif
+#if defined(STM32G4)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32g4xx_ll_rcc.h"
+#endif
+#if defined(STM32H5)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32h5xx_ll_rcc.h"
+#endif
+#if defined(STM32H7)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32h7xx_ll_rcc.h"
+#endif
+#if defined(STM32H7RS)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32h7rsxx_ll_rcc.h"
+#endif
+#if defined(STM32L0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32l0xx_ll_rcc.h"
+#endif
+#if defined(STM32L4)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32l4xx_ll_rcc.h"
+#endif
+#if defined(STM32L5)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32l5xx_ll_rcc.h"
+#endif
+#if defined(STM32U0)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32u0xx_ll_rcc.h"
+#endif
+#if defined(STM32U3)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32u3xx_ll_rcc.h"
+#endif
+#if defined(STM32U5)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32u5xx_ll_rcc.h"
+#endif
+#if defined(STM32N6)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32n6xx_ll_rcc.h"
+#endif
+#if defined(STM32WB)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32wbxx_ll_rcc.h"
+#endif
+#if defined(STM32WBA)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32wbaxx_ll_rcc.h"
+#endif
+#if defined(STM32WL)
+#define LIBXR_STM32_HAS_LL_RCC 1
+#include "stm32wlxx_ll_rcc.h"
+#endif
 #ifdef HAL_I2C_MODULE_ENABLED
 
 using namespace LibXR;
@@ -245,35 +321,65 @@ static bool ResetI2CPeripheral(I2C_TypeDef* instance)
   return false;
 }
 
+static uint32_t NormalizeI2CClock(uint32_t frequency)
+{
+  if (frequency != 0U)
+  {
+    return frequency;
+  }
+#if defined(RCC_D2CCIP2R_I2C123SEL) && defined(RCC_I2C123CLKSOURCE_D2PCLK1)
+  if ((RCC->D2CCIP2R & RCC_D2CCIP2R_I2C123SEL) == RCC_I2C123CLKSOURCE_D2PCLK1)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+#if defined(RCC_D3CCIPR_I2C4SEL) && defined(RCC_I2C4CLKSOURCE_D3PCLK1)
+  if ((RCC->D3CCIPR & RCC_D3CCIPR_I2C4SEL) == RCC_I2C4CLKSOURCE_D3PCLK1)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+  return 0U;
+}
+
 static uint32_t GetI2CClock(I2C_TypeDef* instance)
 {
-#if defined(HAL_RCC_MODULE_ENABLED)
-#if defined(RCC_PERIPHCLK_I2C4) && defined(I2C4)
-  if (instance == I2C4)
-  {
-    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C4);
-  }
-#endif
-#if defined(RCC_PERIPHCLK_I2C2) && defined(I2C2)
-  if (instance == I2C2)
-  {
-    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C2);
-  }
-#endif
-#if defined(RCC_PERIPHCLK_I2C3) && defined(I2C3)
-  if (instance == I2C3)
-  {
-    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C3);
-  }
-#endif
-#if defined(RCC_PERIPHCLK_I2C1) && defined(I2C1)
+#if defined(LIBXR_STM32_HAS_LL_RCC)
+#if defined(I2C1) && defined(LL_RCC_I2C1_CLKSOURCE)
   if (instance == I2C1)
   {
-    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1);
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C1_CLKSOURCE);
   }
 #endif
-#if defined(RCC_PERIPHCLK_I2C1235)
-  return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1235);
+#if defined(I2C2) && defined(LL_RCC_I2C2_CLKSOURCE)
+  if (instance == I2C2)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C2_CLKSOURCE);
+  }
+#endif
+#if defined(I2C3) && defined(LL_RCC_I2C3_CLKSOURCE)
+  if (instance == I2C3)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C3_CLKSOURCE);
+  }
+#endif
+#if defined(I2C4) && defined(LL_RCC_I2C4_CLKSOURCE)
+  if (instance == I2C4)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C4_CLKSOURCE);
+  }
+#endif
+#if defined(I2C5) && defined(LL_RCC_I2C5_CLKSOURCE)
+  if (instance == I2C5)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C5_CLKSOURCE);
+  }
+#endif
+#if defined(I2C6) && defined(LL_RCC_I2C6_CLKSOURCE)
+  if (instance == I2C6)
+  {
+    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C6_CLKSOURCE);
+  }
 #endif
 #endif
   return HAL_RCC_GetPCLK1Freq();
@@ -281,16 +387,11 @@ static uint32_t GetI2CClock(I2C_TypeDef* instance)
 
 static bool ComputeTiming(I2C_HandleTypeDef* handle, uint32_t speed_hz, uint32_t& timing)
 {
-  uint32_t digital_filter = 0;
-  bool analog_filter = true;
-#if defined(I2C_CR1_DNF)
-  digital_filter = (handle->Instance->CR1 & I2C_CR1_DNF) >> I2C_CR1_DNF_Pos;
-#endif
-#if defined(I2C_CR1_ANFOFF)
-  analog_filter = (handle->Instance->CR1 & I2C_CR1_ANFOFF) == 0U;
-#endif
-  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz, analog_filter,
-                                 digital_filter, timing);
+  // RCC reset restores the Timing-mode peripheral defaults: analog filter on,
+  // digital filter disabled. HAL Timing structures on supported families do not
+  // expose these filter fields.
+  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz, true, 0,
+                                 timing);
 }
 }  // namespace
 
