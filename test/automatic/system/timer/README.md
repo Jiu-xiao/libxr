@@ -14,6 +14,6 @@ Timer has two groups, each run in a fresh process so timers or scheduler threads
 After building with the [test instructions](../../../README.md), run from the repository root:
 
 ```sh
-script -q -e -c './build/test/test --case timer_semantics' /dev/null
-script -q -e -c './build/test/test --case timer_scheduler' /dev/null
+script -q -e -c './build/test/libxr_test --case timer_semantics' /dev/null
+script -q -e -c './build/test/libxr_test --case timer_scheduler' /dev/null
 ```

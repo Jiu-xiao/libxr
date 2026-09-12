@@ -137,7 +137,6 @@ add_executable(
   utils/transform/test_transform.cpp
   utils/transform/test_transform_euler_orders.cpp
 )
-set_target_properties(libxr_test PROPERTIES OUTPUT_NAME test)
 target_link_libraries(libxr_test PRIVATE xr)
 target_include_directories(
   libxr_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."

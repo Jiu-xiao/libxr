@@ -17,7 +17,7 @@ This entry does not use a separate process. ASync has a permanent worker, so the
 After building with the [test instructions](../../../README.md), run from the repository root:
 
 ```sh
-script -q -e -c './build/test/test --case async' /dev/null
+script -q -e -c './build/test/libxr_test --case async' /dev/null
 ```
 
 `test_async_cooperative` 是另一个独立测试程序，编译实际裸机后端并控制时间推进，检查 Timer 延后执行、任务完整发布和重复使用。它通过根 CTest 运行，不使用硬件中断。
