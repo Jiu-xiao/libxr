@@ -370,8 +370,7 @@ ErrorCode ESP32I2C::RecoverController()
   esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
 
   int pulse_count = 0;
-  while ((gpio_get_level(sda_gpio) == 0) &&
-         (pulse_count++ < BUS_CLEAR_SCL_PULSES))
+  while ((gpio_get_level(sda_gpio) == 0) && (pulse_count++ < BUS_CLEAR_SCL_PULSES))
   {
     gpio_set_level(scl_gpio, 1);
     esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
