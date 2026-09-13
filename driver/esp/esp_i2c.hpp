@@ -89,7 +89,7 @@ class ESP32I2C : public I2C
   Configuration config_{};
   i2c_hal_context_t hal_ = {};
   uint32_t source_clock_hz_ = 0U;
-  Flag::Plain busy_;
+  Flag::Atomic busy_{};
   intr_handle_t intr_handle_ = nullptr;
   bool intr_installed_ = false;
 
