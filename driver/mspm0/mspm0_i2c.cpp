@@ -103,9 +103,9 @@ bool mspm0_i2c_resolve_dma_triggers(I2C_Regs* instance, uint8_t& tx_trigger,
   return false;
 }
 
-constexpr uint16_t mspm0_i2c_to_addr7(uint16_t slave_addr)
+constexpr bool mspm0_i2c_is_valid_addr7(uint16_t slave_addr)
 {
-  return static_cast<uint16_t>((slave_addr >> 1) & 0x7F);
+  return slave_addr <= 0x7FU;
 }
 
 void mspm0_i2c_recover_controller(I2C_Regs* instance)
@@ -623,7 +623,16 @@ ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     return ErrorCode::OK;
   }
 
-  const uint16_t ADDR7 = mspm0_i2c_to_addr7(slave_addr);
+  if (!mspm0_i2c_is_valid_addr7(slave_addr))
+  {
+    if (op.type != ReadOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::ARG_ERR);
+    }
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uint16_t ADDR7 = slave_addr;
   ErrorCode ans = ErrorCode::NOT_SUPPORT;
   if (dma_enabled_ && read_data.size_ > dma_enable_min_size_)
   {
@@ -653,7 +662,16 @@ ErrorCode MSPM0I2C::Write(uint16_t slave_addr, ConstRawData write_data,
     return ErrorCode::OK;
   }
 
-  const uint16_t ADDR7 = mspm0_i2c_to_addr7(slave_addr);
+  if (!mspm0_i2c_is_valid_addr7(slave_addr))
+  {
+    if (op.type != WriteOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::ARG_ERR);
+    }
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uint16_t ADDR7 = slave_addr;
   ErrorCode ans = ErrorCode::NOT_SUPPORT;
   if (dma_enabled_ && write_data.size_ > dma_enable_min_size_)
   {
@@ -676,6 +694,14 @@ ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                              ConstRawData write_data, WriteOperation& op,
                              MemAddrLength mem_addr_size, bool in_isr)
 {
+  if (!mspm0_i2c_is_valid_addr7(slave_addr))
+  {
+    if (op.type != WriteOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::ARG_ERR);
+    }
+    return ErrorCode::ARG_ERR;
+  }
   const size_t ADDR_SIZE = (mem_addr_size == MemAddrLength::BYTE_8) ? 1 : 2;
   const size_t TOTAL_SIZE = ADDR_SIZE + write_data.size_;
   if (TOTAL_SIZE > MSPM0_I2C_MAX_TRANSFER_SIZE)
@@ -721,7 +747,16 @@ ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     return ErrorCode::OK;
   }
 
-  const uint16_t ADDR7 = mspm0_i2c_to_addr7(slave_addr);
+  if (!mspm0_i2c_is_valid_addr7(slave_addr))
+  {
+    if (op.type != ReadOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(in_isr, ErrorCode::ARG_ERR);
+    }
+    return ErrorCode::ARG_ERR;
+  }
+
+  const uint16_t ADDR7 = slave_addr;
   const size_t ADDR_SIZE = (mem_addr_size == MemAddrLength::BYTE_8) ? 1 : 2;
   auto* addr_bytes = static_cast<uint8_t*>(stage_buffer_.addr_);
   if (stage_buffer_.size_ < ADDR_SIZE)
