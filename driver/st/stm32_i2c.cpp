@@ -902,11 +902,6 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
            i2c_handle_->Lock == HAL_LOCKED ||
            __HAL_I2C_GET_FLAG(i2c_handle_, I2C_FLAG_BUSY) != RESET;
   };
-  if (is_busy())
-  {
-    return ErrorCode::BUSY;
-  }
-
   uint32_t timing = 0U;
   const auto old_init = i2c_handle_->Init;
   const I2CFilterState old_filter_state = CaptureI2CFilterState(i2c_handle_);
@@ -941,7 +936,8 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
     return ErrorCode::NOT_SUPPORT;
   }
 
-  // Calculation can be preempted; do not reset a transfer started in the meantime.
+  // Report intrinsic configuration errors before transient controller state.
+  // Calculation can be preempted, so re-check immediately before reset.
   if (is_busy())
   {
     return ErrorCode::BUSY;
