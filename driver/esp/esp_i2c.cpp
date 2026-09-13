@@ -1168,9 +1168,9 @@ ErrorCode ESP32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
     return ErrorCode::OK;
   }
 
-  const ErrorCode ans = ExecuteTransaction(
-      slave_addr, nullptr, 0U, static_cast<uint8_t*>(read_data.addr_), read_data.size_,
-      in_isr);
+  const ErrorCode ans =
+      ExecuteTransaction(slave_addr, nullptr, 0U, static_cast<uint8_t*>(read_data.addr_),
+                         read_data.size_, in_isr);
   Release();
   return Complete(op, in_isr, ans);
 }
@@ -1216,10 +1216,10 @@ ErrorCode ESP32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     {
       block_wait_.Start(*op.data.sem_info.sem);
     }
-    const ErrorCode ans = StartAsyncTransaction(
-        slave_addr, mem_raw.data(), mem_len,
-        static_cast<const uint8_t*>(write_data.addr_), write_data.size_, nullptr, 0U, op,
-        in_isr);
+    const ErrorCode ans =
+        StartAsyncTransaction(slave_addr, mem_raw.data(), mem_len,
+                              static_cast<const uint8_t*>(write_data.addr_),
+                              write_data.size_, nullptr, 0U, op, in_isr);
     if (ans != ErrorCode::OK)
     {
       if (op.type == WriteOperation::OperationType::BLOCK)
@@ -1311,9 +1311,9 @@ ErrorCode ESP32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     {
       block_wait_.Start(*op.data.sem_info.sem);
     }
-    const ErrorCode ans = StartAsyncTransaction(slave_addr, mem_raw.data(), mem_len,
-                                                nullptr, 0U, dst, read_data.size_, op,
-                                                in_isr);
+    const ErrorCode ans =
+        StartAsyncTransaction(slave_addr, mem_raw.data(), mem_len, nullptr, 0U, dst,
+                              read_data.size_, op, in_isr);
     if (ans != ErrorCode::OK)
     {
       if (op.type == ReadOperation::OperationType::BLOCK)

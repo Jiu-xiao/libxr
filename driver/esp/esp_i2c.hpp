@@ -65,8 +65,8 @@ class ESP32I2C : public I2C
   static size_t MemAddrBytes(MemAddrLength mem_addr_size);
   static void EncodeMemAddr(uint16_t mem_addr, size_t mem_len, uint8_t* out);
   ErrorCode ExecuteTransaction(uint16_t slave_addr, const uint8_t* write_payload,
-                               size_t write_size, uint8_t* read_payload,
-                               size_t read_size, bool in_isr);
+                               size_t write_size, uint8_t* read_payload, size_t read_size,
+                               bool in_isr);
   ErrorCode StartAsyncTransaction(uint16_t slave_addr,
                                   const uint8_t* write_prefix_payload,
                                   size_t write_prefix_size, const uint8_t* write_payload,
