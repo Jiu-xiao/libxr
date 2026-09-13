@@ -6,6 +6,7 @@
 #include "esp_clk_tree.h"
 #include "esp_private/periph_ctrl.h"
 #include "esp_rom_gpio.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "libxr_def.hpp"
 #include "timebase.hpp"
@@ -346,6 +347,46 @@ ErrorCode ESP32I2C::RecoverController()
   i2c_ll_update(hal_.dev);
   return ErrorCode::OK;
 #else
+  // Match ESP-IDF's software bus-clear fallback on targets without a
+  // hardware bus-clear state machine. A slave interrupted mid-byte may keep
+  // SDA low across an MCU reset; resetting only the controller cannot release
+  // that external state.
+#if !SOC_I2C_SUPPORT_HW_CLR_BUS
+  constexpr int BUS_CLEAR_SCL_PULSES = 9;
+  constexpr uint32_t BUS_CLEAR_HALF_PERIOD_US = 5U;
+
+  const gpio_num_t scl_gpio = static_cast<gpio_num_t>(scl_pin_);
+  const gpio_num_t sda_gpio = static_cast<gpio_num_t>(sda_pin_);
+  esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(scl_pin_));
+  esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(sda_pin_));
+  gpio_set_level(scl_gpio, 0);
+  gpio_set_level(sda_gpio, 1);
+  gpio_set_direction(scl_gpio, GPIO_MODE_OUTPUT_OD);
+  gpio_set_direction(sda_gpio, GPIO_MODE_INPUT_OUTPUT_OD);
+  gpio_set_pull_mode(scl_gpio,
+                     enable_internal_pullup_ ? GPIO_PULLUP_ONLY : GPIO_FLOATING);
+  gpio_set_pull_mode(sda_gpio,
+                     enable_internal_pullup_ ? GPIO_PULLUP_ONLY : GPIO_FLOATING);
+  esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
+
+  int pulse_count = 0;
+  while ((gpio_get_level(sda_gpio) == 0) &&
+         (pulse_count++ < BUS_CLEAR_SCL_PULSES))
+  {
+    gpio_set_level(scl_gpio, 1);
+    esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
+    gpio_set_level(scl_gpio, 0);
+    esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
+  }
+
+  // Generate STOP: SDA low -> high while SCL is high.
+  gpio_set_level(sda_gpio, 0);
+  gpio_set_level(scl_gpio, 1);
+  esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
+  gpio_set_level(sda_gpio, 1);
+  esp_rom_delay_us(BUS_CLEAR_HALF_PERIOD_US);
+#endif
+
   // ESP32-class targets without HW FSM reset require full register reset.
   ResetBusRegisterAtomic(port_num_);
   i2c_hal_master_init(&hal_);
