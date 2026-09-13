@@ -2,81 +2,14 @@
 
 #include "stm32_dcache.hpp"
 #include "stm32_i2c_timing.hpp"
-#if defined(STM32C0)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32c0xx_ll_rcc.h"
-#endif
-#if defined(STM32F0)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32f0xx_ll_rcc.h"
-#endif
-#if defined(STM32F3)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32f3xx_ll_rcc.h"
-#endif
 #if defined(STM32F7)
-#define LIBXR_STM32_HAS_LL_RCC 1
 #include "stm32f7xx_ll_rcc.h"
 #endif
-#if defined(STM32G0)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32g0xx_ll_rcc.h"
-#endif
-#if defined(STM32G4)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32g4xx_ll_rcc.h"
-#endif
-#if defined(STM32H5)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32h5xx_ll_rcc.h"
-#endif
 #if defined(STM32H7)
-#define LIBXR_STM32_HAS_LL_RCC 1
 #include "stm32h7xx_ll_rcc.h"
 #endif
 #if defined(STM32H7RS)
-#define LIBXR_STM32_HAS_LL_RCC 1
 #include "stm32h7rsxx_ll_rcc.h"
-#endif
-#if defined(STM32L0)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32l0xx_ll_rcc.h"
-#endif
-#if defined(STM32L4)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32l4xx_ll_rcc.h"
-#endif
-#if defined(STM32L5)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32l5xx_ll_rcc.h"
-#endif
-#if defined(STM32U0)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32u0xx_ll_rcc.h"
-#endif
-#if defined(STM32U3)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32u3xx_ll_rcc.h"
-#endif
-#if defined(STM32U5)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32u5xx_ll_rcc.h"
-#endif
-#if defined(STM32N6)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32n6xx_ll_rcc.h"
-#endif
-#if defined(STM32WB)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32wbxx_ll_rcc.h"
-#endif
-#if defined(STM32WBA)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32wbaxx_ll_rcc.h"
-#endif
-#if defined(STM32WL)
-#define LIBXR_STM32_HAS_LL_RCC 1
-#include "stm32wlxx_ll_rcc.h"
 #endif
 #ifdef HAL_I2C_MODULE_ENABLED
 
@@ -321,84 +254,384 @@ static bool ResetI2CPeripheral(I2C_TypeDef* instance)
   return false;
 }
 
-static uint32_t NormalizeI2CClock(uint32_t frequency)
+/* Resolve a non-zero clock only when the selected source is known. */
+#if defined(STM32H7) && defined(HAL_RCC_MODULE_ENABLED)
+static uint32_t GetH7HSIClock()
 {
-  if (frequency != 0U)
+#if defined(RCC_CR_HSIRDY)
+  if ((RCC->CR & RCC_CR_HSIRDY) == 0U)
   {
-    return frequency;
+    return 0U;
   }
-#if defined(RCC_D2CCIP2R_I2C123SEL) && defined(RCC_I2C123CLKSOURCE_D2PCLK1)
-  if ((RCC->D2CCIP2R & RCC_D2CCIP2R_I2C123SEL) == RCC_I2C123CLKSOURCE_D2PCLK1)
+#endif
+#if defined(__HAL_RCC_GET_HSI_DIVIDER) && defined(RCC_CR_HSIDIV_Pos)
+  return HSI_VALUE >> (__HAL_RCC_GET_HSI_DIVIDER() >> RCC_CR_HSIDIV_Pos);
+#else
+  return HSI_VALUE;
+#endif
+}
+
+static uint32_t GetH7CSIClock()
+{
+#if defined(RCC_CR_CSIRDY)
+  return (RCC->CR & RCC_CR_CSIRDY) != 0U ? CSI_VALUE : 0U;
+#else
+  return 0U;
+#endif
+}
+
+static uint32_t GetH7Pll3RClock()
+{
+#if defined(RCC_CR_PLL3RDY)
+  if ((RCC->CR & RCC_CR_PLL3RDY) == 0U)
+  {
+    return 0U;
+  }
+#endif
+#if defined(RCC_PLLCFGR_DIVR3EN)
+  if ((RCC->PLLCFGR & RCC_PLLCFGR_DIVR3EN) == 0U)
+  {
+    return 0U;
+  }
+#elif defined(RCC_PLLCFGR_PLL3REN)
+  if ((RCC->PLLCFGR & RCC_PLLCFGR_PLL3REN) == 0U)
+  {
+    return 0U;
+  }
+#else
+  return 0U;
+#endif
+  PLL3_ClocksTypeDef pll3{};
+  HAL_RCCEx_GetPLL3ClockFreq(&pll3);
+  return pll3.PLL3_R_Frequency;
+}
+
+static uint32_t GetH7I2CClock(I2C_TypeDef* instance)
+{
+#if defined(I2C4) && defined(LL_RCC_I2C4_CLKSOURCE)
+  if (instance == I2C4)
+  {
+    const uint32_t source = LL_RCC_GetI2CClockSource(LL_RCC_I2C4_CLKSOURCE);
+#if defined(LL_RCC_I2C4_CLKSOURCE_PCLK4)
+    if (source == LL_RCC_I2C4_CLKSOURCE_PCLK4)
+    {
+      return HAL_RCCEx_GetD3PCLK1Freq();
+    }
+#endif
+#if defined(LL_RCC_I2C4_CLKSOURCE_PLL3R)
+    if (source == LL_RCC_I2C4_CLKSOURCE_PLL3R)
+    {
+      return GetH7Pll3RClock();
+    }
+#endif
+#if defined(LL_RCC_I2C4_CLKSOURCE_HSI)
+    if (source == LL_RCC_I2C4_CLKSOURCE_HSI)
+    {
+      return GetH7HSIClock();
+    }
+#endif
+#if defined(LL_RCC_I2C4_CLKSOURCE_CSI)
+    if (source == LL_RCC_I2C4_CLKSOURCE_CSI)
+    {
+      return GetH7CSIClock();
+    }
+#endif
+    return 0U;
+  }
+#endif
+
+#if defined(LL_RCC_I2C123_CLKSOURCE)
+  const uint32_t source = LL_RCC_GetI2CClockSource(LL_RCC_I2C123_CLKSOURCE);
+#if defined(LL_RCC_I2C123_CLKSOURCE_PCLK1)
+  if (source == LL_RCC_I2C123_CLKSOURCE_PCLK1)
   {
     return HAL_RCC_GetPCLK1Freq();
   }
 #endif
-#if defined(RCC_D3CCIPR_I2C4SEL) && defined(RCC_I2C4CLKSOURCE_D3PCLK1)
-  if ((RCC->D3CCIPR & RCC_D3CCIPR_I2C4SEL) == RCC_I2C4CLKSOURCE_D3PCLK1)
+#if defined(LL_RCC_I2C123_CLKSOURCE_PLL3R)
+  if (source == LL_RCC_I2C123_CLKSOURCE_PLL3R)
+  {
+    return GetH7Pll3RClock();
+  }
+#endif
+#if defined(LL_RCC_I2C123_CLKSOURCE_HSI)
+  if (source == LL_RCC_I2C123_CLKSOURCE_HSI)
+  {
+    return GetH7HSIClock();
+  }
+#endif
+#if defined(LL_RCC_I2C123_CLKSOURCE_CSI)
+  if (source == LL_RCC_I2C123_CLKSOURCE_CSI)
+  {
+    return GetH7CSIClock();
+  }
+#endif
+#elif defined(LL_RCC_I2C1235_CLKSOURCE)
+  const uint32_t source = LL_RCC_GetI2CClockSource(LL_RCC_I2C1235_CLKSOURCE);
+#if defined(LL_RCC_I2C1235_CLKSOURCE_PCLK1)
+  if (source == LL_RCC_I2C1235_CLKSOURCE_PCLK1)
   {
     return HAL_RCC_GetPCLK1Freq();
   }
+#endif
+#if defined(LL_RCC_I2C1235_CLKSOURCE_PLL3R)
+  if (source == LL_RCC_I2C1235_CLKSOURCE_PLL3R)
+  {
+    return GetH7Pll3RClock();
+  }
+#endif
+#if defined(LL_RCC_I2C1235_CLKSOURCE_HSI)
+  if (source == LL_RCC_I2C1235_CLKSOURCE_HSI)
+  {
+    return GetH7HSIClock();
+  }
+#endif
+#if defined(LL_RCC_I2C1235_CLKSOURCE_CSI)
+  if (source == LL_RCC_I2C1235_CLKSOURCE_CSI)
+  {
+    return GetH7CSIClock();
+  }
+#endif
+#endif
+  return 0U;
+}
+#endif
+
+#if defined(STM32F7) && defined(HAL_RCC_MODULE_ENABLED)
+static uint32_t GetF7I2CClock(I2C_TypeDef* instance)
+{
+#define LIBXR_F7_I2C_CLOCK(ID)                                                         \
+  if (instance == I2C##ID)                                                             \
+  {                                                                                    \
+    const uint32_t source = LL_RCC_GetI2CClockSource(LL_RCC_I2C##ID##_CLKSOURCE);      \
+    if (source == LL_RCC_I2C##ID##_CLKSOURCE_PCLK1) return HAL_RCC_GetPCLK1Freq();     \
+    if (source == LL_RCC_I2C##ID##_CLKSOURCE_SYSCLK) return HAL_RCC_GetSysClockFreq(); \
+    if (source == LL_RCC_I2C##ID##_CLKSOURCE_HSI)                                      \
+    {                                                                                  \
+      return (RCC->CR & RCC_CR_HSIRDY) != 0U ? HSI_VALUE : 0U;                         \
+    }                                                                                  \
+    return 0U;                                                                         \
+  }
+#if defined(I2C1)
+  LIBXR_F7_I2C_CLOCK(1)
+#endif
+#if defined(I2C2)
+  LIBXR_F7_I2C_CLOCK(2)
+#endif
+#if defined(I2C3)
+  LIBXR_F7_I2C_CLOCK(3)
+#endif
+#if defined(I2C4)
+  LIBXR_F7_I2C_CLOCK(4)
+#endif
+#undef LIBXR_F7_I2C_CLOCK
+  return 0U;
+}
+#endif
+
+static uint32_t GetI2CClock(I2C_TypeDef* instance)
+{
+#if defined(STM32H7) && defined(HAL_RCC_MODULE_ENABLED)
+  return GetH7I2CClock(instance);
+#endif
+#if defined(STM32F7) && defined(HAL_RCC_MODULE_ENABLED)
+  return GetF7I2CClock(instance);
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED)
+#if defined(RCC_PERIPHCLK_I2C8) && defined(I2C8)
+  if (instance == I2C8) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C8);
+#endif
+#if defined(RCC_PERIPHCLK_I2C7) && defined(I2C7)
+  if (instance == I2C7) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C7);
+#endif
+#if defined(RCC_PERIPHCLK_I2C6) && defined(I2C6)
+  if (instance == I2C6) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C6);
+#endif
+#if defined(RCC_PERIPHCLK_I2C5) && defined(I2C5)
+  if (instance == I2C5) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C5);
+#endif
+#if defined(RCC_PERIPHCLK_I2C4) && defined(I2C4)
+  if (instance == I2C4) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C4);
+#endif
+#if defined(RCC_PERIPHCLK_I2C1_I3C1) && defined(I2C1)
+  if (instance == I2C1) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1_I3C1);
+#endif
+#if defined(RCC_PERIPHCLK_I2C23)
+#if defined(I2C2)
+  if (instance == I2C2) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C23);
+#endif
+#if defined(I2C3)
+  if (instance == I2C3) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C23);
+#endif
+#endif
+#if defined(RCC_PERIPHCLK_I2C3) && defined(I2C3)
+  if (instance == I2C3) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C3);
+#endif
+#if defined(RCC_PERIPHCLK_I2C2) && defined(I2C2)
+  if (instance == I2C2) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C2);
+#endif
+#if defined(RCC_PERIPHCLK_I2C1) && defined(I2C1)
+  if (instance == I2C1) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1);
+#endif
+#if defined(RCC_PERIPHCLK_I2C1235) && defined(I2C5)
+  if (instance == I2C5) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1235);
+#endif
+#if defined(RCC_PERIPHCLK_I2C123)
+#if defined(I2C1)
+  if (instance == I2C1) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C123);
+#endif
+#if defined(I2C2)
+  if (instance == I2C2) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C123);
+#endif
+#if defined(I2C3)
+  if (instance == I2C3) return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C123);
+#endif
+#endif
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32C0) && defined(I2C2) && \
+    defined(RCC_PERIPHCLK_I2C1) && !defined(RCC_CCIPR_I2C2SEL)
+  // C0 aliases I2C2's selector to I2C1's RCC field.
+  if (instance == I2C2)
+  {
+    return HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_I2C1);
+  }
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32F0) && defined(I2C2) && \
+    !defined(RCC_CFGR3_I2C2SW)
+  // F0's I2C2 is fixed to the APB1 clock; only I2C1 has a selector.
+  if (instance == I2C2)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32G0) && defined(I2C3) && \
+    !defined(RCC_CCIPR_I2C3SEL)
+  // I2C3 on the G0 parts with this instance is a fixed APB1 peripheral.
+  if (instance == I2C3)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32U0) && defined(I2C2) && \
+    !defined(RCC_CCIPR_I2C2SEL)
+  if (instance == I2C2)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32U0) && defined(I2C4) && \
+    !defined(RCC_CCIPR_I2C4SEL)
+  if (instance == I2C4)
+  {
+    return HAL_RCC_GetPCLK1Freq();
+  }
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32WB0) && \
+    (defined(I2C1) || defined(I2C2))
+  // WB0 has no independent I2C kernel selector; APB1 follows SYSCLK.
+#if defined(I2C2)
+  if (instance == I2C2)
+  {
+    return HAL_RCC_GetSysClockFreq();
+  }
+#endif
+#if defined(I2C1)
+  if (instance == I2C1)
+  {
+    return HAL_RCC_GetSysClockFreq();
+  }
+#endif
+#endif
+#if defined(HAL_RCC_MODULE_ENABLED) && defined(STM32WL3) && \
+    (defined(I2C1) || defined(I2C2))
+  // WL3 has no independent I2C kernel selector; APB1 follows SYSCLK.
+#if defined(I2C2)
+  if (instance == I2C2)
+  {
+    return HAL_RCC_GetSysClockFreq();
+  }
+#endif
+#if defined(I2C1)
+  if (instance == I2C1)
+  {
+    return HAL_RCC_GetSysClockFreq();
+  }
+#endif
 #endif
   return 0U;
 }
 
-static uint32_t GetI2CClock(I2C_TypeDef* instance)
+struct I2CFilterState
 {
-#if defined(LIBXR_STM32_HAS_LL_RCC)
-#if defined(I2C1) && defined(LL_RCC_I2C1_CLKSOURCE)
-  if (instance == I2C1)
-  {
-    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C1_CLKSOURCE);
-  }
+  bool analog_filter{false};
+  uint32_t digital_filter{0U};
+};
+
+static I2CFilterState CaptureI2CFilterState(const I2C_HandleTypeDef* handle)
+{
+  UNUSED(handle);
+  I2CFilterState state;
+#if defined(I2C_CR1_ANFOFF)
+  state.analog_filter = (handle->Instance->CR1 & I2C_CR1_ANFOFF) == 0U;
+#elif defined(I2C_FLTR_ANOFF)
+  state.analog_filter = (handle->Instance->FLTR & I2C_FLTR_ANOFF) == 0U;
 #endif
-#if defined(I2C2) && defined(LL_RCC_I2C2_CLKSOURCE)
-  if (instance == I2C2)
-  {
-    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C2_CLKSOURCE);
-  }
+#if defined(I2C_CR1_DNF) && defined(I2C_CR1_DNF_Pos)
+  state.digital_filter = (handle->Instance->CR1 & I2C_CR1_DNF) >> I2C_CR1_DNF_Pos;
+#elif defined(I2C_FLTR_DNF)
+  state.digital_filter = handle->Instance->FLTR & I2C_FLTR_DNF;
 #endif
-#if defined(I2C3) && defined(LL_RCC_I2C3_CLKSOURCE)
-  if (instance == I2C3)
-  {
-    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C3_CLKSOURCE);
-  }
-#endif
-#if defined(I2C4) && defined(LL_RCC_I2C4_CLKSOURCE)
-  if (instance == I2C4)
-  {
-    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C4_CLKSOURCE);
-  }
-#endif
-#if defined(I2C5) && defined(LL_RCC_I2C5_CLKSOURCE)
-  if (instance == I2C5)
-  {
-    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C5_CLKSOURCE);
-  }
-#endif
-#if defined(I2C6) && defined(LL_RCC_I2C6_CLKSOURCE)
-  if (instance == I2C6)
-  {
-    return LL_RCC_GetI2CClockFreq(LL_RCC_I2C6_CLKSOURCE);
-  }
-#endif
-#endif
-  return HAL_RCC_GetPCLK1Freq();
+  return state;
 }
 
-static bool ComputeTiming(I2C_HandleTypeDef* handle, uint32_t speed_hz, uint32_t& timing)
+static void RestoreI2CFilterState(I2C_HandleTypeDef* handle, I2CFilterState state)
 {
-  // RCC reset restores the Timing-mode peripheral defaults: analog filter on,
-  // digital filter disabled. HAL Timing structures on supported families do not
-  // expose these filter fields.
-  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz, true, 0,
+  UNUSED(state);
+  const uint32_t was_enabled = handle->Instance->CR1 & I2C_CR1_PE;
+  // PE must already be clear before modifying a filter register.
+  CLEAR_BIT(handle->Instance->CR1, I2C_CR1_PE);
+#if defined(I2C_CR1_ANFOFF)
+  MODIFY_REG(handle->Instance->CR1, I2C_CR1_ANFOFF,
+             state.analog_filter ? 0U : I2C_CR1_ANFOFF);
+#elif defined(I2C_FLTR_ANOFF)
+  MODIFY_REG(handle->Instance->FLTR, I2C_FLTR_ANOFF,
+             state.analog_filter ? 0U : I2C_FLTR_ANOFF);
+#endif
+#if defined(I2C_CR1_DNF) && defined(I2C_CR1_DNF_Pos)
+  MODIFY_REG(handle->Instance->CR1, I2C_CR1_DNF, state.digital_filter << I2C_CR1_DNF_Pos);
+#elif defined(I2C_FLTR_DNF)
+  MODIFY_REG(handle->Instance->FLTR, I2C_FLTR_DNF, state.digital_filter);
+#endif
+  SET_BIT(handle->Instance->CR1, was_enabled);
+}
+
+static bool ComputeTiming(I2C_HandleTypeDef* handle, uint32_t speed_hz,
+                          I2CFilterState filter_state, uint32_t& timing)
+{
+  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz,
+                                 filter_state.analog_filter, filter_state.digital_filter,
                                  timing);
+}
+
+static STM32I2C* FindI2C(I2C_HandleTypeDef* handle)
+{
+  if (handle == nullptr || handle->Instance == nullptr)
+  {
+    return nullptr;
+  }
+  const stm32_i2c_id_t id = STM32_I2C_GetID(handle->Instance);
+  if (id == STM32_I2C_ID_ERROR || id >= STM32_I2C_NUMBER)
+  {
+    return nullptr;
+  }
+  return STM32I2C::map[id];
 }
 }  // namespace
 
 STM32I2C::STM32I2C(I2C_HandleTypeDef* hi2c, RawData dma_buff,
                    uint32_t dma_enable_min_size)
     : I2C(),
-      id_(STM32_I2C_GetID(hi2c->Instance)),
+      id_(hi2c == nullptr ? STM32_I2C_ID_ERROR : STM32_I2C_GetID(hi2c->Instance)),
       i2c_handle_(hi2c),
       dma_enable_min_size_(dma_enable_min_size),
       dma_buff_(dma_buff)
@@ -657,28 +890,69 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
 
 ErrorCode STM32I2C::SetConfig(Configuration config)
 {
-  if (i2c_handle_->State != HAL_I2C_STATE_READY)
+  if (i2c_handle_ == nullptr ||
+      STM32_I2C_GetID(i2c_handle_->Instance) == STM32_I2C_ID_ERROR ||
+      config.clock_speed == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  const auto is_busy = [this]()
+  {
+    return recovering_ || i2c_handle_->State != HAL_I2C_STATE_READY ||
+           i2c_handle_->Lock == HAL_LOCKED ||
+           __HAL_I2C_GET_FLAG(i2c_handle_, I2C_FLAG_BUSY) != RESET;
+  };
+  if (is_busy())
   {
     return ErrorCode::BUSY;
   }
 
+  uint32_t timing = 0U;
   const auto old_init = i2c_handle_->Init;
+  const I2CFilterState old_filter_state = CaptureI2CFilterState(i2c_handle_);
   if constexpr (HasClockSpeed<decltype(i2c_handle_)>::value)
   {
-    SetClockSpeed<decltype(i2c_handle_)>(i2c_handle_, config);
-  }
-  else if constexpr (HasTiming<decltype(i2c_handle_)>::value)
-  {
-    uint32_t timing = 0U;
-    if (!ComputeTiming(i2c_handle_, config.clock_speed, timing))
+    if (config.clock_speed > 400000U)
     {
       return ErrorCode::NOT_SUPPORT;
     }
-    SetTiming<decltype(i2c_handle_)>(i2c_handle_, timing);
+#if defined(I2C_CCR_CCR) && defined(HAL_RCC_MODULE_ENABLED)
+    const uint32_t pclk = HAL_RCC_GetPCLK1Freq();
+    const uint32_t factor =
+        config.clock_speed <= 100000U
+            ? 2U
+            : (i2c_handle_->Init.DutyCycle == I2C_DUTYCYCLE_16_9 ? 25U : 3U);
+    const uint64_t denominator = uint64_t(config.clock_speed) * factor;
+    if (pclk == 0U || (uint64_t(pclk) + denominator - 1U) / denominator > I2C_CCR_CCR)
+    {
+      return ErrorCode::NOT_SUPPORT;
+    }
+#endif
+  }
+  else if constexpr (HasTiming<decltype(i2c_handle_)>::value)
+  {
+    if (!ComputeTiming(i2c_handle_, config.clock_speed, old_filter_state, timing))
+    {
+      return ErrorCode::NOT_SUPPORT;
+    }
   }
   else
   {
     return ErrorCode::NOT_SUPPORT;
+  }
+
+  // Calculation can be preempted; do not reset a transfer started in the meantime.
+  if (is_busy())
+  {
+    return ErrorCode::BUSY;
+  }
+  if constexpr (HasClockSpeed<decltype(i2c_handle_)>::value)
+  {
+    SetClockSpeed(i2c_handle_, config);
+  }
+  else
+  {
+    SetTiming(i2c_handle_, timing);
   }
   if (!ResetI2CPeripheral(i2c_handle_->Instance))
   {
@@ -688,18 +962,19 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
   if (HAL_I2C_Init(i2c_handle_) != HAL_OK)
   {
     i2c_handle_->Init = old_init;
-    if (ResetI2CPeripheral(i2c_handle_->Instance))
+    if (ResetI2CPeripheral(i2c_handle_->Instance) && HAL_I2C_Init(i2c_handle_) == HAL_OK)
     {
-      (void)HAL_I2C_Init(i2c_handle_);
+      RestoreI2CFilterState(i2c_handle_, old_filter_state);
     }
     return ErrorCode::INIT_ERR;
   }
+  RestoreI2CFilterState(i2c_handle_, old_filter_state);
   return ErrorCode::OK;
 }
 
 extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
-  STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
+  STM32I2C* i2c = FindI2C(hi2c);
   if (i2c && !i2c->recovering_ &&
       (i2c->read_op_.type != ReadOperation::OperationType::NONE))
   {
@@ -726,7 +1001,7 @@ extern "C" void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef* hi2c)
 
 extern "C" void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
-  STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
+  STM32I2C* i2c = FindI2C(hi2c);
   if (i2c && !i2c->recovering_ &&
       (i2c->write_op_.type != WriteOperation::OperationType::NONE))
   {
@@ -747,7 +1022,7 @@ extern "C" void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef* hi2c)
 
 extern "C" void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
-  STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
+  STM32I2C* i2c = FindI2C(hi2c);
   if (i2c && !i2c->recovering_ &&
       (i2c->write_op_.type != WriteOperation::OperationType::NONE))
   {
@@ -768,7 +1043,7 @@ extern "C" void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef* hi2c)
 
 extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
 {
-  STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
+  STM32I2C* i2c = FindI2C(hi2c);
   if (i2c && !i2c->recovering_ &&
       (i2c->read_op_.type != ReadOperation::OperationType::NONE))
   {
@@ -795,7 +1070,7 @@ extern "C" void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
 
 extern "C" void HAL_I2C_ErrorCallback(I2C_HandleTypeDef* hi2c)
 {
-  STM32I2C* i2c = STM32I2C::map[STM32_I2C_GetID(hi2c->Instance)];
+  STM32I2C* i2c = FindI2C(hi2c);
 
   if (i2c && !i2c->recovering_)
   {

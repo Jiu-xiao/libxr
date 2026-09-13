@@ -205,18 +205,19 @@ ErrorCode MSPM0I2C::WaitBusIdle() const
 
 ErrorCode MSPM0I2C::SetConfig(Configuration config)
 {
-  if (config.clock_speed == 0)
+  if (res_.instance == nullptr || res_.clock_freq == 0U || config.clock_speed == 0U)
   {
     return ErrorCode::ARG_ERR;
   }
-
-  const uint32_t PERIOD_DEN = config.clock_speed * 10U;
-  if (PERIOD_DEN == 0)
+  if (config.clock_speed > 1000000U)
   {
-    return ErrorCode::ARG_ERR;
+    return ErrorCode::NOT_SUPPORT;
   }
 
-  uint32_t period_factor = res_.clock_freq / PERIOD_DEN;
+  // SCL = BUSCLK / (10 * (TPR + 1)); round up to avoid exceeding the request.
+  const uint64_t PERIOD_DEN = uint64_t(config.clock_speed) * 10U;
+  const uint64_t period_factor =
+      (uint64_t(res_.clock_freq) + PERIOD_DEN - 1U) / PERIOD_DEN;
   if (period_factor == 0)
   {
     return ErrorCode::NOT_SUPPORT;
@@ -224,6 +225,12 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
   if (period_factor > 128U)
   {
     return ErrorCode::NOT_SUPPORT;
+  }
+
+  if ((DL_I2C_getControllerStatus(res_.instance) &
+       (DL_I2C_CONTROLLER_STATUS_BUSY | DL_I2C_CONTROLLER_STATUS_BUSY_BUS)) != 0U)
+  {
+    return ErrorCode::BUSY;
   }
 
   const uint8_t TIMER_PERIOD = static_cast<uint8_t>(period_factor - 1U);

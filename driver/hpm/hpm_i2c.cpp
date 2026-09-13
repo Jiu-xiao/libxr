@@ -721,11 +721,7 @@ ErrorCode HPMI2C::EnsureClockReady()
     return ErrorCode::PTR_NULL;
   }
 
-  if (source_clock_hz_ != 0)
-  {
-    return ErrorCode::OK;
-  }
-
+  // Runtime reconfiguration must use the current clock, not the constructor's cache.
   clock_add_to_group(clock_, 0);
   source_clock_hz_ = clock_get_frequency(clock_);
   if (source_clock_hz_ == 0)
@@ -775,11 +771,22 @@ ErrorCode HPMI2C::ApplyConfig(const Configuration& config)
   i2c_config.i2c_mode = mode;
   i2c_config.is_10bit_addressing = (address_mode_ == AddressMode::ADDR_10BIT);
 
+  const uint32_t previous_setup = i2c_->SETUP;
+  const uint32_t previous_tpm = i2c_->TPM;
+  const uint32_t previous_interrupts = i2c_->INTEN;
   ans = ConvertStatus(i2c_init_master(i2c_, source_clock_hz_, &i2c_config));
   if (ans == ErrorCode::OK)
   {
     current_config_ = config;
     configured_ = true;
+  }
+  else if (configured_)
+  {
+    // The SDK resets the controller before validating its timing configuration.
+    // Restore the previous idle configuration without reissuing a transaction.
+    i2c_->TPM = previous_tpm;
+    i2c_->SETUP = previous_setup;
+    i2c_->INTEN = previous_interrupts;
   }
 
   return ans;
@@ -1836,6 +1843,16 @@ ErrorCode HPMI2C::SetConfig(Configuration config)
   if (i2c_ == nullptr)
   {
     return ErrorCode::PTR_NULL;
+  }
+#if LIBXR_HPM_I2C_HAS_DMA_MGR
+  if (AsyncTransferActive())
+  {
+    return ErrorCode::BUSY;
+  }
+#endif
+  if ((i2c_get_status(i2c_) & I2C_STATUS_BUSBUSY_MASK) != 0U)
+  {
+    return ErrorCode::BUSY;
   }
 
   return ApplyConfig(config);

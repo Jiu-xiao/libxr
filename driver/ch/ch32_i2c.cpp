@@ -139,13 +139,35 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
 
 ErrorCode CH32I2C::SetConfig(Configuration config)
 {
-  cfg_ = config;
+  if (instance_ == nullptr || config.clock_speed == 0U)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+  if (config.clock_speed > 400000U)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+  if (recovering_ || DmaBusy() || I2C_GetFlagStatus(instance_, I2C_FLAG_BUSY) != RESET)
+  {
+    return ErrorCode::BUSY;
+  }
+
+  RCC_ClocksTypeDef clocks{};
+  RCC_GetClocksFreq(&clocks);
+  const uint64_t denominator =
+      uint64_t(config.clock_speed) * (config.clock_speed <= 100000U ? 2U : 3U);
+  // CKCFGR.CCR is 12 bits; the SDK otherwise silently truncates low-rate dividers.
+  if (clocks.PCLK1_Frequency == 0U ||
+      (uint64_t(clocks.PCLK1_Frequency) + denominator - 1U) / denominator > 0x0FFFU)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
 
   I2C_Cmd(instance_, DISABLE);
   I2C_DeInit(instance_);
 
   I2C_InitTypeDef init = {};
-  init.I2C_ClockSpeed = cfg_.clock_speed;
+  init.I2C_ClockSpeed = config.clock_speed;
   init.I2C_Mode = I2C_Mode_I2C;
   init.I2C_DutyCycle = I2C_DutyCycle_2;
   init.I2C_OwnAddress1 = 0;
@@ -159,6 +181,9 @@ ErrorCode CH32I2C::SetConfig(Configuration config)
   // 默认 ACK/NACK 状态
   I2C_AcknowledgeConfig(instance_, ENABLE);
   I2C_NACKPositionConfig(instance_, I2C_NACKPosition_Current);
+  // I2C_DeInit resets CTLR2, including the asynchronous error interrupt.
+  I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
+  cfg_ = config;
 
   return ErrorCode::OK;
 }

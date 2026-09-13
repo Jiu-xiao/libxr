@@ -1,5 +1,8 @@
 #pragma once
 
+#include <type_traits>
+#include <utility>
+
 #include "main.h"
 
 #ifdef HAL_I2C_MODULE_ENABLED
@@ -9,7 +12,7 @@
 #endif
 
 #include "i2c.hpp"
-#include "libxr.hpp"
+#include "libxr_assert.hpp"
 
 typedef enum
 {

@@ -213,20 +213,38 @@ ErrorCode ESP32I2C::ApplyConfig()
     return ErrorCode::ARG_ERR;
   }
 
-  i2c_ll_set_source_clk(hal_.dev, I2C_CLK_SRC_DEFAULT);
-  if (ResolveClockSource(source_clock_hz_) != ErrorCode::OK)
+  uint32_t source_clock_hz = 0U;
+  if (ResolveClockSource(source_clock_hz) != ErrorCode::OK)
   {
     return ErrorCode::INIT_ERR;
   }
 
-  if (config_.clock_speed > (source_clock_hz_ / 20U))
+  // ESP-IDF supports Standard/Fast mode. Reject values before entering the
+  // LL timing calculation, whose preconditions are enforced with assertions.
+  if (config_.clock_speed > 400000U || config_.clock_speed > source_clock_hz / 28U)
   {
-    return ErrorCode::ARG_ERR;
+    return ErrorCode::NOT_SUPPORT;
   }
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2
+  // These targets have no module-clock divider and 10-bit START/STOP counters.
+  if (source_clock_hz / config_.clock_speed / 2U > I2C_SCL_START_HOLD_TIME_V)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+#else
+  // The LL implementation uses an 8-bit module-clock divider (encoded minus one).
+  if (source_clock_hz / (config_.clock_speed * 1024U) + 1U > 256U)
+  {
+    return ErrorCode::NOT_SUPPORT;
+  }
+#endif
 
+  source_clock_hz_ = source_clock_hz;
+  PERIPH_RCC_ATOMIC() { i2c_ll_set_source_clk(hal_.dev, I2C_CLK_SRC_DEFAULT); }
+  // ESP32's timing calculation compensates for the currently selected filter.
+  i2c_ll_master_set_filter(hal_.dev, 7U);
   _i2c_hal_set_bus_timing(&hal_, static_cast<int>(config_.clock_speed),
                           I2C_CLK_SRC_DEFAULT, static_cast<int>(source_clock_hz_));
-  i2c_ll_master_set_filter(hal_.dev, 7U);
   i2c_ll_update(hal_.dev);
 
   return ErrorCode::OK;
@@ -942,8 +960,19 @@ ErrorCode ESP32I2C::SetConfig(Configuration config)
     return ErrorCode::BUSY;
   }
 
+  if (i2c_ll_is_bus_busy(hal_.dev))
+  {
+    Release();
+    return ErrorCode::BUSY;
+  }
+
+  const Configuration previous_config = config_;
   config_ = config;
   const ErrorCode ans = ApplyConfig();
+  if (ans != ErrorCode::OK)
+  {
+    config_ = previous_config;
+  }
   Release();
   return ans;
 }

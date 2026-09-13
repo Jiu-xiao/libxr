@@ -7,6 +7,7 @@
 #include "driver/gpio.h"
 #include "esp_def.hpp"
 #include "esp_intr_alloc.h"
+#include "flag.hpp"
 #include "hal/i2c_hal.h"
 #include "hal/i2c_types.h"
 #include "i2c.hpp"
