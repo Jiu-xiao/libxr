@@ -128,6 +128,7 @@ struct I2CFilterState
 
 static I2CFilterState CaptureI2CFilterState(const I2C_HandleTypeDef* handle);
 static void RestoreI2CFilterState(I2C_HandleTypeDef* handle, I2CFilterState state);
+static bool ResetI2CPeripheral(I2C_TypeDef* instance);
 
 static void RecoverAfterBlockTimeout(STM32I2C* i2c)
 {
@@ -145,10 +146,20 @@ static void RecoverAfterBlockTimeout(STM32I2C* i2c)
     (void)HAL_DMA_Abort(hi2c->hdmatx);
   }
 
-  // Re-open the HAL handle after a detached BLOCK timeout without touching
-  // the larger software-side callback/semaphore semantics.
-  (void)HAL_I2C_DeInit(hi2c);
-  if (HAL_I2C_Init(hi2c) == HAL_OK)
+  // Reset only the I2C peripheral so GPIO/NVIC and the selected RCC kernel
+  // clock source survive timeout recovery. Fall back to the legacy HAL
+  // DeInit path only on families without an RCC peripheral-reset primitive.
+  bool initialized = false;
+  if (ResetI2CPeripheral(hi2c->Instance))
+  {
+    initialized = HAL_I2C_Init(hi2c) == HAL_OK;
+  }
+  else
+  {
+    (void)HAL_I2C_DeInit(hi2c);
+    initialized = HAL_I2C_Init(hi2c) == HAL_OK;
+  }
+  if (initialized)
   {
     RestoreI2CFilterState(hi2c, filter_state);
   }
