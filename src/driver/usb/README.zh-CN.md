@@ -7,7 +7,7 @@
 真正小巧、美观、超快且现代的嵌入式系统 USB 堆栈。
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://jiu-xiao.github.io/libxr/)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://xrobot.work/libxr/)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr?ref=badge_shield)
 
 </div>
@@ -82,4 +82,4 @@ TODO
 
 ## 文档
 
-与[LibXR文档](https://xrobot-org.github.io/docs/xrusb)一起发布
+与[LibXR文档](https://xrobot.work/docs/xrusb)一起发布

@@ -7,7 +7,7 @@
 A truly tiny and beautiful, ultra-fast and modern USB stack for embedded systems.
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://jiu-xiao.github.io/libxr/)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://xrobot.work/libxr/)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr?ref=badge_shield)
 
 </div>
@@ -75,4 +75,4 @@ Note:
 
 ## Documentation
 
-Released together with the [LibXR documentation](https://xrobot-org.github.io/en/docs/xrusb).
+Released together with the [LibXR documentation](https://xrobot.work/en/docs/xrusb).
