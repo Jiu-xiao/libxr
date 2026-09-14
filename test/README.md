@@ -30,12 +30,12 @@ CTest runs the registered automatic tests. It uses `script` to provide the pseud
 Use `--case` to run one group. For example:
 
 ```sh
-script -q -e -c './build/test/test --case lockfree_list' /dev/null
+script -q -e -c './build/test/libxr_test --case lockfree_list' /dev/null
 ```
 
-名称列在 [automatic/main.cpp](automatic/main.cpp) 中。可执行文件为 `build/test/test`，对应的 CMake 目标名为 `libxr_test`。需要查看完整输出时使用：
+名称列在 [automatic/main.cpp](automatic/main.cpp) 中。可执行文件为 `build/test/libxr_test`，对应的 CMake 目标名为 `libxr_test`。需要查看完整输出时使用：
 
-Case names are listed in [automatic/main.cpp](automatic/main.cpp). The executable is `build/test/test`, and its CMake target is `libxr_test`. To see the full output, run:
+Case names are listed in [automatic/main.cpp](automatic/main.cpp). The executable is `build/test/libxr_test`, and its CMake target is `libxr_test`. To see the full output, run:
 
 ```sh
 ctest --test-dir build -V -R '^libxr_automatic$' --no-tests=error
