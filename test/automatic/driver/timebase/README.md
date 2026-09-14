@@ -17,5 +17,5 @@ Integer time conversions discard fractional parts. The test allows 2 μs for mic
 After building with the [test instructions](../../../README.md), run from the repository root:
 
 ```sh
-script -q -e -c './build/test/test --case timebase' /dev/null
+script -q -e -c './build/test/libxr_test --case timebase' /dev/null
 ```
