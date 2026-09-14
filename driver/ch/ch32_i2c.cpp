@@ -163,6 +163,13 @@ ErrorCode CH32I2C::SetConfig(Configuration config)
     return ErrorCode::NOT_SUPPORT;
   }
 
+  ApplyConfig(config);
+  cfg_ = config;
+  return ErrorCode::OK;
+}
+
+void CH32I2C::ApplyConfig(Configuration config)
+{
   I2C_Cmd(instance_, DISABLE);
   I2C_DeInit(instance_);
 
@@ -183,9 +190,6 @@ ErrorCode CH32I2C::SetConfig(Configuration config)
   I2C_NACKPositionConfig(instance_, I2C_NACKPosition_Current);
   // I2C_DeInit resets CTLR2, including the asynchronous error interrupt.
   I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
-  cfg_ = config;
-
-  return ErrorCode::OK;
 }
 
 bool CH32I2C::WaitEvent(uint32_t evt, uint32_t timeout_us)
@@ -567,7 +571,8 @@ void CH32I2C::RecoverAfterImmediateFailure()
   I2C_GenerateSTOP(instance_, ENABLE);
   if (!WaitFlag(I2C_FLAG_BUSY, RESET, K_DEFAULT_TIMEOUT_US))
   {
-    (void)SetConfig(cfg_);
+    // DMA is stopped; recovery must not use the public BUSY admission check.
+    ApplyConfig(cfg_);
   }
   else
   {
@@ -636,10 +641,10 @@ ErrorCode CH32I2C::Write(uint16_t slave_addr, ConstRawData write_data, WriteOper
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  op.MarkAsRunning();
   I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartTxDma(write_data.size_);
 
-  op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     return block_wait_.Wait(op.data.sem_info.timeout);
@@ -695,10 +700,10 @@ ErrorCode CH32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& o
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  op.MarkAsRunning();
   I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartRxDma(read_data.size_);
 
-  op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
     return block_wait_.Wait(op.data.sem_info.timeout);
@@ -768,10 +773,10 @@ ErrorCode CH32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  op.MarkAsRunning();
   I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartTxDma(write_data.size_);
 
-  op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     return block_wait_.Wait(op.data.sem_info.timeout);
@@ -900,10 +905,10 @@ ErrorCode CH32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_
   {
     block_wait_.Start(*op.data.sem_info.sem);
   }
+  op.MarkAsRunning();
   I2C_ITConfig(instance_, I2C_IT_ERR, ENABLE);
   StartRxDma(read_data.size_);
 
-  op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
     return block_wait_.Wait(op.data.sem_info.timeout);

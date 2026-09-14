@@ -1274,6 +1274,7 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
   async_ctx_.flags = BuildTransferFlags(kI2CFlagWriteCheckAck);
   async_completion_claim_.store(0U, std::memory_order_release);
 
+  op.MarkAsRunning();
   StartAsyncBlockWaitIfNeeded(op);
 
   ans = EnableAsyncI2cIrq();
@@ -1307,7 +1308,6 @@ ErrorCode HPMI2C::StartWriteAsync(uint16_t slave_addr, ConstRawData write_data,
     return ans;
   }
 
-  op.MarkAsRunning();
   if (op.type == WriteOperation::OperationType::BLOCK)
   {
     return WaitForAsyncBlockResult(op.data.sem_info.timeout);
@@ -1338,6 +1338,7 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
   async_ctx_.flags = kI2CFlagRead;
   async_completion_claim_.store(0U, std::memory_order_release);
 
+  op.MarkAsRunning();
   StartAsyncBlockWaitIfNeeded(op);
 
   ans = EnableAsyncI2cIrq();
@@ -1371,7 +1372,6 @@ ErrorCode HPMI2C::StartReadAsync(uint16_t slave_addr, RawData read_data,
     return ans;
   }
 
-  op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
     return WaitForAsyncBlockResult(op.data.sem_info.timeout);
@@ -1418,6 +1418,7 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   async_ctx_.flags = kI2CFlagRead;
   async_completion_claim_.store(0U, std::memory_order_release);
 
+  op.MarkAsRunning();
   StartAsyncBlockWaitIfNeeded(op);
 
   ans = PrepareAsyncTransfer(slave_addr, kI2CFlagNoStop, async_ctx_.mem_addr_size_in_byte,
@@ -1496,7 +1497,6 @@ ErrorCode HPMI2C::StartMemReadAsync(uint16_t slave_addr, uint16_t mem_addr,
   }
   i2c_clear_status(i2c_, I2C_STATUS_ADDRHIT_MASK);
 
-  op.MarkAsRunning();
   if (op.type == ReadOperation::OperationType::BLOCK)
   {
     return WaitForAsyncBlockResult(op.data.sem_info.timeout);

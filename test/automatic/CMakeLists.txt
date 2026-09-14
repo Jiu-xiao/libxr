@@ -180,3 +180,5 @@ add_executable(test_stm32_i2c_timing driver/i2c/test_stm32_i2c_timing.cpp)
 target_include_directories(test_stm32_i2c_timing PRIVATE ../../driver/st)
 add_test(NAME test_stm32_i2c_timing COMMAND test_stm32_i2c_timing)
 set_tests_properties(test_stm32_i2c_timing PROPERTIES TIMEOUT 30)
+
+add_subdirectory(driver/i2c)

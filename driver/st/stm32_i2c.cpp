@@ -8,9 +8,6 @@
 #if defined(STM32H7)
 #include "stm32h7xx_ll_rcc.h"
 #endif
-#if defined(STM32H7RS)
-#include "stm32h7rsxx_ll_rcc.h"
-#endif
 #ifdef HAL_I2C_MODULE_ENABLED
 
 using namespace LibXR;
@@ -123,11 +120,21 @@ static inline ErrorCode MapHalStartFailure(const I2C_HandleTypeDef* hi2c,
   return (st == HAL_BUSY) ? ErrorCode::BUSY : ErrorCode::FAILED;
 }
 
+struct I2CFilterState
+{
+  bool analog_filter{false};
+  uint32_t digital_filter{0U};
+};
+
+static I2CFilterState CaptureI2CFilterState(const I2C_HandleTypeDef* handle);
+static void RestoreI2CFilterState(I2C_HandleTypeDef* handle, I2CFilterState state);
+
 static void RecoverAfterBlockTimeout(STM32I2C* i2c)
 {
   ASSERT(i2c != nullptr);
 
   auto* hi2c = i2c->i2c_handle_;
+  const I2CFilterState filter_state = CaptureI2CFilterState(hi2c);
   i2c->recovering_ = true;
   if (hi2c->hdmarx != nullptr)
   {
@@ -141,7 +148,10 @@ static void RecoverAfterBlockTimeout(STM32I2C* i2c)
   // Re-open the HAL handle after a detached BLOCK timeout without touching
   // the larger software-side callback/semaphore semantics.
   (void)HAL_I2C_DeInit(hi2c);
-  (void)HAL_I2C_Init(hi2c);
+  if (HAL_I2C_Init(hi2c) == HAL_OK)
+  {
+    RestoreI2CFilterState(hi2c, filter_state);
+  }
 
   i2c->read_ = false;
   i2c->read_op_ = {};
@@ -561,12 +571,6 @@ static uint32_t GetI2CClock(I2C_TypeDef* instance)
   return 0U;
 }
 
-struct I2CFilterState
-{
-  bool analog_filter{false};
-  uint32_t digital_filter{0U};
-};
-
 static I2CFilterState CaptureI2CFilterState(const I2C_HandleTypeDef* handle)
 {
   UNUSED(handle);
@@ -666,6 +670,7 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
       // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
       block_wait_.Start(*op.data.sem_info.sem);
     }
+    op.MarkAsRunning();
     const HAL_StatusTypeDef st = HAL_I2C_Master_Receive_DMA(
         i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
         read_data.size_);
@@ -676,9 +681,12 @@ ErrorCode STM32I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
         block_wait_.Cancel();
         return MapHalStartFailure(i2c_handle_, st);
       }
+      if (op.type == ReadOperation::OperationType::POLLING)
+      {
+        op.UpdateStatus(in_isr, ErrorCode::BUSY);
+      }
       return ErrorCode::BUSY;
     }
-    op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
@@ -725,6 +733,7 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
       block_wait_.Start(*op.data.sem_info.sem);
     }
     STM32_CleanDCacheByAddr(dma_buff_.addr_, write_data.size_);
+    op.MarkAsRunning();
     const HAL_StatusTypeDef st = HAL_I2C_Master_Transmit_DMA(
         i2c_handle_, dev_addr, reinterpret_cast<uint8_t*>(dma_buff_.addr_),
         write_data.size_);
@@ -735,9 +744,12 @@ ErrorCode STM32I2C::Write(uint16_t slave_addr, ConstRawData write_data,
         block_wait_.Cancel();
         return MapHalStartFailure(i2c_handle_, st);
       }
+      if (op.type == WriteOperation::OperationType::POLLING)
+      {
+        op.UpdateStatus(in_isr, ErrorCode::BUSY);
+      }
       return ErrorCode::BUSY;
     }
-    op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
       return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
@@ -782,6 +794,7 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
       // Arm the BLOCK waiter before HAL exposes completion to IRQ context.
       block_wait_.Start(*op.data.sem_info.sem);
     }
+    op.MarkAsRunning();
     const HAL_StatusTypeDef st = HAL_I2C_Mem_Read_DMA(
         i2c_handle_, dev_addr, mem_addr,
         mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
@@ -794,9 +807,12 @@ ErrorCode STM32I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
         block_wait_.Cancel();
         return MapHalStartFailure(i2c_handle_, st);
       }
+      if (op.type == ReadOperation::OperationType::POLLING)
+      {
+        op.UpdateStatus(in_isr, ErrorCode::BUSY);
+      }
       return ErrorCode::BUSY;
     }
-    op.MarkAsRunning();
     if (op.type == ReadOperation::OperationType::BLOCK)
     {
       return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
@@ -848,6 +864,7 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
       block_wait_.Start(*op.data.sem_info.sem);
     }
     STM32_CleanDCacheByAddr(dma_buff_.addr_, write_data.size_);
+    op.MarkAsRunning();
     const HAL_StatusTypeDef st = HAL_I2C_Mem_Write_DMA(
         i2c_handle_, dev_addr, mem_addr,
         mem_addr_size == MemAddrLength::BYTE_8 ? I2C_MEMADD_SIZE_8BIT
@@ -860,9 +877,12 @@ ErrorCode STM32I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
         block_wait_.Cancel();
         return MapHalStartFailure(i2c_handle_, st);
       }
+      if (op.type == WriteOperation::OperationType::POLLING)
+      {
+        op.UpdateStatus(in_isr, ErrorCode::BUSY);
+      }
       return ErrorCode::BUSY;
     }
-    op.MarkAsRunning();
     if (op.type == WriteOperation::OperationType::BLOCK)
     {
       return WaitBlockResultAndRecoverTimeout(this, op.data.sem_info.timeout);
