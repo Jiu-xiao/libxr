@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: build (${{ matrix.build_type }}, DEV_ASSERT=${{ matrix.dev_assert }})
+    name: build (${{ matrix.generator }}, ${{ matrix.build_type }}, DEV_ASSERT=${{ matrix.dev_assert }})
 
     strategy:
       fail-fast: false
@@ -15,20 +15,26 @@ jobs:
         include:
           - build_type: Debug
             dev_assert: "ON"
+            generator: Unix Makefiles
           - build_type: Release
             dev_assert: "ON"
+            generator: Unix Makefiles
           - build_type: Release
             dev_assert: "OFF"
+            generator: Unix Makefiles
+          - build_type: Debug
+            dev_assert: "ON"
+            generator: Ninja
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
     - name: setup deps
-      run: sudo apt-get update && sudo apt-get install -y libwpa-client-dev libnm-dev libudev-dev
+      run: sudo apt-get update && sudo apt-get install -y libwpa-client-dev libnm-dev libudev-dev ninja-build
     - name: configure
-      run: cmake -S . -B build -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=${{ matrix.dev_assert }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-    - name: make
+      run: cmake -S . -B build -G "${{ matrix.generator }}" -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=${{ matrix.dev_assert }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+    - name: build
       run: cd build && cmake --build . -j"$(nproc)"
     - name: automatic tests
       run: ctest --test-dir build --output-on-failure --no-tests=error
