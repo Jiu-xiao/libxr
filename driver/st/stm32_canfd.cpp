@@ -945,7 +945,10 @@ extern "C" void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hcan, uint32_t Rx
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessRxInterrupt(FDCAN_RX_FIFO0);
+    while (HAL_FDCAN_GetRxFifoFillLevel(hcan, FDCAN_RX_FIFO0) > 0U)
+    {
+      can->ProcessRxInterrupt(FDCAN_RX_FIFO0);
+    }
   }
 }
 
@@ -955,7 +958,10 @@ extern "C" void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef* hcan, uint32_t Rx
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessRxInterrupt(FDCAN_RX_FIFO1);
+    while (HAL_FDCAN_GetRxFifoFillLevel(hcan, FDCAN_RX_FIFO1) > 0U)
+    {
+      can->ProcessRxInterrupt(FDCAN_RX_FIFO1);
+    }
   }
 }
 
