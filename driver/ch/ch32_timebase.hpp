@@ -4,13 +4,22 @@
 
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
-extern uint32_t SystemCoreClock;
-
 namespace LibXR
 {
 
 /**
- * @brief CH32 时间基准实现 / CH32 timebase implementation
+ * @brief CH32 硬件计数器时间基准 / CH32 hardware-counter timebase
+ *
+ * @note BSP 必须预先将 SysTick 配置为 HCLK 驱动的 64 位自由运行向上计数器。
+ *       使用期间不得停止、清零计数器或改变 HCLK；HCLK 不低于 1 MHz。
+ *       The BSP must configure SysTick as a 64-bit, HCLK-driven, free-running
+ *       up-counter before initialization. The counter must not be stopped or reset,
+ *       and HCLK must remain unchanged and at least 1 MHz during use.
+ * @note 微秒和毫秒均由硬件计数值换算，不依赖 SysTick 中断的软件计数。
+ *       初始化完成后可在任务或中断中读取，比较值和 tick 中断由 BSP 管理。
+ *       Microseconds and milliseconds are derived from the hardware counter without
+ *       a software interrupt count. Reads are allowed from tasks or interrupts after
+ *       initialization; the BSP manages compare deadlines and tick interrupts.
  */
 class CH32Timebase : public Timebase
 {
@@ -18,29 +27,11 @@ class CH32Timebase : public Timebase
   /**
    * @brief 构造函数 / Constructor
    *
-   * 配置 CH32 SysTick 时间基的回绕范围，并标记时间基已就绪。
-   * Configures the CH32 SysTick wrap range and marks the timebase ready.
+   * 缓存计数器时钟频率，配置时间戳回绕范围并标记时间基就绪。
+   * Cache the counter clock frequency, configure timestamp wrap ranges, and mark
+   * the timebase ready.
    */
   CH32Timebase();
-
-  /**
-   * @brief SysTick 中断入口辅助函数。
-   *        Helper called from the SysTick interrupt path.
-   */
-  static inline void OnSysTickInterrupt();
-
-  /**
-   * @brief 同步毫秒计数器。
-   *        Synchronize the millisecond counter.
-   * @param ticks 新的毫秒计数值。New millisecond tick value.
-   */
-  void Sync(uint32_t ticks);
-
-  /**
-   * @brief SysTick 毫秒计数器。
-   *        SysTick millisecond counter.
-   */
-  static inline volatile uint32_t sys_tick_ms_ = 0;
 };
 
 }  // namespace LibXR

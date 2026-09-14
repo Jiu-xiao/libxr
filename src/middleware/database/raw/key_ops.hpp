@@ -41,7 +41,6 @@ add_again:
     }
     else
     {
-      ASSERT(false);
       return ErrorCode::FULL;
     }
   }
@@ -186,7 +185,6 @@ ErrorCode SetKey(const char* name, const void* data, size_t size, bool recycle =
           }
           else
           {
-            ASSERT(false);
             return ErrorCode::FULL;
           }
         }

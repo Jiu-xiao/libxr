@@ -221,8 +221,10 @@ enum class SizeLimitMode : uint8_t
 #endif
 
 /**
- * @brief 面向 LibXR 用户的断言宏
- * @brief Assertion macro for LibXR users
+ * @brief 固定配置和调用前提检查 / Fixed configuration and caller precondition check
+ * @note LIBXR_DEBUG_BUILD 启用失败检查；关闭时仍求值。必要操作应在宏外执行。
+ *       LIBXR_DEBUG_BUILD enables failure checking; otherwise the expression is still
+ *       evaluated. Required operations belong outside the macro.
  * @param arg 要检查的条件 | Condition to check
  */
 #ifdef LIBXR_DEBUG_BUILD
@@ -261,8 +263,10 @@ enum class SizeLimitMode : uint8_t
 #endif
 
 /**
- * @brief 仅供 LibXR 本体开发使用的开发期断言
- * @brief Development-only assertion for LibXR maintainers
+ * @brief 库内部实现的开发期检查 / Development check for library implementation
+ * @note 默认禁用且不求值；仅在定义 LIBXR_DEV_ASSERT_BUILD 时启用。
+ *       Disabled without evaluation unless LIBXR_DEV_ASSERT_BUILD is defined.
+ *       条件不得包含必须执行的操作。 / Conditions must not contain required operations.
  * @param arg 要检查的条件 | Condition to check
  */
 #ifdef LIBXR_DEV_ASSERT_BUILD
@@ -291,18 +295,14 @@ enum class SizeLimitMode : uint8_t
     }                                                  \
   } while (0)
 #else
-#define DEV_ASSERT(arg) (void(arg), (void)0)
-#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr) \
-  do                                          \
-  {                                           \
-    (void)(arg);                              \
-    (void)(in_isr);                           \
-  } while (0)
+#define DEV_ASSERT(arg) ((void)0)
+#define DEV_ASSERT_FROM_CALLBACK(arg, in_isr) ((void)0)
 #endif
 
 /**
- * @brief 与编译开关无关的强约束检查
- * @brief Strong requirement check independent of build switches
+ * @brief 始终生效的致命运行错误检查 / Always-enabled fatal runtime error check
+ * @note 可恢复错误应通过接口返回，不应在此终止。
+ *       Recoverable errors belong to the interface's error-return path.
  * @param arg 要检查的条件 | Condition to check
  */
 #define REQUIRE(arg)                                \

@@ -130,26 +130,26 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
 
   if (InitializeHardware() != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 
   if (ConfigurePins() != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 
   if (InstallInterrupt() != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 
   if (dma_requested_)
   {
     const ErrorCode dma_ans = InitDmaBackend();
-    ASSERT(dma_ans == ErrorCode::OK);
+    REQUIRE(dma_ans == ErrorCode::OK);
     if (dma_ans != ErrorCode::OK)
     {
       return;
@@ -158,7 +158,7 @@ ESP32SPI::ESP32SPI(spi_host_device_t host, int sclk_pin, int miso_pin, int mosi_
 
   if (SetConfig(config) != ErrorCode::OK)
   {
-    ASSERT(false);
+    REQUIRE(false);
     return;
   }
 }

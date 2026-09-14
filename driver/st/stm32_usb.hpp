@@ -15,7 +15,7 @@
  */
 typedef enum : uint8_t
 {
-#if (defined(USB_BASE))
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   STM32_USB_FS_DEV,
 #endif
 #if (defined(USB_OTG_FS))

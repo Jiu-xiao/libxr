@@ -44,8 +44,11 @@ class UART
   {
     uint32_t baudrate;  ///< 波特率 / Baud rate
     // TODO: Mark, Space
-    Parity parity;      ///< 校验模式 / Parity mode
-    uint8_t data_bits;  ///< 数据位长度 / Number of data bits
+    Parity parity;  ///< 校验模式 / Parity mode
+    /// 有效数据位数。按字节接收时仅低 data_bits 位有效，高位由调用方按需屏蔽。
+    /// Number of valid data bits. For byte-wise RX, only the low data_bits bits are
+    /// valid; callers mask the unspecified upper bits when needed.
+    uint8_t data_bits;
     // TODO: 0.5 1.5
     uint8_t stop_bits;  ///< 停止位长度 / Number of stop bits
   };
@@ -55,9 +58,8 @@ class UART
 
   /**
    * @brief UART 构造函数 / UART constructor
-   * @param rx_buffer_size 接收缓冲区大小 / Receive buffer size
-   * @param tx_queue_size 发送队列大小 / Transmit queue size
-   * @param tx_buffer_size 发送缓冲区大小 / Transmit buffer size
+   * @param read_port 接收端口 / Read port
+   * @param write_port 发送端口 / Write port
    *
    * 该构造函数初始化 UART 的读取和写入端口。
    * This constructor initializes the read and write ports of the UART.
@@ -71,6 +73,9 @@ class UART
   /**
    * @brief 设置 UART 配置 / Sets the UART configuration
    * @param config UART 配置信息 / UART configuration settings
+   * @param in_isr 调用者是否位于中断上下文 / Whether the caller is in an ISR.
+   * @note 配置应用时机和允许的调用环境由具体后端规定。
+   *       Application timing and supported call contexts depend on the backend.
    * @return 返回操作状态，成功时返回 `ErrorCode::OK`，否则返回相应错误码 / Returns the
    * operation status, `ErrorCode::OK` if successful, otherwise an error code
    *
@@ -78,7 +83,7 @@ class UART
    * This is a pure virtual function. Subclasses must implement the specific UART
    * configuration logic.
    */
-  virtual ErrorCode SetConfig(Configuration config) = 0;
+  virtual ErrorCode SetConfig(Configuration config, bool in_isr = false) = 0;
 
   template <typename OperationType, typename = std::enable_if_t<std::is_base_of_v<
                                         WriteOperation, std::decay_t<OperationType>>>>

@@ -40,8 +40,8 @@ static size_t HistoryLineSize(const HistoryLine& line)
  */
 const HistoryLine& HistoryFromNewest(int index_from_newest)
 {
-  ASSERT(index_from_newest >= 0);
-  ASSERT(index_from_newest < static_cast<int>(history_.Size()));
+  DEV_ASSERT(index_from_newest >= 0);
+  DEV_ASSERT(index_from_newest < static_cast<int>(history_.Size()));
   return history_[-index_from_newest - 1];
 }
 

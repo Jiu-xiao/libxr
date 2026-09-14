@@ -48,7 +48,6 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
       break;
     }
 
-    ASSERT(read_err == ESP_OK);
     if (read_err != ESP_OK)
     {
       if (read_err == ESP_ERR_INVALID_STATE)
@@ -67,7 +66,7 @@ void ESP32ADC::DrainContinuousFrames(uint32_t timeout_ms)
     const esp_err_t parse_err =
         adc_continuous_parse_data(continuous_handle_, continuous_read_buf_, out_length,
                                   continuous_parsed_buf_, &parsed_count);
-    ASSERT(parse_err == ESP_OK);
+
     if (parse_err != ESP_OK)
     {
       break;

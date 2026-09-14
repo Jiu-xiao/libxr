@@ -8,7 +8,7 @@ cd "${REPO_ROOT}"
 usage() {
   cat <<'EOF'
 Usage:
-  tools/format_cpp_files.sh [--check]
+  tools/format_cpp_files.sh [--check] [files...]
 
 Description:
   Format all C/C++ files under driver/, src/, system/, and test/ using
@@ -17,6 +17,7 @@ Description:
 
 Options:
   --check   Run clang-format in dry-run mode with --Werror.
+  files     Optional explicit file list, including untracked files.
   -h, --help
 EOF
 }
@@ -28,17 +29,25 @@ case "${1:-}" in
     ;;
   --check)
     MODE="check"
+    shift
     ;;
   -h|--help)
     usage
     exit 0
     ;;
-  *)
+  -*)
     echo "Unknown option: ${1}" >&2
     usage >&2
     exit 2
     ;;
 esac
+
+for source_file in "$@"; do
+  if [[ ! -f "$source_file" ]]; then
+    echo "Not a regular file: $source_file" >&2
+    exit 1
+  fi
+done
 
 CLANG_FORMAT_BIN="${CLANG_FORMAT_BIN:-}"
 if [[ -z "${CLANG_FORMAT_BIN}" ]]; then
@@ -77,6 +86,10 @@ EOF
 fi
 
 list_source_files() {
+  if (( $# > 0 )); then
+    printf '%s\0' "$@"
+    return
+  fi
   find driver src system test -type f \( \
     -name '*.h' -o -name '*.hpp' -o \
     -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
@@ -84,9 +97,9 @@ list_source_files() {
 }
 
 if [[ "${MODE}" == "check" ]]; then
-  list_source_files | xargs -0 -r "${CLANG_FORMAT_BIN}" --dry-run --Werror --style=file
-  echo "clang-format check passed for C/C++ files under driver/, src/, system/, and test/."
+  list_source_files "$@" | xargs -0 -r "${CLANG_FORMAT_BIN}" --dry-run --Werror --style=file
+  echo "clang-format check passed for selected C/C++ files."
 else
-  list_source_files | xargs -0 -r "${CLANG_FORMAT_BIN}" -i --style=file
-  echo "Formatted C/C++ files under driver/, src/, system/, and test/."
+  list_source_files "$@" | xargs -0 -r "${CLANG_FORMAT_BIN}" -i --style=file
+  echo "Formatted selected C/C++ files."
 fi

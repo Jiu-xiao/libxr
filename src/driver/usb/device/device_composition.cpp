@@ -744,7 +744,7 @@ void DeviceComposition::RegisterInterfaceStrings()
       // 这样 DeviceCore 之后可以按索引重新生成任意接口字符串，而不必重扫全部 class。
       // Keep a flat source-string table so DeviceCore can later regenerate any
       // interface string by index without re-scanning all classes.
-      ASSERT(registered_count < interface_string_count_);
+      DEV_ASSERT(registered_count < interface_string_count_);
       if (!class_has_string)
       {
         device_class->SetInterfaceStringBaseIndex(next_index);
@@ -755,5 +755,5 @@ void DeviceComposition::RegisterInterfaceStrings()
     }
   }
 
-  ASSERT(registered_count == interface_string_count_);
+  DEV_ASSERT(registered_count == interface_string_count_);
 }

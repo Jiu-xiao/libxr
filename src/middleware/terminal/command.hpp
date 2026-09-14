@@ -221,7 +221,8 @@ void ExecuteCommand()
     return;
   }
 
-  write_stream_.Commit();
+  // 输出尽力提交后执行命令 / Commit output on a best-effort basis before running it.
+  (void)write_stream_.Commit();
   write_mutex_->Unlock();
   ans->Run(arg_number_, arg_tab_);
   write_mutex_->Lock();

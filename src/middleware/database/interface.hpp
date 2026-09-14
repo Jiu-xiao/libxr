@@ -74,7 +74,8 @@ class Database
         data_ = init_value;
         if (status == ErrorCode::NOT_FOUND)
         {
-          REQUIRE(database.Add(*this) == ErrorCode::OK);
+          [[maybe_unused]] const auto add_result = database.Add(*this);
+          REQUIRE(add_result == ErrorCode::OK);
         }
       }
     }
@@ -99,7 +100,8 @@ class Database
         Memory::FastSet(&data_, 0, sizeof(Data));
         if (status == ErrorCode::NOT_FOUND)
         {
-          REQUIRE(database.Add(*this) == ErrorCode::OK);
+          [[maybe_unused]] const auto add_result = database.Add(*this);
+          REQUIRE(add_result == ErrorCode::OK);
         }
       }
     }

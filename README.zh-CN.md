@@ -178,6 +178,17 @@ set(LIBXR_LOG_LEVEL 4)
 set(LIBXR_TEST_BUILD True)
 ```
 
+自动测试在 `test/automatic/` 中镜像源码目录和源文件归属。在仓库根目录构建并执行完整测试：
+
+```sh
+cmake -S . -B build -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel 8
+ctest --test-dir build --output-on-failure --no-tests=error
+```
+
+CTest 通过 util-linux 的 `script` 程序为运行测试提供所需的伪终端。
+构建矩阵、编译探针及手动测试预留目录说明见 [test/README.md](test/README.md)。
+
 ## 其他工具
 
 ### STM32 C++ 代码自动生成器

@@ -13,6 +13,7 @@
 #include "adc.hpp"
 #include "libxr.hpp"
 #include "libxr_def.hpp"
+#include "stm32_adc_gpdma.hpp"
 
 namespace LibXR
 {
@@ -196,7 +197,11 @@ class STM32ADC
       T hadc)
   {
     ASSERT(hadc->DMA_Handle != nullptr);
+#if defined(DMA_CIRCULAR)
     ASSERT(hadc->DMA_Handle->Init.Mode == DMA_CIRCULAR);
+#else
+    ASSERT(false);
+#endif
   }
 
   template <typename T>
@@ -243,6 +248,9 @@ class STM32ADC
    * @param dma_buff DMA 缓冲区 / DMA buffer
    * @param channels ADC 通道列表 / ADC channel list
    * @param vref 参考电压 / Reference voltage
+   * @note H5 DMA 采样使用半字传输和循环链表，缓冲区、句柄及原链表在对象生命周期内有效。
+   *       H5 DMA sampling uses halfword transfers and a circular list; buffers, handles
+   *       and the original list remain valid for the object's lifetime.
    */
   STM32ADC(ADC_HandleTypeDef* hadc, RawData dma_buff,
            std::initializer_list<uint32_t> channels, float vref);
@@ -278,6 +286,9 @@ class STM32ADC
   float resolution_;
   Channel** channels_;
   float vref_;
+#if defined(LIBXR_STM32_ADC_GPDMA)
+  STM32GpdmaAdcAdapter gpdma_adapter_;
+#endif
 
   float ConvertToVoltage(float adc_value);
 };

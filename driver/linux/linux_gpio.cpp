@@ -577,7 +577,6 @@ ErrorCode LinuxGPIO::OpenChip()
   {
     XR_LOG_ERROR("Failed to open GPIO chip: %s (%s)", chip_path_.c_str(),
                  std::strerror(errno));
-    ASSERT(false);
     return ErrorCode::INIT_ERR;
   }
 

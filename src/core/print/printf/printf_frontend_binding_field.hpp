@@ -139,11 +139,11 @@ namespace FieldSelection
     case FormatType::TextInline:
     case FormatType::TextRef:
     case FormatType::TextSpace:
-      ASSERT(false);
+      DEV_ASSERT(false);
       return FormatPackKind::U32;
   }
 
-  ASSERT(false);
+  DEV_ASSERT(false);
   return FormatPackKind::U32;
 }
 

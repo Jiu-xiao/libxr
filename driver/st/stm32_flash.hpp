@@ -9,6 +9,8 @@
 #include "libxr_type.hpp"
 #include "main.h"
 
+#ifdef HAL_FLASH_MODULE_ENABLED
+
 namespace LibXR
 {
 
@@ -100,6 +102,13 @@ typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init, uint32_t
 
 /**
  * @brief STM32 闪存驱动实现 / STM32 flash driver implementation
+ * @pre 擦写调用及相关缓存控制由调用方串行化；等待期间 HAL tick 必须能推进。
+ *      The caller serializes erase/program calls and related cache control; the HAL
+ *      tick must advance during waits.
+ * @note 擦写期间暂时关闭相关缓存；进入擦写流程后，成功或失败返回均恢复缓存开关并锁定
+ * Flash。 Related caches are temporarily disabled during erase/program operations. Once
+ * the operation starts, success and failure returns restore the original cache enable
+ * state and lock Flash.
  */
 class STM32Flash : public Flash
 {
@@ -146,6 +155,8 @@ class STM32Flash : public Flash
     return FLASH_TYPEPROGRAM_DOUBLEWORD;
 #elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
     return FLASH_TYPEPROGRAM_FLASHWORD;
+#elif defined(FLASH_TYPEPROGRAM_QUADWORD)
+    return FLASH_TYPEPROGRAM_QUADWORD;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
@@ -163,6 +174,8 @@ class STM32Flash : public Flash
     return 8;
 #elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
     return FLASH_NB_32BITWORD_IN_FLASHWORD * 4;
+#elif defined(FLASH_TYPEPROGRAM_QUADWORD)
+    return 16;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif
@@ -172,3 +185,5 @@ class STM32Flash : public Flash
 };
 
 }  // namespace LibXR
+
+#endif

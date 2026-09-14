@@ -19,10 +19,12 @@ This Guide is written in Chinese.
 ## 运行测试
 1. 使用 CMake 进行配置和构建： 
    ```sh
-    mkdir build & cd build & cmake -DLIBXR_TEST_BUILD=True ..&& make
+    cmake -S . -B build -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=ON -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build --parallel 8
    ```
 2. 执行测试套件： 
    ```sh
-    ./test
+    ctest --test-dir build --output-on-failure --no-tests=error
    ```
+自动测试位于 `test/automatic/`；根 CTest 通过 util-linux `script` 提供运行测试所需的伪终端。
 每当进行代码更改时运行测试。

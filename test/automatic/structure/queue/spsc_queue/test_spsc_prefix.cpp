@@ -1,0 +1,334 @@
+/**
+ * @file test_spsc_prefix.cpp
+ * @brief 检查 SPSC 前缀读写的长度、顺序和发布时机。 /
+ * Tests SPSC prefix lengths, order and publication timing.
+ *
+ * 包含跨环尾、另一端在回调内推进、数据对齐及并发前缀传输。
+ * Includes wraparound, opposite-side progress, alignment and concurrent transfers.
+ */
+
+#include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <thread>
+#include <vector>
+
+#include "spsc_queue.hpp"
+#include "test.hpp"
+#include "test_assert.hpp"
+
+namespace
+{
+using Queue = LibXR::SPSCQueue<uint32_t>;
+
+void PositionEmptyQueue(Queue& queue, size_t offset)
+{
+  // 保持队列为空，只把读写位置移动到指定偏移，用于构造跨环尾的两段数据。
+  // Keep the queue empty but shift both positions to exercise two spans across the ring
+  // end.
+  for (size_t i = 0; i < offset; ++i)
+  {
+    TEST_ASSERT(queue.Push(0U) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+  }
+}
+
+void CheckContents(Queue& queue, const std::vector<uint32_t>& expected)
+{
+  TEST_ASSERT(queue.Size() == expected.size());
+  for (uint32_t value : expected)
+  {
+    uint32_t actual = 0U;
+    TEST_ASSERT(queue.Pop(actual) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(actual == value);
+  }
+  TEST_ASSERT(queue.Size() == 0U);
+}
+
+void FillQueue(Queue& queue, size_t offset, size_t used, std::vector<uint32_t>& expected)
+{
+  PositionEmptyQueue(queue, offset);
+  for (size_t index = 0U; index < used; ++index)
+  {
+    const uint32_t value = static_cast<uint32_t>(10U + index);
+    expected.push_back(value);
+    TEST_ASSERT(queue.Push(value) == LibXR::ErrorCode::OK);
+  }
+}
+
+void CheckProducePrefix(size_t capacity, size_t offset, size_t used, size_t limit,
+                        size_t prefix)
+{
+  // offset 指定起点，used 占用空间，limit 是请求量，prefix 是回调实际写入量。
+  // offset sets the start, used fills slots, limit requests space, and prefix is actually
+  // written.
+  Queue queue(capacity);
+  std::vector<uint32_t> expected;
+  FillQueue(queue, offset, used, expected);
+
+  const size_t offer = std::min(limit, capacity - used);
+  size_t calls = 0U;
+  const size_t produced = queue.ProduceWithWriter(
+      limit,
+      [&](uint32_t* first, size_t first_size, uint32_t* second, size_t second_size)
+      {
+        ++calls;
+        TEST_ASSERT(first != nullptr && first_size > 0U);
+        TEST_ASSERT(first_size + second_size == offer);
+        TEST_ASSERT((second == nullptr) == (second_size == 0U));
+        // 回调返回前数据尚未发布，队列长度仍应是原值。
+        // Before the callback returns, its prefix is unpublished and the size must remain
+        // unchanged.
+        TEST_ASSERT(queue.Size() == used);
+        for (size_t index = 0U; index < prefix; ++index)
+        {
+          (index < first_size ? first[index] : second[index - first_size]) =
+              static_cast<uint32_t>(100U + index);
+        }
+        return prefix;
+      });
+
+  TEST_ASSERT(produced == prefix);
+  TEST_ASSERT(calls == (offer == 0U ? 0U : 1U));
+  for (size_t index = 0U; index < prefix; ++index)
+  {
+    expected.push_back(static_cast<uint32_t>(100U + index));
+  }
+  CheckContents(queue, expected);
+}
+
+void CheckConsumePrefix(size_t capacity, size_t offset, size_t used, size_t limit,
+                        size_t prefix)
+{
+  // 即使回调看到了更多数据，也只能移除它返回的前缀长度，其余数据仍可读取。
+  // Remove only the prefix returned by the callback; the rest of the offered data remains
+  // queued.
+  Queue queue(capacity);
+  std::vector<uint32_t> expected;
+  FillQueue(queue, offset, used, expected);
+
+  const size_t offer = std::min(limit, used);
+  size_t calls = 0U;
+  const size_t consumed = queue.ConsumeWithReader(
+      limit,
+      [&](const uint32_t* first, size_t first_size, const uint32_t* second,
+          size_t second_size)
+      {
+        ++calls;
+        TEST_ASSERT(first != nullptr && first_size > 0U);
+        TEST_ASSERT(first_size + second_size == offer);
+        TEST_ASSERT((second == nullptr) == (second_size == 0U));
+        for (size_t index = 0U; index < offer; ++index)
+        {
+          TEST_ASSERT((index < first_size ? first[index] : second[index - first_size]) ==
+                      expected[index]);
+        }
+        TEST_ASSERT(queue.Size() == used);
+        return prefix;
+      });
+
+  TEST_ASSERT(consumed == prefix);
+  TEST_ASSERT(calls == (offer == 0U ? 0U : 1U));
+  expected.erase(expected.begin(), expected.begin() + prefix);
+  CheckContents(queue, expected);
+}
+
+void TestEveryPrefix()
+{
+  // 用小容量遍历起点、占用量和前缀长度，包含空队列、满队列及跨环尾情况。
+  // Enumerate small capacities, offsets and prefixes, including empty, full and wrapped
+  // queues.
+  for (size_t capacity = 1U; capacity <= 8U; ++capacity)
+  {
+    for (size_t offset = 0U; offset <= capacity; ++offset)
+    {
+      for (size_t used = 0U; used <= capacity; ++used)
+      {
+        for (size_t limit = 0U; limit <= capacity + 2U; ++limit)
+        {
+          const size_t write_offer = std::min(limit, capacity - used);
+          for (size_t prefix = 0U; prefix <= write_offer; ++prefix)
+          {
+            CheckProducePrefix(capacity, offset, used, limit, prefix);
+          }
+
+          const size_t read_offer = std::min(limit, used);
+          for (size_t prefix = 0U; prefix <= read_offer; ++prefix)
+          {
+            CheckConsumePrefix(capacity, offset, used, limit, prefix);
+          }
+        }
+      }
+    }
+  }
+}
+
+void TestOppositeSideProgress()
+{
+  // 在回调内操作队列另一端，检查写入发布和读取释放都发生在回调返回后。
+  // Operate on the opposite end inside callbacks; publication and release must wait for
+  // return.
+  Queue queue(3U);
+  const size_t produced =
+      queue.ProduceWithWriter(std::numeric_limits<size_t>::max(),
+                              [&](uint32_t* first, size_t n1, uint32_t*, size_t n2)
+                              {
+                                TEST_ASSERT(n1 == 3U && n2 == 0U);
+                                first[0] = 71U;
+                                uint32_t value = 0U;
+                                TEST_ASSERT(queue.Pop(value) == LibXR::ErrorCode::EMPTY);
+                                return 1U;
+                              });
+  TEST_ASSERT(produced == 1U);
+  TEST_ASSERT(queue.ConsumeWithReader(
+                  3U,
+                  [&](const uint32_t* first, size_t n1, const uint32_t*, size_t n2)
+                  {
+                    TEST_ASSERT(n1 == 1U && n2 == 0U && first[0] == 71U);
+                    TEST_ASSERT(queue.Push(72U) == LibXR::ErrorCode::OK);
+                    return 1U;
+                  }) == 1U);
+  CheckContents(queue, {72U});
+
+  TEST_ASSERT(queue.PushBatch(static_cast<const uint32_t*>(nullptr), 0U) ==
+              LibXR::ErrorCode::OK);
+  const uint32_t full[] = {1U, 2U, 3U};
+  TEST_ASSERT(queue.PushBatch(full, 3U) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(
+      queue.ConsumeWithReader(3U,
+                              [&](const uint32_t*, size_t, const uint32_t*, size_t)
+                              {
+                                TEST_ASSERT(queue.Push(99U) == LibXR::ErrorCode::FULL);
+                                return 2U;
+                              }) == 2U);
+  TEST_ASSERT(queue.Push(99U) == LibXR::ErrorCode::OK);
+  CheckContents(queue, {3U, 99U});
+}
+
+struct alignas(16) AlignedPayload
+{
+  uint32_t value;
+};
+
+void TestAlignedPayloadAndRawStride()
+{
+  // 跨环尾后的两段地址仍须对齐；原始队列的元素步长可以大于有效数据长度。
+  // Both wrapped spans must stay aligned; raw element stride may exceed the payload size.
+  LibXR::SPSCQueue<AlignedPayload> queue(3U);
+  AlignedPayload seed{0U};
+  TEST_ASSERT(queue.Push(seed) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.Push(seed) == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(queue.Pop() == LibXR::ErrorCode::OK);
+  TEST_ASSERT(
+      queue.ProduceWithWriter(
+          3U,
+          [](AlignedPayload* first, size_t n1, AlignedPayload* second, size_t n2)
+          {
+            TEST_ASSERT(n1 == 2U && n2 == 1U);
+            TEST_ASSERT(reinterpret_cast<uintptr_t>(first) % alignof(AlignedPayload) ==
+                        0U);
+            TEST_ASSERT(reinterpret_cast<uintptr_t>(second) % alignof(AlignedPayload) ==
+                        0U);
+            first[0] = AlignedPayload{11U};
+            first[1] = AlignedPayload{12U};
+            second[0] = AlignedPayload{13U};
+            return 3U;
+          }) == 3U);
+  for (uint32_t expected = 11U; expected <= 13U; ++expected)
+  {
+    AlignedPayload actual{};
+    TEST_ASSERT(queue.Pop(actual) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(actual.value == expected);
+  }
+
+  LibXR::SPSCQueueBase raw(3U, 4U, 2U);
+  TEST_ASSERT(raw.ProduceWithWriter(2U,
+                                    [](void* first, size_t n1, void*, size_t n2)
+                                    {
+                                      TEST_ASSERT(n1 == 2U && n2 == 0U);
+                                      auto* bytes = static_cast<uint8_t*>(first);
+                                      for (size_t i = 0U; i < n1; ++i)
+                                      {
+                                        for (size_t byte = 0U; byte < 3U; ++byte)
+                                        {
+                                          bytes[i * 4U + byte] =
+                                              static_cast<uint8_t>(i + 1U);
+                                        }
+                                      }
+                                      return n1;
+                                    }) == 2U);
+  uint8_t payload[3]{};
+  for (uint8_t expected = 1U; expected <= 2U; ++expected)
+  {
+    TEST_ASSERT(raw.PopBytes(payload) == LibXR::ErrorCode::OK);
+    TEST_ASSERT(payload[0] == expected && payload[1] == expected &&
+                payload[2] == expected);
+  }
+}
+
+void TestConcurrentPrefixes()
+{
+  // 生产者和消费者每次处理不同长度的前缀，用递增序号检查丢失、重复和乱序。
+  // Use different producer and consumer prefix lengths; sequence numbers catch loss,
+  // repeats and reordering.
+  constexpr uint32_t TOTAL = 50000U;
+  Queue queue(17U);
+  std::thread producer(
+      [&]
+      {
+        uint32_t next = 0U;
+        while (next != TOTAL)
+        {
+          const size_t produced = queue.ProduceWithWriter(
+              std::min<uint32_t>(11U, TOTAL - next),
+              [&](uint32_t* first, size_t n1, uint32_t* second, size_t n2)
+              {
+                const size_t prefix = std::min<size_t>(n1 + n2, 1U + next % 7U);
+                for (size_t i = 0U; i < prefix; ++i)
+                {
+                  (i < n1 ? first[i] : second[i - n1]) = next + static_cast<uint32_t>(i);
+                }
+                return prefix;
+              });
+          next += static_cast<uint32_t>(produced);
+          if (produced == 0U)
+          {
+            std::this_thread::yield();
+          }
+        }
+      });
+  uint32_t expected = 0U;
+  while (expected != TOTAL)
+  {
+    const size_t consumed = queue.ConsumeWithReader(
+        13U,
+        [&](const uint32_t* first, size_t n1, const uint32_t* second, size_t n2)
+        {
+          const size_t prefix = std::min<size_t>(n1 + n2, 1U + expected % 5U);
+          for (size_t i = 0U; i < prefix; ++i)
+          {
+            TEST_ASSERT((i < n1 ? first[i] : second[i - n1]) == expected + i);
+          }
+          return prefix;
+        });
+    expected += static_cast<uint32_t>(consumed);
+    if (consumed == 0U)
+    {
+      std::this_thread::yield();
+    }
+  }
+  producer.join();
+  TEST_ASSERT(queue.Size() == 0U);
+}
+}  // namespace
+
+void test_spsc_prefix()
+{
+  TestEveryPrefix();
+  TestOppositeSideProgress();
+  TestAlignedPayloadAndRawStride();
+  TestConcurrentPrefixes();
+}

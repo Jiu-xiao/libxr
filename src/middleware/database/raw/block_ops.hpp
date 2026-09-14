@@ -223,7 +223,7 @@ void CopyBlockPrefixAndChecksum(BlockType dst_block, BlockType src_block,
   const size_t src_offset = GetBlockOffset(src_block);
   const size_t checksum_offset = GetChecksumOffset();
 
-  ASSERT(used_size <= checksum_offset);
+  DEV_ASSERT(used_size <= checksum_offset);
   // Only the live key prefix and checksum are needed; erased tail bytes are irrelevant.
   CopyFlashData(dst_offset, src_offset, used_size);
   CopyFlashData(dst_offset + checksum_offset, src_offset + checksum_offset,

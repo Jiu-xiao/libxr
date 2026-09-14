@@ -15,7 +15,7 @@ extern "C" __attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t
   static volatile const char* task_name = pcTaskName;
   UNUSED(task_name);
   UNUSED(xTask);
-  ASSERT(false);
+  REQUIRE(false);
 }
 
 uint32_t LibXR::libxr_freertos_timebase_tick_offset = 0;
@@ -42,7 +42,7 @@ void* operator new(std::size_t size)
 {
   if (size == 0)
   {
-    return pvPortMalloc(size);
+    size = sizeof(std::size_t);
   }
 
 #ifdef LIBXR_DEBUG_BUILD

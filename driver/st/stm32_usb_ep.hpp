@@ -21,7 +21,7 @@ class STM32Endpoint : public USB::Endpoint
   STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd,
                 Direction dir, size_t fifo_size, LibXR::RawData buffer);
 #endif
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd,
                 Direction dir, size_t hw_buffer_offset, size_t hw_buffer_size,
                 LibXR::RawData buffer);
@@ -43,7 +43,7 @@ class STM32Endpoint : public USB::Endpoint
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   size_t fifo_size_ = 0;
 #endif
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   size_t hw_buffer_size_ = 0;
 #endif
   stm32_usb_dev_id_t id_;
@@ -71,7 +71,7 @@ class STM32Endpoint : public USB::Endpoint
   static inline STM32Endpoint* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 #endif
 
-#if defined(USB_BASE)
+#if defined(USB_BASE) || defined(USB_DRD_FS)
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
   static inline STM32Endpoint* map_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 #endif

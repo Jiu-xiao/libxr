@@ -6,7 +6,7 @@ using namespace LibXR;
 
 Mutex::Mutex() : mutex_handle_(xSemaphoreCreateMutex())
 {
-  ASSERT(mutex_handle_ != nullptr);
+  REQUIRE(mutex_handle_ != nullptr);
 }
 
 Mutex::~Mutex()
