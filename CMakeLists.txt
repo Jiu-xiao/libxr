@@ -236,21 +236,25 @@ else()
 endif()
 
 if(XROBOT_MODULES_DIR)
-  file(
-    GLOB _xr_module_dirs CONFIGURE_DEPENDS
-    RELATIVE ${XROBOT_MODULES_DIR}
-    ${XROBOT_MODULES_DIR}/*
-  )
-  list(SORT _xr_module_dirs)
+  if(EXISTS "${XROBOT_MODULES_DIR}/CMakeLists.txt")
+    include("${XROBOT_MODULES_DIR}/CMakeLists.txt")
+  else()
+    file(
+      GLOB _xr_module_dirs CONFIGURE_DEPENDS
+      RELATIVE ${XROBOT_MODULES_DIR}
+      ${XROBOT_MODULES_DIR}/*
+    )
+    list(SORT _xr_module_dirs)
 
-  foreach(_xr_mod IN LISTS _xr_module_dirs)
-    if(IS_DIRECTORY "${XROBOT_MODULES_DIR}/${_xr_mod}")
-      if(EXISTS "${XROBOT_MODULES_DIR}/${_xr_mod}/CMakeLists.txt")
-        message(STATUS "[XRobot] Including module: ${_xr_mod}")
-        include("${XROBOT_MODULES_DIR}/${_xr_mod}/CMakeLists.txt")
+    foreach(_xr_mod IN LISTS _xr_module_dirs)
+      if(IS_DIRECTORY "${XROBOT_MODULES_DIR}/${_xr_mod}")
+        if(EXISTS "${XROBOT_MODULES_DIR}/${_xr_mod}/CMakeLists.txt")
+          message(STATUS "[XRobot] Including module: ${_xr_mod}")
+          include("${XROBOT_MODULES_DIR}/${_xr_mod}/CMakeLists.txt")
+        endif()
       endif()
-    endif()
-  endforeach()
+    endforeach()
+  endif()
 
   get_property(_xr_module_deps GLOBAL PROPERTY XR_MODULE_DEPS)
   if(_xr_module_deps)
