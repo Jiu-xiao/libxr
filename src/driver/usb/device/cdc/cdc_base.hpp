@@ -167,7 +167,11 @@ class CDCBase : public DeviceClass
    * @return true DTR已设置
    * @return false DTR未设置
    */
-  bool IsDtrSet() const { return (control_line_state_ & CDC_CONTROL_LINE_DTR) != 0; }
+  bool IsDtrSet() const
+  {
+    return (control_line_state_.load(std::memory_order_acquire) & CDC_CONTROL_LINE_DTR) !=
+           0U;
+  }
 
   /**
    * @brief 检查RTS状态
@@ -176,7 +180,11 @@ class CDCBase : public DeviceClass
    * @return true RTS已设置
    * @return false RTS未设置
    */
-  bool IsRtsSet() const { return (control_line_state_ & CDC_CONTROL_LINE_RTS) != 0; }
+  bool IsRtsSet() const
+  {
+    return (control_line_state_.load(std::memory_order_acquire) & CDC_CONTROL_LINE_RTS) !=
+           0U;
+  }
 
   /**
    * @brief 发送串行状态通知
@@ -232,7 +240,7 @@ class CDCBase : public DeviceClass
   virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
                              bool) override
   {
-    control_line_state_ = 0;
+    control_line_state_.store(0U, std::memory_order_release);
     // 获取并配置数据IN端点
     auto ans = endpoint_pool.Get(ep_data_in_, Endpoint::Direction::IN, data_in_ep_num_);
     ASSERT(ans == ErrorCode::OK);
@@ -371,7 +379,7 @@ class CDCBase : public DeviceClass
   virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
-    control_line_state_ = 0;
+    control_line_state_.store(0U, std::memory_order_release);
     ep_data_in_->Close();
     ep_data_out_->Close();
     ep_comm_in_->Close();
@@ -507,7 +515,7 @@ class CDCBase : public DeviceClass
       case ClassRequest::SET_CONTROL_LINE_STATE:
         // 设置 DTR / RTS 状态。
         // Update the DTR / RTS control-line state.
-        control_line_state_ = wValue;
+        control_line_state_.store(wValue, std::memory_order_release);
         result.write_zlp = true;
         SendSerialState(in_isr);
         if (has_control_line_state_cb_)
@@ -715,7 +723,9 @@ class CDCBase : public DeviceClass
       { self->FillSerialState(context, fill); }, this);
   CDCLineCoding pending_line_coding_{};
   CDCLineCoding line_coding_ = {115200, 0, 0, 8};  ///< 当前线路编码 / Current line coding
-  uint16_t control_line_state_ = 0;  ///< 控制线路状态 / Control line state
+  // Public DTR/RTS queries cross the controller-owner boundary. Use the existing
+  // word-sized atomic ABI, including on Cortex-M0 and QingKe targets.
+  std::atomic<uint32_t> control_line_state_{0};
 };
 
 }  // namespace LibXR::USB

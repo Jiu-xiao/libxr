@@ -60,8 +60,10 @@ void DeviceCore<C>::Initialize(bool in_isr)
   {
     EndpointPool::HardwareScope hardware(&pool_);
     OnControlReady();
+    // An IRQ can run as soon as the hardware guard releases. Publish readiness
+    // before then, or a valid first SETUP can be discarded as uninitialized.
+    inited_.store(1U, std::memory_order_release);
   }
-  inited_.store(1U, std::memory_order_release);
 }
 
 template <typename C>
@@ -79,30 +81,30 @@ void DeviceCore<C>::Deinitialize(bool in_isr)
 template <typename C>
 void DeviceCore<C>::ProcessEvents(bool in_isr, uint32_t events)
 {
-  if (events & (RESET_EVENT | DISCONNECT_EVENT | DEINIT_EVENT))
+  if (events & LIFECYCLE_EVENTS)
   {
+    // First retire the old session; then reconcile the last published intent.
+    // DEINIT|INIT is not equivalent to DEINIT, and INIT must not get lost in an
+    // else-if branch merely because teardown was also pending.
     Deinitialize(in_isr);
-    if ((events & RESET_EVENT) && desired_enabled_.load(std::memory_order_acquire))
+    if (events & DISCONNECT_EVENT) composition_.Notify(in_isr, DeviceEvent::DISCONNECTED);
+    if (desired_enabled_.load(std::memory_order_acquire))
     {
+      if (events & RESET_EVENT)
       {
         EndpointPool::HardwareScope hardware(&pool_);
         OnControllerReset();
+        const Speed observed_speed = ReadBusSpeed();
+        if ((profile_speeds_ & SpeedBit(observed_speed)) == 0U) return;
+        speed_ = observed_speed;
+        pool_.SetSpeed(speed_);
       }
       pool_.SetSuspended(false, in_isr);
-      const Speed observed_speed = ReadBusSpeed();
-      if ((profile_speeds_ & SpeedBit(observed_speed)) == 0U) return;
-      speed_ = observed_speed;
-      pool_.SetSpeed(speed_);
       if constexpr (C::BUS_TIME) this->previous = 0xffffffffU;
       Initialize(in_isr);
-      composition_.Notify(in_isr, DeviceEvent::RESET);
+      if ((events & RESET_EVENT) && IsInited())
+        composition_.Notify(in_isr, DeviceEvent::RESET);
     }
-    if (events & DISCONNECT_EVENT) composition_.Notify(in_isr, DeviceEvent::DISCONNECTED);
-  }
-  else if ((events & INIT_EVENT) && desired_enabled_.load(std::memory_order_acquire))
-  {
-    if (IsInited()) Deinitialize(in_isr);
-    Initialize(in_isr);
   }
   if (events & 128U)
     for (size_t i = 0; i < composition_.ClassCount(); ++i)
@@ -121,10 +123,7 @@ void DeviceCore<C>::ProcessEvents(bool in_isr, uint32_t events)
   if (events & SETUP_EVENT)
   {
     SetupPacket setup;
-    if (ReadCapturedSetup(setup))
-      HandleSetup(in_isr, setup);
-    else
-      pool_.PostControl(SETUP_EVENT, in_isr);
+    if (TakeCapturedSetup(setup)) HandleSetup(in_isr, setup);
   }
   if constexpr (C::BUS_TIME)
     if (events & TIME_EVENT) DeliverBusTime(in_isr);
@@ -134,24 +133,24 @@ template <typename C>
 void DeviceCore<C>::OnSetupPacket(bool in_isr, const SetupPacket* setup)
 {
   if (setup == nullptr) return;
-  uint32_t words[2];
-  std::memcpy(words, setup, sizeof(words));
-  setup_sequence_.fetch_add(1U, std::memory_order_acq_rel);
-  setup_words_[0].store(words[0], std::memory_order_relaxed);
-  setup_words_[1].store(words[1], std::memory_order_relaxed);
-  setup_sequence_.fetch_add(1U, std::memory_order_release);
-  pool_.PostControl(SETUP_EVENT, in_isr);
+  {
+    EndpointPool::HardwareScope hardware(&pool_);
+    captured_setup_ = *setup;
+    captured_setup_pending_ = true;
+    pool_.PublishControl(SETUP_EVENT);
+  }
+  pool_.RequestService(in_isr);
 }
 
 template <typename C>
-bool DeviceCore<C>::ReadCapturedSetup(SetupPacket& setup) const
+bool DeviceCore<C>::TakeCapturedSetup(SetupPacket& setup)
 {
-  const uint32_t before = setup_sequence_.load(std::memory_order_acquire);
-  if (before & 1U) return false;
-  const uint32_t words[2] = {setup_words_[0].load(std::memory_order_relaxed),
-                             setup_words_[1].load(std::memory_order_relaxed)};
-  if (setup_sequence_.load(std::memory_order_acquire) != before) return false;
-  std::memcpy(&setup, words, sizeof(words));
+  EndpointPool::HardwareScope hardware(&pool_);
+  // A newer lifecycle request must be applied before a post-boundary SETUP.
+  // Its publication is inside the same guard as mailbox invalidation.
+  if (!captured_setup_pending_ || pool_.HasPendingControl(LIFECYCLE_EVENTS)) return false;
+  setup = captured_setup_;
+  captured_setup_pending_ = false;
   return true;
 }
 
@@ -172,7 +171,6 @@ void DeviceCore<C>::HandleSetup(bool in_isr, const SetupPacket& setup)
   setup_ = setup;
   if constexpr ((C::SPEEDS & SpeedBit(Speed::HIGH)) != 0U)
     this->other_speed_descriptor = false;
-  handled_setup_sequence_ = setup_sequence_.load(std::memory_order_acquire);
   transferred_ = 0;
   status_out_armed_ = false;
   status_out_seen_ = false;

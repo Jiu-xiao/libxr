@@ -236,9 +236,8 @@ class HID : public DeviceClass
     inited_ = true;
     last_input_length_ = 0;
     input_endpoint_.store(ep_in_, std::memory_order_release);
-    uint32_t expected = DISABLED;
-    (void)input_phase_.compare_exchange_strong(
-        expected, AVAILABLE, std::memory_order_release, std::memory_order_relaxed);
+    // Preserve any cancelled writer until it releases the input storage.
+    input_phase_.fetch_or(INPUT_ENABLED, std::memory_order_release);
   }
 
   static void OnDataOutCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
@@ -623,8 +622,6 @@ class HID : public DeviceClass
   {
     if (report.addr_ == nullptr || report.size_ == 0U || report.size_ > TX_REPORT_LEN)
       return ErrorCode::ARG_ERR;
-    Endpoint* endpoint = input_endpoint_.load(std::memory_order_acquire);
-    if (!endpoint) return ErrorCode::FAILED;
     uint32_t expected = AVAILABLE;
     if (!input_phase_.compare_exchange_strong(expected, WRITING,
                                               std::memory_order_acq_rel))
@@ -635,12 +632,15 @@ class HID : public DeviceClass
     if (!input_phase_.compare_exchange_strong(expected, READY, std::memory_order_release,
                                               std::memory_order_relaxed))
     {
-      input_phase_.store(
-          input_endpoint_.load(std::memory_order_acquire) ? AVAILABLE : DISABLED,
-          std::memory_order_release);
+      // Release only writer ownership. A concurrent Bind/ClearHALT owns the
+      // enabled bit; an old writer must not overwrite its newer decision.
+      input_phase_.fetch_and(INPUT_ENABLED, std::memory_order_acq_rel);
       return ErrorCode::FAILED;  // A reset cancelled this not-yet-published report.
     }
-    endpoint->RequestTx(in_isr);
+    // The pointer is only a perpetual-endpoint doorbell, sampled after publication.
+    // A reset may cancel this accepted report; a stale kick carries no payload.
+    if (auto* endpoint = input_endpoint_.load(std::memory_order_acquire))
+      endpoint->RequestTx(in_isr);
     return ErrorCode::OK;
   }
 
@@ -706,9 +706,7 @@ class HID : public DeviceClass
     {
       if (ep_in_ && endpoint == ep_in_->GetAddress())
       {
-        uint32_t expected = DISABLED;
-        (void)input_phase_.compare_exchange_strong(expected, AVAILABLE,
-                                                   std::memory_order_acq_rel);
+        input_phase_.fetch_or(INPUT_ENABLED, std::memory_order_release);
       }
       if (ep_out_ && endpoint == ep_out_->GetAddress())
         (void)ep_out_->ArmReceive(RX_REPORT_LEN);
@@ -717,8 +715,11 @@ class HID : public DeviceClass
   }
 
  private:
-  static constexpr uint32_t DISABLED = 0U, AVAILABLE = 1U, WRITING = 2U, READY = 3U,
-                            IN_FLIGHT = 4U, CANCEL_WRITING = 5U;
+  // Lifecycle permission and writer ownership share one publication point.
+  static constexpr uint32_t INPUT_ENABLED = 8U, INPUT_PHASE_MASK = 7U;
+  static constexpr uint32_t DISABLED = 0U, AVAILABLE = INPUT_ENABLED,
+                            WRITING = INPUT_ENABLED | 1U, READY = INPUT_ENABLED | 2U,
+                            IN_FLIGHT = INPUT_ENABLED | 3U, CANCEL_WRITING = 4U;
   std::atomic<uint32_t> input_phase_{DISABLED};
   std::atomic<Endpoint*> input_endpoint_{nullptr};
   uint8_t input_pending_[TX_REPORT_LEN]{};
@@ -732,7 +733,11 @@ class HID : public DeviceClass
   {
     uint32_t state = input_phase_.load(std::memory_order_acquire);
     while (!input_phase_.compare_exchange_weak(
-        state, state == WRITING || state == CANCEL_WRITING ? CANCEL_WRITING : DISABLED,
+        state,
+        (state & INPUT_PHASE_MASK) == (WRITING & INPUT_PHASE_MASK) ||
+                (state & INPUT_PHASE_MASK) == CANCEL_WRITING
+            ? CANCEL_WRITING
+            : DISABLED,
         std::memory_order_acq_rel))
     {
     }

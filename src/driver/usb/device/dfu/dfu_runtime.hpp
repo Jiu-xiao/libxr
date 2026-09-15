@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dfu/dfu_def.hpp"
+#include "timer.hpp"
 
 namespace LibXR::USB
 {
@@ -32,6 +33,20 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
         jump_ctx_(jump_ctx),
         default_detach_timeout_ms_(detach_timeout_ms)
   {
+    // The class and its registered Timer node have initialization lifetime.
+    // Timer only rings the controller doorbell; deadline/state stay owner-only.
+    if (jump_to_bootloader_ != nullptr)
+    {
+      auto timer = Timer::CreateTask(
+          +[](DfuRuntimeClass* self)
+          {
+            if (self->launch_phase_.load(std::memory_order_acquire) == WAITING)
+              self->RequestClassService(false);
+          },
+          this, 1U);
+      Timer::Start(timer);
+      Timer::Add(timer);
+    }
   }
 
   // Runtime DFU 只有一个延迟动作：DETACH 超时后跳到板级 bootloader 入口。
