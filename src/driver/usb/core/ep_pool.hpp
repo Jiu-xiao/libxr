@@ -3,7 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "core.hpp"
 #include "ep.hpp"
+#include "serialized_service.hpp"
 
 namespace LibXR::USB
 {
@@ -114,6 +116,83 @@ class EndpointPool
    */
   void SetEndpoint0(Endpoint* ep0_in, Endpoint* ep0_out);
 
+  using HardwareEnter = uintptr_t (*)(void*);
+  using HardwareLeave = void (*)(void*, uintptr_t);
+  void SetHardwareGuard(void* context, HardwareEnter enter, HardwareLeave leave)
+  {
+    hardware_context_ = context;
+    hardware_enter_ = enter;
+    hardware_leave_ = leave;
+  }
+
+  // Short hardware-only critical region. It must not include class callbacks or
+  // blocking work. Backends mask local IRQs and, on SMP, serialize register access.
+  class HardwareScope
+  {
+   public:
+    explicit HardwareScope(EndpointPool* pool) : pool_(pool)
+    {
+      if (pool_ && pool_->hardware_enter_)
+        token_ = pool_->hardware_enter_(pool_->hardware_context_);
+    }
+    ~HardwareScope() { Release(); }
+    HardwareScope(const HardwareScope&) = delete;
+    HardwareScope& operator=(const HardwareScope&) = delete;
+    void Release()
+    {
+      if (pool_ && pool_->hardware_leave_)
+        pool_->hardware_leave_(pool_->hardware_context_, token_);
+      pool_ = nullptr;
+    }
+
+   private:
+    EndpointPool* pool_;
+    uintptr_t token_ = 0;
+  };
+
+  // Capture the complete raw IRQ batch and clear W1C sources before callbacks can
+  // rearm the same hardware. Exiting this scope releases the hardware guard BEFORE
+  // entering ordinary controller/class work; it does not add a worker thread.
+  class InterruptScope
+  {
+   public:
+    explicit InterruptScope(EndpointPool& pool) : pool_(pool), hardware_(&pool)
+    {
+      pool_.interrupt_depth_.fetch_add(1U, std::memory_order_acq_rel);
+    }
+    ~InterruptScope()
+    {
+      hardware_.Release();
+      if (pool_.interrupt_depth_.fetch_sub(1U, std::memory_order_acq_rel) == 1U)
+        pool_.RequestService(true);
+    }
+    InterruptScope(const InterruptScope&) = delete;
+    InterruptScope& operator=(const InterruptScope&) = delete;
+
+   private:
+    EndpointPool& pool_;
+    HardwareScope hardware_;
+  };
+
+  /// Invoke synchronously if free; otherwise retain work for the current owner.
+  void RequestService(bool in_isr);
+  void SetControlHandler(Callback<uint32_t> callback) { control_handler_ = callback; }
+  void PostControl(uint32_t events, bool in_isr);
+  bool HasPendingControl() const
+  {
+    return control_pending_.load(std::memory_order_acquire) != 0U;
+  }
+  bool CurrentContextIsISR() const { return current_in_isr_; }
+  bool DataEnabled() const { return data_enabled_; }
+  void SetDataEnabled(bool enabled) { data_enabled_ = enabled; }
+  bool IsPlanning() const { return planning_; }
+  void SetPlanning(bool planning) { planning_ = planning; }
+  Speed GetSpeed() const { return speed_; }
+  void SetSpeed(Speed speed) { speed_ = speed; }
+  bool ConfigurationValid() const;
+  bool IsSuspended() const { return suspended_; }
+  void SetSuspended(bool suspended, bool in_isr);
+
  private:
   /// 方向数量（OUT=0, IN=1）/ Number of direction slots (OUT=0, IN=1)
   static constexpr size_t DIR_COUNT = 2;
@@ -139,8 +218,20 @@ class EndpointPool
   }
 
   Endpoint* slots_[SLOT_COUNT][DIR_COUNT] = {};  ///< [端点号][方向] 端点指针 / [num][dir]
-  SlotUse use_[SLOT_COUNT][DIR_COUNT] = {};      ///< 对应槽占用状态 / Per-slot usage
+  SlotUse use_[SLOT_COUNT][DIR_COUNT] = {};  ///< 对应槽占用状态 / Per-slot usage
 
+  void* hardware_context_ = nullptr;
+  HardwareEnter hardware_enter_ = nullptr;
+  HardwareLeave hardware_leave_ = nullptr;
+  std::atomic<uint32_t> interrupt_depth_{0};
+  SerializedService service_;
+  std::atomic<uint32_t> control_pending_{0};
+  Callback<uint32_t> control_handler_;
+  bool current_in_isr_ = false;
+  bool data_enabled_ = true;
+  bool planning_ = false;
+  Speed speed_ = Speed::FULL;
+  bool suspended_ = false;       ///< Controller-owner state.
   Endpoint* ep0_in_ = nullptr;   ///< 端点0 IN对象 / Endpoint 0 IN pointer
   Endpoint* ep0_out_ = nullptr;  ///< 端点0 OUT对象 / Endpoint 0 OUT pointer
 };

@@ -35,6 +35,7 @@ class CDCWriteTest : public CDCBase
                      bool in_isr) override
   {
     CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
+    GetDataInEndpoint()->SetOnTxFill(fill_cb_);
   }
 
   /**
@@ -47,13 +48,9 @@ class CDCWriteTest : public CDCBase
    */
   void OnDataOutComplete(bool in_isr, ConstRawData& data) override
   {
-    UNUSED(in_isr);
     UNUSED(data);
-    if (IsDtrSet())
-    {
-      auto ep_data_in = GetDataInEndpoint();
-      ep_data_in->Transfer(ep_data_in->MaxTransferSize());
-    }
+    GetDataInEndpoint()->RequestTx(in_isr);
+    (void)GetDataOutEndpoint()->ArmReceive(GetDataOutEndpoint()->MaxPacketSize());
   }
 
   /**
@@ -67,13 +64,17 @@ class CDCWriteTest : public CDCBase
   {
     UNUSED(in_isr);
     UNUSED(data);
-
-    if (IsDtrSet())
-    {
-      auto ep_data_in = GetDataInEndpoint();
-      ep_data_in->Transfer(ep_data_in->MaxTransferSize());
-    }
   }
+
+ private:
+  Callback<Endpoint::TxFill&> fill_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool, CDCWriteTest* self, Endpoint::TxFill& fill)
+      {
+        if (!self->IsDtrSet()) return;
+        std::memset(fill.Buffer().addr_, 0, fill.Buffer().size_);
+        fill.SetSize(fill.Buffer().size_);
+      },
+      this);
 };
 
 /**
@@ -113,7 +114,7 @@ class CDCReadTest : public CDCBase
   {
     CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
     auto ep_data_out = GetDataOutEndpoint();
-    ep_data_out->Transfer(ep_data_out->MaxTransferSize());
+    (void)ep_data_out->ArmReceive(ep_data_out->MaxTransferSize());
   }
 
   /**
@@ -129,7 +130,7 @@ class CDCReadTest : public CDCBase
     UNUSED(data);
 
     auto ep_data_out = GetDataOutEndpoint();
-    ep_data_out->Transfer(ep_data_out->MaxTransferSize());
+    (void)ep_data_out->ArmReceive(ep_data_out->MaxTransferSize());
   }
 
   /**

@@ -26,10 +26,9 @@ static void ResetEp0State(OtgHsEndpointMap& map)
   DEV_ASSERT_FROM_CALLBACK(out0 != nullptr, true);
   DEV_ASSERT_FROM_CALLBACK(in0 != nullptr, true);
 
-  out0->SetState(LibXR::USB::Endpoint::State::IDLE);
   out0->tog0_ = true;
   out0->tog1_ = false;
-  in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+
   in0->tog0_ = true;
   in0->tog1_ = false;
 
@@ -79,8 +78,6 @@ static void PrepareEp0ForSetup(OtgHsEndpointMap& map)
   // 必须先把 EP0 恢复成默认控制端点形态。
   // A fresh SETUP cancels the previous control transfer, so EP0 must be re-armed
   // to the default control endpoint shape before the setup packet is dispatched.
-  out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-  in0->SetState(LibXR::USB::Endpoint::State::IDLE);
   out0->tog0_ = true;
   out0->tog1_ = false;
   in0->tog0_ = true;
@@ -218,6 +215,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     return;
   }
 
+  USB::EndpointPool::InterruptScope interrupt_scope(*usb);
+
   auto& map = LibXR::CH32EndpointOtgHs::map_otg_hs_;
 
   // 处理顺序很重要：先恢复总线级事件，再收束 EP0 setup 仲裁，
@@ -244,17 +243,25 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
     if (INTFLAG & USBHS_UIF_BUS_RST)
     {
       USBHSD->DEV_AD = 0;
-      usb->Deinit(true);
-      usb->Init(true);
+      usb->OnBusReset(true);
       ResetEp0State(map);
       clear_mask |= USBHS_UIF_BUS_RST;
     }
 
+    if (INTFLAG & USBHS_UIF_HST_SOF)
+    {
+      const uint16_t frame = USBHSD->FRAME_NO;
+      usb->OnSof(true, frame & USBHS_SOF_FRAME_NUM,
+                 static_cast<uint8_t>((frame & USBHS_MICRO_FRAME_NUM) >> 13U));
+      clear_mask |= USBHS_UIF_HST_SOF;
+    }
+
     if (INTFLAG & USBHS_UIF_SUSPEND)
     {
-      usb->Deinit(true);
-      usb->Init(true);
-      ResetEp0State(map);
+      if (USBHSD->MIS_ST & USBHS_UMS_SUSPEND)
+        usb->OnSuspend(true);
+      else
+        usb->OnResume(true);
       clear_mask |= USBHS_UIF_SUSPEND;
     }
 
@@ -300,10 +307,12 @@ CH32USBOtgHS::CH32USBOtgHS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::HIGH,
-                      USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd,
-                      LANG_LIST, CONFIGS, uid)
+      USB::DeviceCore<USB::HighSpeedCapabilities>(
+          *this, USB::USBSpec::USB_2_1, USB::Speed::HIGH,
+          USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd, LANG_LIST, CONFIGS,
+          uid)
 {
+  ConfigureCH32USBGuard(*this);
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -346,14 +355,19 @@ CH32USBOtgHS::CH32USBOtgHS(
   }
 }
 
-LibXR::ErrorCode CH32USBOtgHS::SetAddress(uint8_t address,
-                                          USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBOtgHS::SetAddress(uint8_t address, USB::ControlContext context)
 {
-  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
+  if (context == USB::ControlContext::STATUS_IN_COMPLETE)
   {
     USBHSD->DEV_AD = address;
   }
   return LibXR::ErrorCode::OK;
+}
+
+void CH32USBOtgHS::OnControlReady()
+{
+  USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_RES_ACK;
+  if (WantsBusTime()) USBHSD->INT_EN |= USBHS_UIE_SOF_ACT;
 }
 
 void CH32USBOtgHS::Start(bool)

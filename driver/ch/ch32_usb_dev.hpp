@@ -2,6 +2,7 @@
 
 #include "ch32_usb.hpp"
 #include "ch32_usb_endpoint.hpp"
+#include "ch32_usb_guard.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/ep_pool.hpp"
@@ -10,7 +11,8 @@
 namespace LibXR
 {
 
-class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
+class CH32USBDevice : public USB::EndpointPool,
+                      public USB::DeviceCore<USB::FullSpeedCapabilities>
 {
  public:
   /**
@@ -25,14 +27,20 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
           CONFIGS,
       USB::Speed speed = USB::Speed::FULL, USB::USBSpec spec = USB::USBSpec::USB_2_1)
       : USB::EndpointPool(max_ep_num),
-        USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
-                        CONFIGS),
+        USB::DeviceCore<USB::FullSpeedCapabilities>(*this, spec, speed, packet_size, vid,
+                                                    pid, bcd, LANG_LIST, CONFIGS),
         id_(id)
   {
   }
 
-  void Init(bool in_isr) override { USB::DeviceCore::Init(in_isr); }
-  void Deinit(bool in_isr) override { USB::DeviceCore::Deinit(in_isr); }
+  void Init(bool in_isr) override
+  {
+    USB::DeviceCore<USB::FullSpeedCapabilities>::Init(in_isr);
+  }
+  void Deinit(bool in_isr) override
+  {
+    USB::DeviceCore<USB::FullSpeedCapabilities>::Deinit(in_isr);
+  }
 
   uint8_t id_;
 };
@@ -42,7 +50,8 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
 /**
  * @brief CH32 FSDEV 设备驱动 / CH32 FSDEV device driver
  */
-class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
+class CH32USBDeviceFS : public USB::EndpointPool,
+                        public USB::DeviceCore<USB::FullSpeedCapabilities>
 {
  public:
   /**
@@ -70,7 +79,9 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
+
+  void OnControlReady() override;
 
   void Start(bool in_isr) override;
   void Stop(bool in_isr) override;
@@ -85,7 +96,8 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
 /**
  * @brief CH32 OTG FS 设备驱动 / CH32 OTG FS device driver
  */
-class CH32USBOtgFS : public USB::EndpointPool, public USB::DeviceCore
+class CH32USBOtgFS : public USB::EndpointPool,
+                     public USB::DeviceCore<USB::FullSpeedCapabilities>
 {
  public:
   /**
@@ -112,7 +124,9 @@ class CH32USBOtgFS : public USB::EndpointPool, public USB::DeviceCore
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
+
+  void OnControlReady() override;
 
   void Start(bool in_isr) override;
   void Stop(bool in_isr) override;
@@ -127,7 +141,8 @@ class CH32USBOtgFS : public USB::EndpointPool, public USB::DeviceCore
 /**
  * @brief CH32 OTG HS 设备驱动 / CH32 OTG HS device driver
  */
-class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
+class CH32USBOtgHS : public USB::EndpointPool,
+                     public USB::DeviceCore<USB::HighSpeedCapabilities>
 {
  public:
   /**
@@ -167,7 +182,16 @@ class CH32USBOtgHS : public USB::EndpointPool, public USB::DeviceCore
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
+
+  USB::Speed ReadBusSpeed() const override
+  {
+    return (USBHSD->SPEED_TYPE & USBHS_USB_SPEED_TYPE) == USBHS_USB_SPEED_HIGH
+               ? USB::Speed::HIGH
+               : USB::Speed::FULL;
+  }
+
+  void OnControlReady() override;
 
   void Start(bool in_isr) override;
   void Stop(bool in_isr) override;

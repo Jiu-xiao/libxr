@@ -87,6 +87,8 @@ class DapLinkV1Class
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override;
 
   void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data) override;
+  void FillResponse(bool in_isr, Endpoint::TxFill& fill);
+  bool request_pending_ = false;
   void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data) override;
 
  private:
@@ -230,6 +232,9 @@ class DapLinkV1Class
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
+  Callback<Endpoint::TxFill&> fill_response_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool context, DapLinkV1Class* self, Endpoint::TxFill& fill)
+      { self->FillResponse(context, fill); }, this);
   LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
 
@@ -312,19 +317,22 @@ void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
   {
     // Double buffer splits RawData into two halves; ensure EP IN buffer >= 2 * MAX_RESP.
     ep_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, MAX_RESP, true});
+        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, MAX_RESP, MAX_RESP});
     ep_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
+    ep_in_->SetOnTxFill(fill_response_cb_);
   }
 
   if (ep_out_ != nullptr)
   {
     // Double buffer splits RawData into two halves; ensure EP OUT buffer >= 2 * MAX_REQ.
     ep_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, MAX_REQ, true});
+        {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, MAX_REQ, MAX_REQ});
     ep_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
   }
 
+  request_pending_ = false;
   inited_ = true;
+  if (endpoint_pool.IsPlanning()) return;
   match_mask_ = 0xFFFFFFFFu;
 
   dap_state_ = {};
@@ -372,7 +380,7 @@ void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool, bool 
   ep_in_ = nullptr;
   ep_out_ = nullptr;
 
-  swd_.Close();
+  if (!endpoint_pool.IsPlanning()) swd_.Close();
   if constexpr (JTAG_ENABLED)
   {
     if (jtag_ != nullptr)
@@ -409,39 +417,11 @@ void DapLinkV1Class<SwdPort>::OnDataInCompleteStatic(bool in_isr, DapLinkV1Class
 template <typename SwdPort>
 void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
 {
-  if (!inited_ || !ep_in_ || !ep_out_)
-  {
-    return;
-  }
-
-  const auto* REQ = static_cast<const uint8_t*>(data.addr_);
-  const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
-
-  auto tx_buff = ep_in_->GetBuffer();
-  const uint16_t RESP_CAP = static_cast<uint16_t>(tx_buff.size_);
-  const uint16_t TX_LEN = (RESP_CAP < MAX_RESP) ? RESP_CAP : MAX_RESP;
-
-  if (ep_in_->GetState() == Endpoint::State::IDLE)
-  {
-    ArmOutTransferIfIdle();
-  }
-
-  Memory::FastSet(tx_buff.addr_, 0, RESP_CAP);
-  uint16_t out_len = 0u;
-  auto ans = ProcessOneCommand(
-      in_isr, REQ, REQ_LEN, reinterpret_cast<uint8_t*>(tx_buff.addr_), RESP_CAP, out_len);
-  UNUSED(ans);
-  UNUSED(out_len);
-
-  if (ep_in_->GetState() == Endpoint::State::IDLE)
-  {
-    ep_in_->Transfer(TX_LEN);
-    ep_in_->SetActiveLength(0);
-  }
-  else
-  {
-    ep_in_->SetActiveLength(TX_LEN);
-  }
+  UNUSED(data);
+  if (!inited_ || !ep_in_ || !ep_out_) return;
+  REQUIRE(!request_pending_);
+  request_pending_ = true;
+  ep_in_->RequestTx(in_isr);
 }
 
 template <typename SwdPort>
@@ -449,31 +429,38 @@ void DapLinkV1Class<SwdPort>::OnDataInComplete(bool in_isr, LibXR::ConstRawData&
 {
   UNUSED(in_isr);
   UNUSED(data);
-
-  auto act_len = ep_in_->GetActiveLength();
-  if (act_len > 0)
-  {
-    ep_in_->Transfer(act_len);
-    ep_in_->SetActiveLength(0);
-  }
-
   ArmOutTransferIfIdle();
+}
+
+template <typename SwdPort>
+void DapLinkV1Class<SwdPort>::FillResponse(bool in_isr, Endpoint::TxFill& fill)
+{
+  if (!inited_) return;
+  if (!request_pending_)
+  {
+    ArmOutTransferIfIdle();
+    return;
+  }
+  const auto request = ep_out_->ReceiveResult();
+  request_pending_ = false;
+  Memory::FastSet(fill.Buffer().addr_, 0, MAX_RESP);
+  uint16_t length = 0;
+  const auto result = ProcessOneCommand(
+      in_isr, static_cast<const uint8_t*>(request.addr_),
+      static_cast<uint16_t>(request.size_), static_cast<uint8_t*>(fill.Buffer().addr_),
+      static_cast<uint16_t>(fill.Buffer().size_), length);
+  UNUSED(result);
+  REQUIRE(length <= MAX_RESP);
+  fill.SetSize(MAX_RESP);
 }
 
 template <typename SwdPort>
 void DapLinkV1Class<SwdPort>::ArmOutTransferIfIdle()
 {
-  if (!inited_ || !ep_out_)
-  {
+  if (!inited_ || request_pending_ || !ep_in_ || !ep_out_ || !ep_in_->CanPrepareTx())
     return;
-  }
-
-  if (ep_out_->GetState() != Endpoint::State::IDLE)
-  {
-    return;
-  }
-
-  (void)ep_out_->Transfer(ep_out_->MaxTransferSize());
+  if (ep_out_->GetState() == Endpoint::State::IDLE || ep_out_->HasReceiveResult())
+    (void)ep_out_->ArmReceive(MAX_REQ);
 }
 
 template <typename SwdPort>

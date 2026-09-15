@@ -1,8 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
-#include "double_buffer.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
@@ -11,6 +11,8 @@
 
 namespace LibXR::USB
 {
+
+class EndpointPool;
 
 /**
  * @class Endpoint
@@ -76,13 +78,14 @@ class Endpoint
    * @brief 端点状态
    *        Endpoint state
    */
-  enum class State : uint8_t
+  enum class State : uint32_t
   {
     DISABLED,  ///< 禁用 / Disabled
     IDLE,      ///< 空闲 / Idle
     BUSY,      ///< 忙 / Busy
     STALLED,   ///< 停止/挂起 / Stalled
-    ERROR      ///< 错误 / Error
+    ERROR,     ///< 错误 / Error
+    RESULT     ///< 已完成的接收仍由类消费 / Retained receive result
   };
 
   /**
@@ -130,425 +133,171 @@ class Endpoint
     return static_cast<EPNumber>(EPNumberToInt8(ep) + 1);
   }
 
-  /**
-   * @struct Config
-   * @brief 端点配置参数 / Endpoint configuration parameters
-   */
+  /** Endpoint protocol and bounded payload storage configuration. */
   struct Config
   {
-    Direction direction = Direction::OUT;   ///< 端点方向 / Endpoint direction
-    Type type = Type::BULK;                 ///< 端点类型 / Endpoint type
-    uint16_t max_packet_size = UINT16_MAX;  ///< 最大包长 / Max packet size
-    bool double_buffer = false;             ///< 是否启用双缓冲 / Enable double buffer
-    uint8_t mult = 0;  ///< 多包倍数（高带宽端点） / Multiplier (high-bandwidth)
+    Direction direction = Direction::OUT;
+    Type type = Type::BULK;
+    uint16_t max_packet_size = UINT16_MAX;
+    size_t transfer_size = 0;  ///< Zero selects the supplied storage's capacity.
+    uint8_t mult = 0;
   };
 
   /**
-   * @brief 构造函数 / Constructor
-   * @param number 端点号 / Endpoint number
-   * @param dir 允许配置的方向 / Allowed direction
-   * @param buffer 端点缓冲区 / Endpoint buffer
+   * Synchronous, state-authorized producer view. SetSize publishes stable storage
+   * before a WriteQueue scope can settle. It neither starts hardware nor callbacks.
+   * No SetSize means no work; SetSize(0) requests an ordinary zero-length TX.
    */
-  explicit Endpoint(EPNumber number, Direction dir, RawData buffer)
-      : number_(number), avail_direction_(dir), buffer_(buffer), double_buffer_(buffer)
+  class TxFill
   {
-  }
+   public:
+    TxFill(const TxFill&) = delete;
+    TxFill& operator=(const TxFill&) = delete;
+    RawData Buffer() const { return buffer_; }
+    bool CanStart() const { return can_start_; }
+    void SetSize(size_t size);
 
-  /**
-   * @brief 虚析构函数 / Virtual destructor
-   */
+   private:
+    friend class Endpoint;
+    TxFill(Endpoint& endpoint, RawData buffer, bool can_start)
+        : endpoint_(endpoint), buffer_(buffer), can_start_(can_start)
+    {
+    }
+    Endpoint& endpoint_;
+    RawData buffer_;
+    const bool can_start_;
+    bool supplied_ = false;
+    size_t size_ = 0;
+  };
+
+  explicit Endpoint(EPNumber number, Direction dir, RawData buffer);
   virtual ~Endpoint() = default;
-
   Endpoint(const Endpoint&) = delete;
   Endpoint& operator=(const Endpoint&) = delete;
 
-  /**
-   * @brief 获取端点号 / Get endpoint number
-   * @return EPNumber 端点号 / Endpoint number
-   */
   EPNumber GetNumber() const { return number_; }
-
-  /**
-   * @brief 获取允许配置的方向 / Get allowed endpoint direction
-   * @return Direction 允许方向 / Allowed direction
-   */
   Direction AvailableDirection() const { return avail_direction_; }
-
-  /**
-   * @brief 获取当前端点方向 / Get current endpoint direction
-   * @return Direction 当前方向 / Current direction
-   */
   Direction GetDirection() const
   {
-    if (state_ == State::DISABLED)
-    {
-      return AvailableDirection();
-    }
-    return config_.direction;
+    return GetState() == State::DISABLED ? avail_direction_ : config_.direction;
   }
-
-  /**
-   * @brief 获取端点地址（方向 + 号） / Get endpoint address (dir + num)
-   * @return uint8_t 端点地址 / Endpoint address
-   */
   uint8_t GetAddress() const
   {
-    if (state_ == State::DISABLED)
-    {
-      return EPNumberToInt8(number_) & 0x0F;
-    }
-    return EPNumberToAddr(number_, config_.direction);
+    return GetState() == State::DISABLED ? EPNumberToInt8(number_)
+                                         : EPNumberToAddr(number_, config_.direction);
   }
-
-  /**
-   * @brief 获取端点状态 / Get endpoint state
-   * @return State 当前状态 / Current state
-   */
-  State GetState() const { return state_; }
-
-  /**
-   * @brief 设置端点状态 / Set endpoint state
-   * @param state 状态 / State
-   */
-  void SetState(State state) { state_ = state; }
-
-  /**
-   * @brief 获取端点类型 / Get endpoint type
-   * @return Type 端点类型 / Endpoint type
-   */
+  State GetState() const { return state_.load(std::memory_order_acquire); }
   Type GetType() const { return config_.type; }
-
-  /**
-   * @brief 获取最大包长 / Get max packet size
-   * @return uint16_t 最大包长 / Max packet size
-   */
   uint16_t MaxPacketSize() const { return config_.max_packet_size; }
+  size_t MaxTransferSize() const { return capacity_; }
+  bool IsStalled() const { return GetState() == State::STALLED; }
 
-  /**
-   * @brief 是否处于 STALL 状态 / Whether endpoint is stalled
-   * @return true 已 STALL / Stalled
-   * @return false 非 STALL / Not stalled
-   */
-  bool IsStalled() const { return state_ == State::STALLED; }
+  void Configure(const Config& cfg);
+  void Close();
+  ErrorCode Stall();
+  ErrorCode ClearStall();
 
-  /**
-   * @brief 是否启用双缓冲 / Whether double buffer is enabled
-   * @return true 启用 / Enabled
-   * @return false 未启用 / Disabled
-   */
-  bool UseDoubleBuffer() const { return config_.double_buffer; }
-
-  /**
-   * @brief 获取当前可用于传输的缓冲区 / Get current transfer buffer
-   * @return RawData 缓冲区视图 / Buffer view
-   */
-  RawData GetBuffer() const
+  void SetOnTxFill(Callback<TxFill&> callback) { on_tx_fill_ = callback; }
+  void SetOnTransferCompleteCallback(Callback<ConstRawData&> callback)
   {
-    if (config_.double_buffer)
-    {
-      return {double_buffer_.ActiveBuffer(), double_buffer_.Size()};
-    }
-    else
-    {
-      return buffer_;
-    }
+    on_transfer_complete_ = callback;
   }
+  void SetOnTransferStarted(Callback<size_t> callback) { on_started_ = callback; }
+  void SetOnTransferError(Callback<ErrorCode> callback) { on_error_ = callback; }
+  void SetOnWork(Callback<> callback) { on_work_ = callback; }
 
-  /**
-   * @brief 设置传输完成回调 / Set transfer complete callback
-   * @param cb 回调函数 / Callback
-   */
-  void SetOnTransferCompleteCallback(Callback<ConstRawData&> cb)
+  /// Payload must already reside in persistent class storage before this doorbell.
+  void RequestService(bool in_isr = false);
+  void RequestTx(bool in_isr = false) { RequestService(in_isr); }
+
+  /// Owner-only receive authorization. RESULT is retained until explicit rearm.
+  ErrorCode ArmReceive(size_t size);
+  bool CanPrepareTx() const
   {
-    on_transfer_complete_ = cb;
+    return config_.direction == Direction::IN && prepared_size_ == 0U &&
+           (GetState() == State::IDLE || GetState() == State::BUSY);
   }
+  bool HasReceiveResult() const { return GetState() == State::RESULT; }
+  ConstRawData ReceiveResult() const;
 
-  /**
-   * @brief 设置当前活动缓冲区有效长度 / Set active buffer valid length
-   * @param len 有效长度 / Valid length
-   */
-  void SetActiveLength(uint16_t len) { double_buffer_.SetActiveLength(len); }
+  // Owner-only direct transfer for EP0 and class migration. No buffer can escape
+  // its controller-serialized scope; production classes should bind TxFill.
+  RawData GetBuffer() const;
+  ErrorCode Transfer(size_t size);
+  // Backend/core control-state handoff only; not an application admission API.
+  void ResetAfterHardwareStop();
+  // Control setup arbitration may retire a captured old status completion before
+  // aborting the old request. This does not start/produce a subsequent transfer.
+  void RetireCapturedCompletion(bool in_isr) { CompleteSegment(in_isr); }
+  ErrorCode TransferZLP() { return Transfer(0); }
+  void SetActiveLength(size_t size);
+  size_t GetActiveLength() const { return prepared_size_; }
 
-  /**
-   * @brief 获取当前活动缓冲区有效长度 / Get active buffer valid length
-   * @return size_t 有效长度 / Valid length
-   */
-  size_t GetActiveLength() { return double_buffer_.GetActiveLength(); }
+  /// Hardware must stop accepting more data and clear its old source before this
+  /// exact segment completion is published. Zero length is still a completion.
+  void OnTransferCompleteCallback(bool in_isr, size_t actual_size,
+                                  ErrorCode result = ErrorCode::OK);
 
-  /**
-   * @brief 返回当前最大可传输字节数 / Return maximum transferable size at this time
-   * @return size_t 最大可传输字节数 / Maximum transferable bytes
-   */
-  virtual size_t MaxTransferSize() const { return MaxPacketSize(); }
-
-  /**
-   * @brief 配置端点协议参数 / Configure endpoint protocol parameters
-   * @param cfg 配置参数 / Configuration parameters
-   */
-  virtual void Configure(const Config& cfg) = 0;
-
-  /**
-   * @brief 关闭端点 / Close endpoint
-   */
-  virtual void Close() = 0;
-
-  /**
-   * @brief 置 STALL / Stall endpoint
-   * @return ErrorCode 错误码 / Error code
-   */
-  virtual ErrorCode Stall() = 0;
-
-  /**
-   * @brief 清除 STALL / Clear stall
-   * @return ErrorCode 错误码 / Error code
-   */
-  virtual ErrorCode ClearStall() = 0;
-
-  /**
-   * @brief 启动一次传输 / Start a transfer
-   * @param size 传输长度 / Transfer size
-   * @return ErrorCode 错误码 / Error code
-   */
-  virtual ErrorCode Transfer(size_t size) = 0;
-
-  /**
-   * @brief Bulk 多包传输辅助接口 / Helper for multi-packet bulk transfer
-   * @param data 应用层缓冲区（IN：待发送数据；OUT：接收缓冲区） / App buffer (IN: data to
-   * send; OUT: receive buffer)
-   * @return ErrorCode 错误码 / Error code
-   */
-  virtual ErrorCode TransferMultiBulk(RawData& data)
-  {
-    auto ep_buf = GetBuffer();
-    size_t max_chunk = MaxTransferSize();
-
-    ASSERT(max_chunk > 0);
-
-    // 单包就能搞定的情况：不进入 multi-bulk 状态机，保持原有行为
-    if (data.size_ <= max_chunk)
-    {
-      if (GetDirection() == Direction::IN)
-      {
-        multi_bulk_ = false;
-        multi_bulk_remain_ = 0;
-        multi_bulk_data_ = {nullptr, 0};
-
-        auto src = static_cast<const uint8_t*>(data.addr_);
-        auto dst = static_cast<uint8_t*>(ep_buf.addr_);
-        Memory::FastCopy(dst, src, data.size_);
-
-        return Transfer(data.size_);
-      }
-
-      // OUT：接收——为了把数据回填到 data，单包也走 multi-bulk
-      if (GetDirection() == Direction::OUT)
-      {
-        multi_bulk_ = true;
-        multi_bulk_data_ = data;
-        multi_bulk_remain_ = data.size_;  // OUT: 剩余可写容量
-        return Transfer(data.size_);
-      }
-
-      return ErrorCode::ARG_ERR;
-    }
-
-    // 需要多包处理的情况
-    multi_bulk_ = true;
-    multi_bulk_data_ = data;          // 应用层 buffer 指针 + 最大容量 / 逻辑总长
-    multi_bulk_remain_ = data.size_;  // IN: 剩余待发送；OUT: 剩余可写容量
-
-    // 第一包大小
-    size_t first = max_chunk;
-    if (first > multi_bulk_remain_)
-    {
-      first = multi_bulk_remain_;
-    }
-
-    if (GetDirection() == Direction::IN)
-    {
-      // IN：发送时，先把第一 chunk 拷到 EP buffer
-      auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_);
-      auto dst = static_cast<uint8_t*>(ep_buf.addr_);
-      Memory::FastCopy(dst, src, first);
-
-      multi_bulk_remain_ -= first;  // 已经准备好 first 字节要发
-    }
-    // OUT：接收时，先启动一次接收，稍后在回调里拷贝到 multi_bulk_data_
-
-    return Transfer(first);
-  }
-
-  /**
-   * @brief 发送/接收 ZLP（零长度包） / Transfer zero length packet (ZLP)
-   * @return ErrorCode 错误码 / Error code
-   */
-  virtual ErrorCode TransferZLP() { return Transfer(0); }
-
-  /**
-   * @brief 由底层在传输完成时调用 / Called by low-level driver when transfer completes
-   * @param in_isr 是否在中断上下文 / Whether in ISR context
-   * @param actual_transfer_size 实际传输长度 / Actual transferred size
-   */
-  void OnTransferCompleteCallback(bool in_isr, size_t actual_transfer_size)
-  {
-    if (GetState() != State::BUSY)
-    {
-      return;
-    }
-
-    bool callback_uses_app_buffer = false;
-    bool out_switched_before_cb = false;
-
-    const Direction DIR = GetDirection();
-    const size_t MAX_CHUNK = MaxTransferSize();
-    const bool DB = UseDoubleBuffer();
-
-    if (multi_bulk_)
-    {
-      if (DIR == Direction::IN)
-      {
-        if (multi_bulk_remain_ > 0)
-        {
-          auto ep_buf = GetBuffer();  // 此时应是“下一块 Active”（因为 Transfer 已切换）
-          const size_t SENT = multi_bulk_data_.size_ - multi_bulk_remain_;
-
-          size_t chunk = MAX_CHUNK;
-          if (chunk > multi_bulk_remain_) chunk = multi_bulk_remain_;
-
-          auto src = static_cast<const uint8_t*>(multi_bulk_data_.addr_) + SENT;
-          auto dst = static_cast<uint8_t*>(ep_buf.addr_);
-          Memory::FastCopy(dst, src, chunk);
-          multi_bulk_remain_ -= chunk;
-
-          SetState(State::IDLE);
-          (void)Transfer(chunk);
-          return;
-        }
-
-        // 结束：对上层报告 app buffer
-        multi_bulk_ = false;
-        callback_uses_app_buffer = true;
-        actual_transfer_size = multi_bulk_data_.size_;
-      }
-      else
-      {
-        // OUT：完成时 Active 里是数据
-        auto ep_buf = GetBuffer();
-        size_t prev_remain = multi_bulk_remain_;
-        size_t recvd = actual_transfer_size;
-        if (recvd > prev_remain)
-        {
-          recvd = prev_remain;
-        }
-
-        const size_t OFFSET = multi_bulk_data_.size_ - prev_remain;
-
-        auto dst = static_cast<uint8_t*>(multi_bulk_data_.addr_) + OFFSET;
-        auto src = static_cast<const uint8_t*>(ep_buf.addr_);
-        Memory::FastCopy(dst, src, recvd);
-
-        multi_bulk_remain_ = prev_remain - recvd;
-
-        const bool SHORT_PACKET = (recvd < MAX_CHUNK);
-        const bool BUFFER_FULL = (multi_bulk_remain_ == 0);
-
-        if (DB)
-        {
-          SwitchBuffer();  // 切换后 Pending = 刚接收的包；Active = 下次用
-          out_switched_before_cb = true;
-        }
-
-        if (!SHORT_PACKET && !BUFFER_FULL)
-        {
-          size_t chunk = MAX_CHUNK;
-          if (chunk > multi_bulk_remain_)
-          {
-            chunk = multi_bulk_remain_;
-          }
-
-          SetState(State::IDLE);
-          (void)Transfer(chunk);  // 下一包将落到新的 Active（
-          return;
-        }
-
-        multi_bulk_ = false;
-        callback_uses_app_buffer = true;
-        actual_transfer_size = multi_bulk_data_.size_ - multi_bulk_remain_;
-      }
-    }
-
-    // 非 multi-bulk：OUT 也必须“回调前切换”
-    if (!multi_bulk_ && DB && DIR == Direction::OUT && !out_switched_before_cb)
-    {
-      SwitchBuffer();
-      out_switched_before_cb = true;
-    }
-
-    SetState(State::IDLE);
-
-    ConstRawData data;
-    if (callback_uses_app_buffer)
-    {
-      data = ConstRawData(multi_bulk_data_.addr_, actual_transfer_size);
-    }
-    else
-    {
-      if (DB)
-      {
-        // 回调里永远取 Pending = 刚刚完成的那包（IN/OUT 一致）
-        data = ConstRawData(double_buffer_.PendingBuffer(), actual_transfer_size);
-      }
-      else
-      {
-        data = ConstRawData(buffer_.addr_, actual_transfer_size);
-      }
-    }
-
-    on_transfer_complete_.Run(in_isr, data);
-  }
+  /// Backend-visible snapshot of the one armed segment, not the writable buffer.
+  RawData TransferBuffer() const { return transfer_buffer_; }
+  size_t SegmentSize() const { return segment_size_; }
 
  protected:
-  /**
-   * @brief 获取当前配置引用 / Get endpoint config reference
-   * @return Config& 配置引用 / Configuration reference
-   */
   Config& GetConfig() { return config_; }
-
-  /**
-   * @brief 切换双缓冲 / Switch double buffer
-   */
-  virtual void SwitchBuffer()
-  {
-    double_buffer_.EnablePending();
-    double_buffer_.Switch();
-  }
-
-  /**
-   * @brief 设置当前活动缓冲块 / Set active buffer block
-   * @param active_block true 使用第二块；false 使用第一块 / true selects second block;
-   * false selects first block
-   */
-  virtual void SetActiveBlock(bool active_block)
-  {
-    double_buffer_.SetActiveBlock(active_block);
-    double_buffer_.EnablePending();
-  }
+  RawData HardwareBuffer() const { return hardware_buffer_; }
+  void SetState(State state) { state_.store(state, std::memory_order_release); }
+  bool IsPlanning() const;
+  void RequireStaging() { fixed_hardware_buffer_ = true; }
+  virtual void ConfigureHardware(const Config& cfg) = 0;
+  virtual void CloseHardware() = 0;
+  virtual ErrorCode StallHardware() = 0;
+  virtual ErrorCode ClearStallHardware() = 0;
+  virtual ErrorCode StartHardware(RawData buffer, size_t size) = 0;
+  virtual size_t MaxHardwareTransferSize() const { return MaxPacketSize(); }
 
  private:
-  LibXR::Callback<LibXR::ConstRawData&>
-      on_transfer_complete_;  ///< 传输完成回调 / Transfer complete callback
+  friend class EndpointPool;
+  void Attach(EndpointPool& pool) { pool_ = &pool; }
+  void Service(bool in_isr, bool force = false);
+  void DriveTx(bool in_isr);
+  void CompleteSegment(bool in_isr);
+  void ResetTransfer();
+  void InitializeStorage(size_t required);
+  bool CanProgress() const;
+  ErrorCode StartPrepared();
+  ErrorCode StartSegment();
+  ErrorCode StartZero();
+  RawData PayloadBuffer() const;
 
-  EPNumber number_;                    ///< 端点号 / Endpoint number
-  Direction avail_direction_;          ///< 可配置方向 / Allowed direction
-  Config config_;                      ///< 当前配置 / Current configuration
-  State state_ = State::DISABLED;      ///< 当前状态 / Current state
-  LibXR::RawData buffer_;              ///< 端点缓冲区 / Endpoint buffer
-  LibXR::DoubleBuffer double_buffer_;  ///< 双缓冲管理 / Double buffer manager
+  EPNumber number_;
+  Direction avail_direction_;
+  Config config_;
+  std::atomic<State> state_{State::DISABLED};
+  EndpointPool* pool_ = nullptr;
+  RawData hardware_buffer_;
+  uint8_t* storage_ = nullptr;
+  size_t capacity_ = 0;
+  bool storage_initialized_ = false;
+  bool fixed_hardware_buffer_ = false;
+  uint8_t current_buffer_ = 1;
+  size_t active_size_ = 0;
+  size_t prepared_size_ = 0;
+  size_t completed_size_ = 0;
+  size_t segment_size_ = 0;
+  RawData transfer_buffer_{nullptr, 0};
+  bool hardware_active_ = false;
 
-  bool multi_bulk_ = false;  ///< 多包 bulk 状态机使能 / Multi-bulk state enabled
-  RawData multi_bulk_data_;  ///< 多包 bulk 应用层 buffer / App buffer for multi-bulk
-  size_t multi_bulk_remain_ =
-      0;  ///< 多包 bulk 剩余字节数 / Remaining bytes for multi-bulk
+  // A controller IRQ is the only producer, the controller owner is the consumer.
+  // Word-sized publication avoids byte-atomic runtime ABIs on Cortex-M0.
+  std::atomic<uint32_t> completion_ready_{0};
+  size_t completion_size_ = 0;
+  ErrorCode completion_result_ = ErrorCode::OK;
+  std::atomic<uint32_t> work_pending_{0};
+  Callback<size_t> on_started_;
+  Callback<TxFill&> on_tx_fill_;
+  Callback<ConstRawData&> on_transfer_complete_;
+  Callback<ErrorCode> on_error_;
+  Callback<> on_work_;
 };
 
 }  // namespace LibXR::USB

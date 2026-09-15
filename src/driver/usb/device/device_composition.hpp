@@ -73,6 +73,20 @@ class DeviceComposition
    *        Build the current configuration descriptor cache.
    */
   ErrorCode BuildConfigDescriptor();
+  ErrorCode PrepareDescriptors(uint32_t speeds, bool in_isr);
+  ConstRawData GetConfigDescriptor(size_t index, Speed speed) const;
+  size_t ControlReceiveCapacity() const;
+  ConfigDescriptorItem* ConfigItem(size_t config, size_t item) const
+  {
+    return items_[config].items[item];
+  }
+  size_t ConfigItemCount(size_t config) const { return items_[config].item_num; }
+  size_t ClassCount() const { return class_count_; }
+  DeviceClass* ClassAt(size_t index) const { return classes_[index]; }
+  void Notify(bool in_isr, DeviceEvent event, uint8_t endpoint = 0);
+  void NotifyBusTime(bool in_isr, const BusTime& time);
+  bool WantsBusTime() const;
+  bool ContainsActiveClass(const DeviceClass* item) const;
 
   /**
    * @brief 获取当前 configuration 描述符缓存
@@ -83,13 +97,10 @@ class DeviceComposition
   /**
    * @brief 获取当前 BOS 描述符缓存 / Get the current BOS descriptor cache
    */
-  [[nodiscard]] ConstRawData GetBosDescriptor();
 
   /**
    * @brief 分发 BOS vendor request / Dispatch BOS vendor requests
    */
-  ErrorCode ProcessBosVendorRequest(bool in_isr, const SetupPacket* setup,
-                                    BosVendorResult& result);
 
   /**
    * @brief 获取字符串描述符（含 interface string）
@@ -156,7 +167,6 @@ class DeviceComposition
    * @brief 按当前配置重建 BOS capability 缓存
    *        Rebuild the BOS capability cache from the active configuration.
    */
-  void RebuildBosCache();
 
   /**
    * @brief 为所有 class 分配并登记 interface string 索引
@@ -192,7 +202,14 @@ class DeviceComposition
       0;  ///< 接口字符串总数量 / Total interface string count
   RawData interface_string_buffer_{
       nullptr, 0};  ///< 临时字符串描述符缓冲区 / Temp interface string descriptor buffer
-  BosManager bos_;  ///< BOS 聚合管理 / BOS aggregation manager
+  struct DescriptorCache
+  {
+    RawData data{nullptr, 0};
+    size_t size = 0;
+  };
+  DescriptorCache* descriptors_ = nullptr;
+  uint32_t descriptor_speeds_ = 0;
+  bool descriptors_prepared_ = false;
   ConfigDescriptor config_desc_;  ///< 配置描述符构造器 / Configuration descriptor builder
 };
 

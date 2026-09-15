@@ -11,6 +11,8 @@ LibXR::ErrorCode EndpointPool::Put(Endpoint* ep)
     return LibXR::ErrorCode::ARG_ERR;
   }
 
+  ep->Attach(*this);
+
   const auto ep_num = static_cast<size_t>(ep->GetNumber());
   if (ep_num >= SLOT_COUNT)
   {
@@ -161,4 +163,64 @@ void EndpointPool::SetEndpoint0(Endpoint* ep0_in, Endpoint* ep0_out)
 {
   ep0_in_ = ep0_in;
   ep0_out_ = ep0_out;
+  if (ep0_in_) ep0_in_->Attach(*this);
+  if (ep0_out_) ep0_out_->Attach(*this);
+}
+
+void EndpointPool::PostControl(uint32_t events, bool in_isr)
+{
+  control_pending_.fetch_or(events, std::memory_order_release);
+  RequestService(in_isr);
+}
+
+void EndpointPool::RequestService(bool in_isr)
+{
+  if (interrupt_depth_.load(std::memory_order_acquire) != 0U)
+  {
+    service_.Publish(1U);
+    return;
+  }
+  service_.Invoke(1U, in_isr,
+                  [this](uint32_t, bool current_isr)
+                  {
+                    if (interrupt_depth_.load(std::memory_order_acquire) != 0U) return;
+                    current_in_isr_ = current_isr;
+                    const uint32_t events =
+                        control_pending_.exchange(0U, std::memory_order_acq_rel);
+                    if (events != 0U) control_handler_.Run(current_isr, events);
+                    if (HasPendingControl()) return;
+                    if (ep0_out_) ep0_out_->Service(current_isr, (events & 63U) != 0U);
+                    if (!HasPendingControl() && ep0_in_)
+                      ep0_in_->Service(current_isr, (events & 63U) != 0U);
+                    for (size_t n = 1; n < SLOT_COUNT && !HasPendingControl(); ++n)
+                    {
+                      for (size_t d = 0; d < DIR_COUNT && !HasPendingControl(); ++d)
+                      {
+                        auto* ep = slots_[n][d];
+                        if (ep && (d == 0U || ep != slots_[n][0]))
+                          ep->Service(current_isr, (events & 63U) != 0U);
+                      }
+                    }
+                  });
+}
+
+void EndpointPool::SetSuspended(bool suspended, bool in_isr)
+{
+  suspended_ = suspended;
+  if (!suspended)
+  {
+    for (size_t n = 1; n < SLOT_COUNT; ++n)
+      for (size_t d = 0; d < DIR_COUNT; ++d)
+        if (slots_[n][d]) slots_[n][d]->RequestService(in_isr);
+  }
+}
+
+bool EndpointPool::ConfigurationValid() const
+{
+  for (size_t n = 1; n < SLOT_COUNT; ++n)
+    for (size_t d = 0; d < DIR_COUNT; ++d)
+      if (use_[n][d] == SlotUse::IN_USE && slots_[n][d] &&
+          slots_[n][d]->GetState() == Endpoint::State::ERROR)
+        return false;
+  return true;
 }

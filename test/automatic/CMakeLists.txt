@@ -207,3 +207,9 @@ add_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xrobot_freshness.cmake"
 )
 set_tests_properties(xrobot_freshness PROPERTIES TIMEOUT 60)
+# Real Endpoint/CDC/RW code; only the hardware segment is controlled by the test.
+add_executable(test_usb_endpoint driver/usb/core/test_endpoint.cpp)
+target_link_libraries(test_usb_endpoint PRIVATE xr)
+target_include_directories(test_usb_endpoint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_endpoint COMMAND test_usb_endpoint)
+set_tests_properties(usb_endpoint PROPERTIES TIMEOUT 30)

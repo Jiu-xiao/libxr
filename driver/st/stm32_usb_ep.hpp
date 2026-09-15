@@ -27,18 +27,19 @@ class STM32Endpoint : public USB::Endpoint
                 LibXR::RawData buffer);
 #endif
 
-  void Configure(const Config& cfg) override;
-  void Close() override;
-  ErrorCode Transfer(size_t size) override;
+  void ConfigureHardware(const Config& cfg) override;
+  void CloseHardware() override;
+  ErrorCode StartHardware(RawData buffer, size_t size) override;
 
-  ErrorCode Stall() override;
-  ErrorCode ClearStall() override;
+  ErrorCode StallHardware() override;
+  ErrorCode ClearStallHardware() override;
 
-  size_t MaxTransferSize() const override;
+  size_t MaxHardwareTransferSize() const override;
 
   PCD_HandleTypeDef* hpcd_;
 
   size_t last_transfer_size_ = 0;
+  RawData hardware_transfer_{nullptr, 0};
 
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   size_t fifo_size_ = 0;

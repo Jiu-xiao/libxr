@@ -19,15 +19,13 @@ class CH32EndpointOtgFs : public USB::Endpoint
   CH32EndpointOtgFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
                     bool single_direction);
 
-  void Configure(const Config& cfg) override;
-  void Close() override;
-  ErrorCode Transfer(size_t size) override;
+  void ConfigureHardware(const Config& cfg) override;
+  void CloseHardware() override;
+  ErrorCode StartHardware(RawData buffer, size_t size) override;
 
   void TransferComplete(size_t size);
-  ErrorCode Stall() override;
-  ErrorCode ClearStall() override;
-
-  void SwitchBuffer() override;
+  ErrorCode StallHardware() override;
+  ErrorCode ClearStallHardware() override;
 
   bool tog_ = false;
   bool is_isochronous_ = false;
@@ -35,6 +33,7 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
   size_t last_transfer_size_ = 0;
   RawData dma_buffer_;
+  RawData transfer_dma_{nullptr, 0};
 
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
   static inline CH32EndpointOtgFs* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
@@ -53,18 +52,16 @@ class CH32EndpointDevFs : public USB::Endpoint
   CH32EndpointDevFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
                     bool is_isochronous);
 
-  void Configure(const Config& cfg) override;
-  void Close() override;
-  ErrorCode Transfer(size_t size) override;
+  void ConfigureHardware(const Config& cfg) override;
+  void CloseHardware() override;
+  ErrorCode StartHardware(RawData buffer, size_t size) override;
 
   void TransferComplete(size_t size);
 
   void CopyRxDataToBuffer(size_t size);
 
-  ErrorCode Stall() override;
-  ErrorCode ClearStall() override;
-
-  void SwitchBuffer() override;
+  ErrorCode StallHardware() override;
+  ErrorCode ClearStallHardware() override;
 
   static void ResetPMAAllocator();
   static void SetEpTxStatus(uint8_t ep, uint16_t status);
@@ -96,23 +93,21 @@ class CH32EndpointOtgHs : public USB::Endpoint
   CH32EndpointOtgHs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
                     bool double_buffer);
 
-  void Configure(const Config& cfg) override;
-  void Close() override;
-  ErrorCode Transfer(size_t size) override;
+  void ConfigureHardware(const Config& cfg) override;
+  void CloseHardware() override;
+  ErrorCode StartHardware(RawData buffer, size_t size) override;
 
   void TransferComplete(size_t size);
-  ErrorCode Stall() override;
-  ErrorCode ClearStall() override;
-
-  void SwitchBuffer() override;
+  ErrorCode StallHardware() override;
+  ErrorCode ClearStallHardware() override;
 
   uint8_t dev_id_;
   bool tog0_ = false;
   bool tog1_ = false;
-  bool hw_double_buffer_ = false;
 
   size_t last_transfer_size_ = 0;
   RawData dma_buffer_;
+  RawData transfer_dma_{nullptr, 0};
 
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
   static inline CH32EndpointOtgHs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
