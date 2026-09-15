@@ -3,12 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "device_events.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/desc_cfg.hpp"
 
 namespace LibXR::USB
 {
 class DeviceComposition;
+template <typename Capabilities>
 class DeviceCore;
 
 /**
@@ -54,7 +56,27 @@ class DeviceClass : public ConfigDescriptorItem
     return nullptr;
   }
 
+  virtual void OnService(bool in_isr) { UNUSED(in_isr); }
+  virtual size_t GetControlReceiveCapacity() const { return 64U; }
+  virtual bool WantsBusTime() const { return false; }
+  virtual void OnBusTime(bool in_isr, const BusTime& time)
+  {
+    UNUSED(in_isr);
+    UNUSED(time);
+  }
+  virtual void OnDeviceEvent(bool in_isr, DeviceEvent event, uint8_t endpoint = 0)
+  {
+    UNUSED(in_isr);
+    UNUSED(event);
+    UNUSED(endpoint);
+  }
+
  protected:
+  void RequestClassService(bool in_isr = false)
+  {
+    if (service_pool_) service_pool_->PostControl(128U, in_isr);
+  }
+
   /**
    * @brief 返回已分配的接口字符串索引
    *        Return the assigned USB string index for a local interface.
@@ -75,8 +97,8 @@ class DeviceClass : public ConfigDescriptorItem
                                     ///< stage buffer (Host->Device)
     ConstRawData write_data{nullptr, 0};  ///< IN 数据阶段发送数据（Device->Host）/ IN
                                           ///< data stage payload (Device->Host)
-    bool read_zlp = false;   ///< 期望 STATUS OUT（arm OUT 等待 ZLP）/ Expect STATUS OUT
-                             ///< (arm OUT for ZLP)
+    bool read_zlp = false;  ///< 期望 STATUS OUT（arm OUT 等待 ZLP）/ Expect STATUS OUT
+                            ///< (arm OUT for ZLP)
     bool write_zlp = false;  ///< 发送 STATUS IN（发送 ZLP）/ Send STATUS IN (send ZLP)
 
     RawData& OutData() { return read_data; }
@@ -197,13 +219,42 @@ class DeviceClass : public ConfigDescriptorItem
     return ErrorCode::NOT_SUPPORT;
   }
 
+  virtual ErrorCode OnControlRequest(bool in_isr, const SetupPacket& setup,
+                                     ControlTransferResult& result)
+  {
+    if ((setup.bmRequestType & REQ_TYPE_MASK) ==
+        static_cast<uint8_t>(RequestType::VENDOR))
+      return OnVendorRequest(in_isr, setup.bRequest, setup.wValue, setup.wLength,
+                             setup.wIndex, result);
+    return OnClassRequest(in_isr, setup.bRequest, setup.wValue, setup.wLength,
+                          setup.wIndex, result);
+  }
+  virtual ErrorCode OnControlData(bool in_isr, const SetupPacket& setup,
+                                  ConstRawData& data)
+  {
+    if ((setup.bmRequestType & REQ_DIRECTION_MASK) != 0U) return ErrorCode::OK;
+    return OnClassData(in_isr, setup.bRequest, data);
+  }
+  virtual void OnControlComplete(bool in_isr, const SetupPacket& setup)
+  {
+    if ((setup.bmRequestType & REQ_DIRECTION_MASK) != 0U)
+      OnClassInDataStatusComplete(in_isr, setup.bRequest);
+  }
+  virtual void OnControlAbort(bool in_isr, const SetupPacket& setup)
+  {
+    UNUSED(in_isr);
+    UNUSED(setup);
+  }
+
  private:
   // These helpers are driven by DeviceComposition during initialization-time string
   // registration and are not part of the public class contract.
   // 这些辅助函数只在初始化期由 DeviceComposition 调用，不属于对外类接口。
   void SetInterfaceStringBaseIndex(uint8_t string_index);
 
+  EndpointPool* service_pool_ = nullptr;  // Immutable after composition construction.
   friend class DeviceComposition;
+  template <typename Capabilities>
   friend class DeviceCore;
 
   uint8_t interface_string_base_index_ =

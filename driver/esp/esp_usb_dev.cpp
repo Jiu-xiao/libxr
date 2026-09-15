@@ -30,9 +30,24 @@ ESP32USBDevice::ESP32USBDevice(
         configs,
     ConstRawData uid)
     : USB::EndpointPool(ep_cfgs.size() * 2U),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
-                      pid, bcd, lang_list, configs, uid)
+      USB::DeviceCore<USB::FullSpeedCapabilities>(*this, USB::USBSpec::USB_2_1,
+                                                  USB::Speed::FULL, packet_size, vid, pid,
+                                                  bcd, lang_list, configs, uid)
 {
+  SetHardwareGuard(
+      this,
+      [](void* context) -> uintptr_t
+      {
+        auto* self = static_cast<ESP32USBDevice*>(context);
+        portENTER_CRITICAL_SAFE(&self->hardware_mux_);
+        return 0;
+      },
+      [](void* context, uintptr_t)
+      {
+        auto* self = static_cast<ESP32USBDevice*>(context);
+        portEXIT_CRITICAL_SAFE(&self->hardware_mux_);
+      });
+  ResetFifoState();
   ASSERT(ep_cfgs.size() > 0U && ep_cfgs.size() <= ENDPOINT_COUNT);
 
   auto cfg_it = ep_cfgs.begin();
@@ -54,10 +69,13 @@ ESP32USBDevice::ESP32USBDevice(
 
     if (cfg_it->direction_hint == EPConfig::DirectionHint::BothDirections)
     {
+      const size_t half = cfg_it->buffer.size_ / 2U;
+      REQUIRE(half >= 8U && (half % 4U) == 0U);
       auto* ep_out = new ESP32USBEndpoint(*this, ep_num, USB::Endpoint::Direction::OUT,
-                                          cfg_it->buffer);
-      auto* ep_in = new ESP32USBEndpoint(*this, ep_num, USB::Endpoint::Direction::IN,
-                                         cfg_it->buffer);
+                                          {cfg_it->buffer.addr_, half});
+      auto* ep_in = new ESP32USBEndpoint(
+          *this, ep_num, USB::Endpoint::Direction::IN,
+          {static_cast<uint8_t*>(cfg_it->buffer.addr_) + half, half});
       endpoint_map_.out[USB::Endpoint::EPNumberToInt8(ep_num)] = ep_out;
       endpoint_map_.in[USB::Endpoint::EPNumberToInt8(ep_num)] = ep_in;
       Put(ep_out);
@@ -84,19 +102,19 @@ ESP32USBDevice::ESP32USBDevice(
 
 void ESP32USBDevice::Init(bool in_isr)
 {
-  // 每次重新 Init 前先重置 FIFO 账本，避免复用旧的分配状态 / Reset FIFO bookkeeping
-  // before each re-init so stale allocation state is not reused.
-  ResetFifoState();
-  USB::DeviceCore::Init(in_isr);
+  USB::DeviceCore<USB::FullSpeedCapabilities>::Init(in_isr);
 }
 
-void ESP32USBDevice::Deinit(bool in_isr) { USB::DeviceCore::Deinit(in_isr); }
+void ESP32USBDevice::Deinit(bool in_isr)
+{
+  USB::DeviceCore<USB::FullSpeedCapabilities>::Deinit(in_isr);
+}
 
 // 地址只在 SETUP status 之前写入硬件，保持 control-transfer 时序正确 / Write the device
 // address only at the setup-before-status point to preserve control-transfer timing.
-ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::DeviceCore::Context context)
+ErrorCode ESP32USBDevice::SetAddress(uint8_t address, USB::ControlContext context)
 {
-  if (context == USB::DeviceCore::Context::SETUP_BEFORE_STATUS)
+  if (context == USB::ControlContext::SETUP_BEFORE_STATUS)
   {
     auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
     dev->dcfg_reg.devaddr = address;
@@ -123,8 +141,8 @@ void ESP32USBDevice::Start(bool)
   InitializeCore();
   if (IsInited())
   {
-    USB::DeviceCore::Deinit(false);
-    USB::DeviceCore::Init(false);
+    USB::DeviceCore<USB::FullSpeedCapabilities>::Deinit(false);
+    USB::DeviceCore<USB::FullSpeedCapabilities>::Init(false);
   }
 
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
@@ -284,6 +302,7 @@ void ESP32USBDevice::InitializeCore()
   dev->gintmsk_reg.oepintmsk = 1;
   dev->gintmsk_reg.iepintmsk = 1;
   dev->gintmsk_reg.otgintmsk = 1;
+  if (WantsBusTime()) dev->gintmsk_reg.val |= 1U << 3U;
 }
 
 void ESP32USBDevice::ClearTxFifoRegisters()
@@ -404,6 +423,7 @@ void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
 
 void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
+  USB::EndpointPool::InterruptScope interrupt_scope(*this);
   // 统一从 gintsts & gintmsk 取当前批次待处理中断，并在有限 guard 内排空 / Pull one
   // interrupt batch from gintsts & gintmsk and drain it under a bounded guard.
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
@@ -417,10 +437,16 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
       break;
     }
 
+    if (pending.sof)
+    {
+      dev->gintsts_reg.val = 1U << 3U;
+      OnSof(true, static_cast<uint16_t>((dev->dsts_reg.val >> 8U) & 0x7ffU));
+    }
     if (pending.usbrst)
     {
       dev->gintsts_reg.usbrst = 1;
       HandleBusReset(true);
+      continue;
     }
 
     if (pending.enumdone)
@@ -437,11 +463,13 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
     if (pending.usbsusp)
     {
       dev->gintsts_reg.usbsusp = 1;
+      OnSuspend(true);
     }
 
     if (pending.wkupint)
     {
       dev->gintsts_reg.wkupint = 1;
+      OnResume(true);
     }
 
     if (!DmaEnabled() && pending.rxflvl)
@@ -527,18 +555,10 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
   dev->diepmsk_reg.timeoutmsk = 1;
 
   FlushFifos();
-  ResetDeviceState();
-  ResetEndpointHardwareState();
 
   dev->dcfg_reg.devaddr = 0U;
 
-  if (IsInited())
-  {
-    Deinit(in_isr);
-    Init(in_isr);
-  }
-
-  ReloadSetupPacketCount();
+  OnBusReset(in_isr);
 }
 
 void ESP32USBDevice::HandleEndpointInterrupt(bool in_isr, bool in_dir)
@@ -730,4 +750,15 @@ bool ESP32USBDevice::EnsureRxFifo(uint16_t packet_size)
 
 }  // namespace LibXR
 
+#endif
+
+#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    CONFIG_IDF_TARGET_ESP32S3
+void LibXR::ESP32USBDevice::OnControllerReset()
+{
+  ResetDeviceState();
+  ResetEndpointHardwareState();
+  ResetFifoState();
+}
+void LibXR::ESP32USBDevice::OnControlReady() { ReloadSetupPacketCount(); }
 #endif

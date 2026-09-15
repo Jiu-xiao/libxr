@@ -316,7 +316,7 @@ CH32EndpointDevFs::CH32EndpointDevFs(EPNumber ep_num, Direction dir,
   map_dev_fs_[EP_I][static_cast<uint8_t>(dir)] = this;
 }
 
-void CH32EndpointDevFs::Configure(const Config& cfg)
+void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
 {
   ASSERT(cfg.direction == Direction::IN || cfg.direction == Direction::OUT);
   ASSERT(cfg.direction == GetDirection());
@@ -332,7 +332,7 @@ void CH32EndpointDevFs::Configure(const Config& cfg)
     packet_size_limit = 1023;
   }
 
-  const auto BUF = GetBuffer();
+  const auto BUF = HardwareBuffer();
   if (packet_size_limit > BUF.size_)
   {
     packet_size_limit = BUF.size_;
@@ -356,13 +356,19 @@ void CH32EndpointDevFs::Configure(const Config& cfg)
 
   if (pma_addr_ == 0 || pma_addr_ < PMA_ALLOC_BASE)
   {
-    const uint16_t ADDR = alloc_pma(BUF.size_);
+    const uint16_t ADDR = alloc_pma(max_packet_size);
     REQUIRE(ADDR >= PMA_ALLOC_BASE);
     if (ADDR < PMA_ALLOC_BASE)
     {
       return;
     }
     pma_addr_ = ADDR;
+  }
+
+  if (IsPlanning())
+  {
+    SetState(State::IDLE);
+    return;
   }
 
   volatile BTableEntry* bt = btable_entries();
@@ -416,7 +422,7 @@ void CH32EndpointDevFs::Configure(const Config& cfg)
   SetState(State::IDLE);
 }
 
-void CH32EndpointDevFs::Close()
+void CH32EndpointDevFs::CloseHardware()
 {
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
   if (GetDirection() == Direction::IN)
@@ -429,41 +435,23 @@ void CH32EndpointDevFs::Close()
   }
 }
 
-ErrorCode CH32EndpointDevFs::Transfer(size_t size)
+ErrorCode CH32EndpointDevFs::StartHardware(RawData buffer, size_t size)
 {
-  if (size > GetBuffer().size_)
-  {
-    return ErrorCode::OUT_OF_RANGE;
-  }
-
-  SetState(State::BUSY);
-
-  const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
+  ASSERT(size <= MaxPacketSize() && size <= buffer.size_);
+  const uint8_t ep = EPNumberToInt8(GetNumber());
   last_transfer_size_ = size;
-
   if (GetDirection() == Direction::IN)
   {
-    auto buffer = GetBuffer();
-    pma_write(pma_addr_, buffer.addr_, size);
-
-    // Keep the current transfer on the old active block and switch to the next block
-    // for producer writes, matching STM32/HAL timing.
-    if (UseDoubleBuffer() && size > 0)
-    {
-      Endpoint::SwitchBuffer();
-    }
-
-    btable_entries()[EP_I].count_tx = static_cast<uint16_t>(size);
-    set_tx_status(EP_I, USB_EP_TX_VALID);
+    if (size != 0U) pma_write(pma_addr_, buffer.addr_, size);
+    btable_entries()[ep].count_tx = static_cast<uint16_t>(size);
+    set_tx_status(ep, USB_EP_TX_VALID);
   }
   else
   {
-    volatile BTableEntry* bt = btable_entries();
-    bt[EP_I].addr_rx = pma_addr_;
-    bt[EP_I].count_rx = encode_rx_count(GetConfig().max_packet_size);
-    set_rx_status(EP_I, USB_EP_RX_VALID);
+    btable_entries()[ep].addr_rx = pma_addr_;
+    btable_entries()[ep].count_rx = encode_rx_count(GetConfig().max_packet_size);
+    set_rx_status(ep, USB_EP_RX_VALID);
   }
-
   return ErrorCode::OK;
 }
 
@@ -478,30 +466,28 @@ void CH32EndpointDevFs::CopyRxDataToBuffer(size_t size)
 
 void CH32EndpointDevFs::TransferComplete(size_t size)
 {
-  const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
-
+  const uint8_t ep = EPNumberToInt8(GetNumber());
   if (GetDirection() == Direction::OUT)
   {
-    const uint16_t RX_CNT = get_rx_count_from_btable(EP_I);
-    size_t n = RX_CNT;
-    if (n > GetBuffer().size_)
+    set_rx_status(ep, USB_EP_RX_NAK);
+    size = get_rx_count_from_btable(ep);
+    const auto destination = TransferBuffer();
+    if (size > destination.size_)
     {
-      n = GetBuffer().size_;
+      OnTransferCompleteCallback(true, size, ErrorCode::OUT_OF_RANGE);
+      return;
     }
-    pma_read(GetBuffer().addr_, pma_addr_, n);
-    size = n;
-    set_rx_status(EP_I, USB_EP_RX_NAK);
+    if (size != 0U) pma_read(destination.addr_, pma_addr_, size);
   }
   else
   {
-    set_tx_status(EP_I, USB_EP_TX_NAK);
+    set_tx_status(ep, USB_EP_TX_NAK);
     size = last_transfer_size_;
   }
-
   OnTransferCompleteCallback(true, size);
 }
 
-ErrorCode CH32EndpointDevFs::Stall()
+ErrorCode CH32EndpointDevFs::StallHardware()
 {
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
   if (GetDirection() == Direction::IN)
@@ -515,7 +501,7 @@ ErrorCode CH32EndpointDevFs::Stall()
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointDevFs::ClearStall()
+ErrorCode CH32EndpointDevFs::ClearStallHardware()
 {
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
   if (GetDirection() == Direction::IN)
@@ -528,8 +514,6 @@ ErrorCode CH32EndpointDevFs::ClearStall()
   }
   return ErrorCode::OK;
 }
-
-void CH32EndpointDevFs::SwitchBuffer() { Endpoint::SwitchBuffer(); }
 
 void CH32EndpointDevFs::SetEpTxStatus(uint8_t ep, uint16_t status)
 {

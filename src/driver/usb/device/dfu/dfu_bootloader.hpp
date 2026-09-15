@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <cstring>
 
 #include "dfu/dfu_def.hpp"
+#include "timer.hpp"
 
 namespace LibXR::USB
 {
@@ -76,6 +78,10 @@ class DfuBootloaderBackend
     image_.launch_requested = false;
     image_.ready = false;
     image_.stored_size = 0u;
+    size_t stored = 0;
+    image_.ready = ProbeStoredImage(&stored);  // Initialization, never a SETUP IRQ.
+    image_.stored_size = image_.ready ? stored : 0;
+    published_image_size_.store(image_.stored_size, std::memory_order_release);
   }
 
   DfuBootloaderBackend(const DfuBootloaderBackend&) = delete;
@@ -114,20 +120,15 @@ class DfuBootloaderBackend
    */
   void DfuAbort(uint8_t)
   {
+    CancelWork();
     ResetTransferState();
-    image_.launch_requested = false;
-    image_.ready = false;
-    image_.stored_size = 0u;
+    launch_request_.store(0U, std::memory_order_release);
   }
 
   /**
    * @brief 清除 DFU 错误态 / Clear the DFU error state
    */
-  void DfuClearStatus(uint8_t)
-  {
-    ResetTransferState();
-    image_.launch_requested = false;
-  }
+  void DfuClearStatus(uint8_t alt) { DfuAbort(alt); }
 
   DFUStatusCode DfuDownload(uint8_t alt, uint16_t block_num, ConstRawData data,
                             uint32_t& poll_timeout_ms)
@@ -142,7 +143,7 @@ class DfuBootloaderBackend
     {
       return DFUStatusCode::ERR_USBR;
     }
-    if (HasPendingWrite() || HasPendingManifest())
+    if (HasPendingWork())
     {
       return DFUStatusCode::ERR_NOTDONE;
     }
@@ -187,6 +188,10 @@ class DfuBootloaderBackend
     download_.last_status = DFUStatusCode::OK;
     download_.next_poll_timeout_ms = ComputeWritePollTimeout(offset, data.size_);
     poll_timeout_ms = download_.next_poll_timeout_ms;
+    job_.kind = WorkKind::WRITE;
+    job_.write = write_;
+    job_.image_size = 0;
+    job_state_.store(STAGED, std::memory_order_release);
     return DFUStatusCode::OK;
   }
 
@@ -220,6 +225,11 @@ class DfuBootloaderBackend
       return 0u;
     }
 
+    if (HasPendingWork())
+    {
+      status = DFUStatusCode::ERR_NOTDONE;
+      return 0;
+    }
     if (block_num == 0u)
     {
       upload_.session_started = true;
@@ -230,10 +240,8 @@ class DfuBootloaderBackend
       {
         image_size = image_.stored_size;
       }
-      else if (!ProbeStoredImage(&image_size))
-      {
+      else
         image_size = 0u;
-      }
       upload_.image_size = image_size;
       if (upload_.image_size == 0u)
       {
@@ -280,13 +288,16 @@ class DfuBootloaderBackend
     {
       return DFUStatusCode::ERR_TARGET;
     }
-    if (!download_.session_started || download_.received_bytes == 0u || HasPendingWrite())
+    if (HasPendingWork() || !download_.session_started || download_.received_bytes == 0u)
     {
       return DFUStatusCode::ERR_NOTDONE;
     }
     manifest_.pending = true;
     manifest_.last_status = DFUStatusCode::OK;
     poll_timeout_ms = manifest_.poll_timeout_ms;
+    job_.kind = WorkKind::MANIFEST;
+    job_.image_size = download_.received_bytes;
+    job_state_.store(STAGED, std::memory_order_release);
     return DFUStatusCode::OK;
   }
 
@@ -306,73 +317,120 @@ class DfuBootloaderBackend
     return manifest_.last_status;
   }
 
-  void Process()
+  // Owner-side reconciliation only. Slow work runs in the shared Timer context.
+  void Process() { CommitWorkResult(); }
+
+  void AllowPendingWork()
   {
-    // 这里仅推进协议自身拥有的异步工作；
-    // app launch 仍然保持为显式的板级/应用层策略决策。
-    // Only protocol-owned asynchronous work advances here;
-    // app launch remains an explicit board/application policy decision.
-    if (write_.pending)
-    {
-      ProcessPendingWrite();
-      return;
-    }
-    if (manifest_.pending)
-    {
-      ProcessPendingManifest();
-    }
+    uint32_t expected = STAGED;
+    (void)job_state_.compare_exchange_strong(expected, READY, std::memory_order_release,
+                                             std::memory_order_relaxed);
   }
 
-  bool TryRequestRunApp()
+  bool RunPendingWork()
   {
-    // Run-app 请求不修改 DFU 传输状态；它只记录一个待消费的镜像启动请求，
-    // 由外层 boot/application 循环决定何时真正跳转。
-    // The run-app request does not mutate DFU transfer state; it only records
-    // an image-backed launch request for the outer boot/application loop.
-    if (!image_.ready)
-    {
-      size_t image_size = 0u;
-      image_.ready = ProbeStoredImage(&image_size);
-      image_.stored_size = image_.ready ? image_size : 0u;
-    }
-    if (image_.ready)
-    {
-      image_.launch_requested = true;
-      return true;
-    }
-    return false;
-  }
-
-  void DfuCommitManifestWaitReset(uint8_t alt)
-  {
-    if (alt != 0u)
-    {
-      return;
-    }
-    if (autorun_ && image_.ready)
-    {
-      image_.launch_requested = true;
-    }
-  }
-
-  bool TryConsumeAppLaunch(uint32_t)
-  {
-    if (!image_.launch_requested || !image_.ready)
-    {
+    uint32_t expected = READY;
+    if (!job_state_.compare_exchange_strong(expected, RUNNING, std::memory_order_acq_rel))
       return false;
-    }
-    image_.launch_requested = false;
-    if (jump_to_app_ != nullptr)
+    DFUStatusCode result = DFUStatusCode::OK;
+    if (job_.kind == WorkKind::WRITE)
     {
-      jump_to_app_(jump_app_ctx_);
+      if (!EnsureBlocksErased(job_.write.offset, job_.write.len))
+        result = DFUStatusCode::ERR_ERASE;
+      else if (!BeginFlashStep())
+        result = DFUStatusCode::ERR_NOTDONE;
+      else if (flash_.Write(image_offset_ + job_.write.offset,
+                            {write_buffer_, job_.write.len}) != ErrorCode::OK)
+        result = DFUStatusCode::ERR_PROG;
+    }
+    else
+    {
+      uint32_t crc = 0;
+      if (!ComputeImageCrc32(job_.image_size, crc))
+        result = DFUStatusCode::ERR_VERIFY;
+      else if (!WriteSeal(job_.image_size, crc))
+        result = DFUStatusCode::ERR_VERIFY;
+    }
+    job_result_ = result;
+    uint32_t observed = job_state_.load(std::memory_order_acquire);
+    while (!job_state_.compare_exchange_weak(observed, (observed & CANCELLED) | DONE,
+                                             std::memory_order_release,
+                                             std::memory_order_acquire))
+    {
     }
     return true;
   }
 
-  bool HasPendingWork() const { return HasPendingWrite() || HasPendingManifest(); }
+  void CommitWorkResult()
+  {
+    const uint32_t state = job_state_.load(std::memory_order_acquire);
+    if ((state & ~CANCELLED) != DONE) return;
+    if ((state & CANCELLED) == 0U)
+    {
+      if (job_.kind == WorkKind::WRITE)
+      {
+        download_.last_status = job_result_;
+        if (job_result_ == DFUStatusCode::OK)
+        {
+          download_.received_bytes = job_.write.offset + job_.write.len;
+          download_.expected_block_num = static_cast<uint16_t>(job_.write.block_num + 1U);
+        }
+        write_.pending = false;
+      }
+      else
+      {
+        manifest_.last_status = job_result_;
+        manifest_.pending = false;
+        if (job_result_ == DFUStatusCode::OK)
+        {
+          image_.stored_size = job_.image_size;
+          image_.ready = true;
+          published_image_size_.store(job_.image_size, std::memory_order_release);
+          download_.session_started = false;
+          download_.received_bytes = 0;
+          download_.expected_block_num = 0;
+          upload_ = {};
+        }
+      }
+    }
+    // Only the protocol owner releases the immutable job/data slot after reading
+    // its result. A cancelled old job never updates a replacement USB session.
+    job_state_.store(EMPTY, std::memory_order_release);
+  }
 
-  bool HasValidImage() const { return image_.ready; }
-  size_t ImageSize() const { return image_.stored_size; }
+  bool TryRequestRunApp()
+  {
+    if (HasPendingWork() || published_image_size_.load(std::memory_order_acquire) == 0U)
+      return false;
+    launch_request_.store(1U, std::memory_order_release);
+    return true;
+  }
+
+  void DfuCommitManifestWaitReset(uint8_t alt)
+  {
+    if (alt == 0U && autorun_ && HasValidImage())
+      launch_request_.store(1U, std::memory_order_release);
+  }
+
+  bool TryConsumeAppLaunch(uint32_t)
+  {
+    if (HasPendingWork() || !HasValidImage() ||
+        launch_request_.exchange(0U, std::memory_order_acq_rel) == 0U)
+      return false;
+    if (jump_to_app_) jump_to_app_(jump_app_ctx_);
+    return true;
+  }
+
+  bool HasPendingWork() const
+  {
+    return job_state_.load(std::memory_order_acquire) != EMPTY;
+  }
+
+  bool HasValidImage() const { return ImageSize() != 0U; }
+  size_t ImageSize() const
+  {
+    return published_image_size_.load(std::memory_order_acquire);
+  }
 
  private:
   // download/upload 只允许访问 seal 记录之前的 payload 区域。
@@ -413,7 +471,8 @@ class DfuBootloaderBackend
     download_.session_started = true;
     image_.ready = false;
     image_.stored_size = 0u;
-    image_.launch_requested = false;
+    published_image_size_.store(0U, std::memory_order_release);
+    launch_request_.store(0U, std::memory_order_release);
   }
 
   void ResetTransferState()
@@ -457,67 +516,9 @@ class DfuBootloaderBackend
   // Execute one deferred write step:
   // 1) erase each newly touched erase block once
   // 2) program the just-received payload chunk
-  void ProcessPendingWrite()
-  {
-    if (!EnsureBlocksErased(write_.offset, write_.len))
-    {
-      download_.last_status = DFUStatusCode::ERR_ERASE;
-      write_.pending = false;
-      return;
-    }
-    if (flash_.Write(image_offset_ + write_.offset, {write_buffer_, write_.len}) !=
-        ErrorCode::OK)
-    {
-      download_.last_status = DFUStatusCode::ERR_PROG;
-      write_.pending = false;
-      return;
-    }
-
-    download_.received_bytes = write_.offset + write_.len;
-    download_.expected_block_num = static_cast<uint16_t>(write_.block_num + 1u);
-    download_.last_status = DFUStatusCode::OK;
-    write_.pending = false;
-  }
 
   // 通过计算固定 CRC32 并写入 seal 记录来完成镜像定稿。
   // Finalize the image by computing the fixed CRC32 and writing the seal record.
-  void ProcessPendingManifest()
-  {
-    const size_t payload_limit = PayloadLimit();
-    if (download_.received_bytes == 0u || download_.received_bytes > payload_limit)
-    {
-      manifest_.last_status = DFUStatusCode::ERR_ADDRESS;
-      manifest_.pending = false;
-      return;
-    }
-
-    uint32_t crc32 = 0u;
-    if (!ComputeImageCrc32(download_.received_bytes, crc32))
-    {
-      manifest_.last_status = DFUStatusCode::ERR_VERIFY;
-      manifest_.pending = false;
-      return;
-    }
-    if (!WriteSeal(download_.received_bytes, crc32))
-    {
-      manifest_.last_status = DFUStatusCode::ERR_VERIFY;
-      manifest_.pending = false;
-      return;
-    }
-
-    image_.stored_size = download_.received_bytes;
-    image_.ready = true;
-    image_.launch_requested = false;
-    manifest_.last_status = DFUStatusCode::OK;
-    download_.session_started = false;
-    download_.received_bytes = 0u;
-    download_.expected_block_num = 0u;
-    upload_.session_started = false;
-    upload_.offset = 0u;
-    upload_.expected_block_num = 0u;
-    upload_.image_size = 0u;
-    manifest_.pending = false;
-  }
 
   // 计算 seal 记录使用的固定 CRC32，只覆盖 payload 区域。
   // Compute the fixed CRC32 used by the seal record over the payload area only.
@@ -536,7 +537,8 @@ class DfuBootloaderBackend
       {
         chunk = sizeof(crc_buffer_);
       }
-      if (flash_.Read(image_offset_ + offset, {crc_buffer_, chunk}) != ErrorCode::OK)
+      if (!BeginFlashStep() ||
+          flash_.Read(image_offset_ + offset, {crc_buffer_, chunk}) != ErrorCode::OK)
       {
         return false;
       }
@@ -573,6 +575,10 @@ class DfuBootloaderBackend
     seal->crc32_inv = ~crc32;
 
     if (!EnsureBlocksErased(seal_offset_, seal_storage_size_))
+    {
+      return false;
+    }
+    if (!BeginFlashStep())
     {
       return false;
     }
@@ -645,7 +651,8 @@ class DfuBootloaderBackend
         continue;
       }
       const size_t block_offset = block * erase_block_size_;
-      if (flash_.Erase(image_offset_ + block_offset, erase_block_size_) != ErrorCode::OK)
+      if (!BeginFlashStep() ||
+          flash_.Erase(image_offset_ + block_offset, erase_block_size_) != ErrorCode::OK)
       {
         return false;
       }
@@ -709,26 +716,65 @@ class DfuBootloaderBackend
     size_t image_size = 0u;
   };
 
+  enum class WorkKind : uint8_t
+  {
+    WRITE,
+    MANIFEST
+  };
+  static constexpr uint32_t EMPTY = 0U, STAGED = 1U, READY = 2U, RUNNING = 3U, DONE = 4U;
+  static constexpr uint32_t CANCELLED = 0x80000000U;
+  struct Work
+  {
+    WorkKind kind = WorkKind::WRITE;
+    WriteState write{};
+    size_t image_size = 0;
+  } job_;
+  std::atomic<uint32_t> job_state_{EMPTY};
+  DFUStatusCode job_result_ = DFUStatusCode::OK;
+  std::atomic<size_t> published_image_size_{0};
+  std::atomic<uint32_t> launch_request_{0};
+
+  void CancelWork()
+  {
+    uint32_t state = job_state_.load(std::memory_order_acquire);
+    while (state != EMPTY)
+    {
+      const uint32_t phase = state & ~CANCELLED;
+      const uint32_t next = phase == RUNNING || phase == DONE ? state | CANCELLED : EMPTY;
+      if (job_state_.compare_exchange_weak(state, next, std::memory_order_acq_rel)) break;
+    }
+  }
+
+  bool BeginFlashStep()
+  {
+    uint32_t state = job_state_.load(std::memory_order_acquire);
+    if (state == EMPTY) return true;  // Constructor-only stored-image validation.
+    if (state != RUNNING) return false;
+    // A successful claim authorizes this one noncancelable Flash call. Cancel
+    // after the claim lets it reach a safe boundary, not the following call.
+    return job_state_.compare_exchange_strong(state, RUNNING, std::memory_order_acq_rel);
+  }
+
   Flash& flash_;                  ///< 底层 flash 设备 / Underlying flash device
   size_t image_offset_ = 0u;      ///< 镜像区起始偏移 / Image base offset
   size_t image_size_limit_ = 0u;  ///< 镜像区总边界 / Image region limit
   size_t seal_offset_ = 0u;  ///< seal 相对镜像区偏移 / Seal offset inside image region
   JumpCallback jump_to_app_ = nullptr;  ///< 跳 app 回调 / App jump callback
   void* jump_app_ctx_ = nullptr;        ///< 跳转上下文 / Jump callback context
-  bool autorun_ = true;    ///< manifest 后是否自动请求运行 / Autorun after manifest
-  ImageState image_ = {};  ///< 镜像级状态 / Image-level state
-  size_t erase_block_size_ = 1u;      ///< 最小擦除粒度 / Minimum erase granularity
-  size_t erase_block_count_ = 0u;     ///< 受管块数量 / Number of tracked erase blocks
+  bool autorun_ = true;  ///< manifest 后是否自动请求运行 / Autorun after manifest
+  ImageState image_ = {};          ///< 镜像级状态 / Image-level state
+  size_t erase_block_size_ = 1u;   ///< 最小擦除粒度 / Minimum erase granularity
+  size_t erase_block_count_ = 0u;  ///< 受管块数量 / Number of tracked erase blocks
   uint8_t* erased_blocks_ = nullptr;  ///< 每块擦除标记 / Per-block erase marks
   size_t seal_storage_size_ = 0u;     ///< seal 暂存大小 / Seal scratch size
   uint8_t* seal_storage_ = nullptr;   ///< seal 暂存区 / Seal scratch buffer
-  size_t transfer_size_ = 0u;         ///< 单次 DFU 传输上限 / Per-transfer DFU limit
-  uint8_t* write_buffer_ = nullptr;   ///< 下载块暂存区 / Download chunk buffer
-  uint8_t crc_buffer_[256] = {};      ///< CRC 分块缓冲 / CRC chunk buffer
-  DownloadState download_ = {};       ///< Download 状态 / Download state
-  WriteState write_ = {};             ///< 写入步骤状态 / Write-step state
-  ManifestState manifest_ = {};       ///< Manifest 状态 / Manifest state
-  UploadState upload_ = {};           ///< Upload 状态 / Upload state
+  size_t transfer_size_ = 0u;        ///< 单次 DFU 传输上限 / Per-transfer DFU limit
+  uint8_t* write_buffer_ = nullptr;  ///< 下载块暂存区 / Download chunk buffer
+  uint8_t crc_buffer_[256] = {};     ///< CRC 分块缓冲 / CRC chunk buffer
+  DownloadState download_ = {};      ///< Download 状态 / Download state
+  WriteState write_ = {};            ///< 写入步骤状态 / Write-step state
+  ManifestState manifest_ = {};      ///< Manifest 状态 / Manifest state
+  UploadState upload_ = {};          ///< Upload 状态 / Upload state
 };
 
 /**
@@ -845,7 +891,30 @@ class DFUClass : public DfuInterfaceClassBase
                               winusb_vendor_code),
         backend_(backend)
   {
+    if constexpr (requires(Backend& b) {
+                    b.RunPendingWork();
+                    b.CommitWorkResult();
+                    b.AllowPendingWork();
+                  })
+    {
+      auto timer = Timer::CreateTask(
+          +[](DFUClass* self)
+          {
+            if (self->backend_.RunPendingWork()) self->RequestClassService(false);
+          },
+          this, 1U);
+      Timer::Start(timer);  // Initialize before publishing into the shared list.
+      Timer::Add(timer);
+    }
   }
+
+  void OnService(bool) override
+  {
+    if constexpr (requires(Backend& b) { b.CommitWorkResult(); })
+      backend_.CommitWorkResult();
+  }
+
+  size_t GetControlReceiveCapacity() const override { return MAX_TRANSFER_SIZE; }
 
  protected:
   void BindEndpoints(EndpointPool&, uint8_t start_itf_num, bool) override
@@ -962,6 +1031,51 @@ class DFUClass : public DfuInterfaceClassBase
     return ErrorCode::OK;
   }
 
+  ErrorCode OnControlRequest(bool in_isr, const SetupPacket& setup,
+                             ControlTransferResult& result) override
+  {
+    if ((setup.bmRequestType & REQ_TYPE_MASK) != static_cast<uint8_t>(RequestType::CLASS))
+      return DeviceClass::OnControlRequest(in_isr, setup, result);
+    const auto request = static_cast<DFURequest>(setup.bRequest);
+    const bool input = request == DFURequest::UPLOAD ||
+                       request == DFURequest::GETSTATUS ||
+                       request == DFURequest::GETSTATE;
+    if ((setup.bmRequestType & REQ_DIRECTION_MASK) != (input ? 0x80U : 0U) ||
+        (setup.bmRequestType & REQ_RECIPIENT_MASK) !=
+            static_cast<uint8_t>(Recipient::INTERFACE) ||
+        (request == DFURequest::GETSTATUS && setup.wLength != sizeof(StatusResponse)) ||
+        (request == DFURequest::GETSTATE && setup.wLength != 1U))
+      return ErrorCode::ARG_ERR;
+    const uint32_t now = static_cast<uint32_t>(Timebase::GetMilliseconds());
+    if (state_ == DFUState::DFU_DNBUSY || state_ == DFUState::DFU_MANIFEST)
+    {
+      if (!poll_waiting_ || static_cast<int32_t>(now - poll_deadline_) < 0)
+        return ProtocolStall(DFUStatusCode::ERR_STALLEDPKT);
+      state_ = state_ == DFUState::DFU_DNBUSY ? DFUState::DFU_DNLOAD_SYNC
+                                              : DFUState::DFU_MANIFEST_SYNC;
+      poll_waiting_ = false;
+    }
+    return OnClassRequest(in_isr, setup.bRequest, setup.wValue, setup.wLength,
+                          setup.wIndex, result);
+  }
+
+  void OnControlAbort(bool, const SetupPacket& setup) override
+  {
+    if (setup.bRequest == static_cast<uint8_t>(DFURequest::DNLOAD))
+    {
+      backend_.DfuAbort(current_alt_setting_);
+      ClearErrorState();
+    }
+    else if (setup.bRequest == static_cast<uint8_t>(DFURequest::GETSTATUS) &&
+             !poll_waiting_)
+    {
+      if (state_ == DFUState::DFU_DNBUSY)
+        state_ = DFUState::DFU_DNLOAD_SYNC;
+      else if (state_ == DFUState::DFU_MANIFEST)
+        state_ = DFUState::DFU_MANIFEST_SYNC;
+    }
+  }
+
   ErrorCode OnClassRequest(bool, uint8_t bRequest, uint16_t wValue, uint16_t wLength,
                            uint16_t wIndex, ControlTransferResult& result) override
   {
@@ -1044,6 +1158,14 @@ class DFUClass : public DfuInterfaceClassBase
     if (static_cast<DFURequest>(bRequest) != DFURequest::GETSTATUS)
     {
       return;
+    }
+    if (state_ == DFUState::DFU_DNBUSY || state_ == DFUState::DFU_MANIFEST)
+    {
+      poll_deadline_ =
+          static_cast<uint32_t>(Timebase::GetMilliseconds()) + poll_timeout_ms_;
+      poll_waiting_ = true;
+      if constexpr (requires(Backend& b) { b.AllowPendingWork(); })
+        backend_.AllowPendingWork();
     }
     if (state_ == DFUState::DFU_MANIFEST_WAIT_RESET)
     {
@@ -1223,6 +1345,11 @@ class DFUClass : public DfuInterfaceClassBase
 
       case DFUState::DFU_MANIFEST_SYNC:
       {
+        if (manifest_started_)
+        {
+          RefreshManifestStatus();
+          break;
+        }
         if (status_ != DFUStatusCode::OK)
         {
           state_ = DFUState::DFU_ERROR;
@@ -1237,6 +1364,7 @@ class DFUClass : public DfuInterfaceClassBase
         {
           status_ = DFUStatusCode::OK;
           state_ = DFUState::DFU_MANIFEST;
+          manifest_started_ = true;
         }
         else
         {
@@ -1322,6 +1450,8 @@ class DFUClass : public DfuInterfaceClassBase
     // 镜像级 bookkeeping 保留在 backend_ 里。
     // Reset only frontend-owned protocol state;
     // image-level bookkeeping stays in backend_.
+    poll_waiting_ = false;
+    manifest_started_ = false;
     pending_block_num_ = 0u;
     pending_dnload_length_ = 0u;
     poll_timeout_ms_ = 0u;
@@ -1332,6 +1462,8 @@ class DFUClass : public DfuInterfaceClassBase
 
   void ClearErrorState()
   {
+    poll_waiting_ = false;
+    manifest_started_ = false;
     status_ = DFUStatusCode::OK;
     state_ = DFUState::DFU_IDLE;
     poll_timeout_ms_ = 0u;
@@ -1363,8 +1495,11 @@ class DFUClass : public DfuInterfaceClassBase
   uint8_t transfer_buffer_[MAX_TRANSFER_SIZE] =
       {};                          ///< EP0 传输缓冲 / EP0 transfer buffer
   bool download_started_ = false;  ///< 是否已有有效下载数据 / Whether payload has started
-  uint16_t pending_block_num_ = 0u;      ///< 待提交 block 编号 / Pending block number
+  uint16_t pending_block_num_ = 0u;  ///< 待提交 block 编号 / Pending block number
   uint16_t pending_dnload_length_ = 0u;  ///< 待提交 DNLOAD 长度 / Pending DNLOAD length
+  uint32_t poll_deadline_ = 0;
+  bool poll_waiting_ = false;
+  bool manifest_started_ = false;
   uint32_t poll_timeout_ms_ = 0u;        ///< 当前轮询超时 / Current poll timeout
   DFUState state_ = DFUState::DFU_IDLE;  ///< DFU 状态 / DFU state
   DFUStatusCode status_ = DFUStatusCode::OK;  ///< DFU 状态码 / DFU status code
@@ -1429,7 +1564,7 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
 
   // 这里只推进 backend 拥有的异步工作；真正跳 app 仍保持显式调用。
   // Process only backend-owned async work; actual app launch remains explicit.
-  void Process() { Storage::backend_.Process(); }
+  void Process() { this->RequestClassService(false); }
   bool RequestRunApp() { return Storage::backend_.TryRequestRunApp(); }
 
   bool TryConsumeAppLaunch(uint32_t now_ms)
@@ -1445,6 +1580,15 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
   size_t SealOffset() const { return Storage::seal_offset_; }
 
  protected:
+  void OnControlComplete(bool in_isr, const SetupPacket& setup) override
+  {
+    Base::OnControlComplete(in_isr, setup);
+    if ((setup.bmRequestType & REQ_TYPE_MASK) ==
+            static_cast<uint8_t>(RequestType::VENDOR) &&
+        setup.bRequest == VENDOR_REQUEST_RUN_APP)
+      (void)Storage::backend_.TryRequestRunApp();
+  }
+
   ErrorCode OnVendorRequest(bool, uint8_t bRequest, uint16_t wValue, uint16_t wLength,
                             uint16_t,
                             typename Base::ControlTransferResult& result) override
@@ -1463,7 +1607,7 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
       // Do not launch the app while protocol-owned async work is still pending.
       return ErrorCode::BUSY;
     }
-    if (!Storage::backend_.TryRequestRunApp())
+    if (!Storage::backend_.HasValidImage())
     {
       // RUN_APP 只在已知存在有效 seal 镜像时才会接受。
       // RUN_APP is only accepted when a valid sealed image is known.

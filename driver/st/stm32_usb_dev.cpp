@@ -17,7 +17,23 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd)
   return STM32_USB_DEV_ID_NUM;
 }
 
-extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
+extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef* hpcd)
+{
+  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  if (!usb) return;
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  auto* device = reinterpret_cast<USB_OTG_DeviceTypeDef*>(
+      reinterpret_cast<uintptr_t>(hpcd->Instance) + USB_OTG_DEVICE_BASE);
+  const uint32_t position = (device->DSTS & USB_OTG_DSTS_FNSOF) >> 8U;
+  if (hpcd->Init.speed == PCD_SPEED_HIGH)
+    usb->OnSof(true, static_cast<uint16_t>(position >> 3U),
+               static_cast<uint8_t>(position & 7U));
+  else
+    usb->OnSof(true, static_cast<uint16_t>(position & 0x7ffU));
+#else
+  usb->OnSof(true, static_cast<uint16_t>(hpcd->Instance->FNR & 0x7ffU));
+#endif
+}
 
 extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
 {
@@ -40,66 +56,25 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
     STM32_InvalidateDCacheByAddr(hpcd->Setup, sizeof(USB::SetupPacket));
   }
 
-  usb->GetEndpoint0In()->SetState(USB::Endpoint::State::IDLE);
-  usb->GetEndpoint0Out()->SetState(USB::Endpoint::State::IDLE);
-
   usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket*>(hpcd->Setup));
 }
 
 extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto id = STM32USBDeviceGetID(hpcd);
-
-  if (id >= STM32_USB_DEV_ID_NUM)
-  {
-    return;
-  }
-
-  auto usb = STM32USBDevice::map_[id];
-
-  if (!usb)
-  {
-    return;
-  }
-
-  usb->Deinit(true);
-  usb->Init(true);
+  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  if (usb) usb->OnBusReset(true);
 }
 
 extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto id = STM32USBDeviceGetID(hpcd);
-
-  if (id >= STM32_USB_DEV_ID_NUM)
-  {
-    return;
-  }
-
-  auto usb = STM32USBDevice::map_[id];
-
-  if (!usb)
-  {
-    return;
-  }
-  usb->Deinit(true);
+  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  if (usb) usb->OnSuspend(true);
 }
 
 extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto id = STM32USBDeviceGetID(hpcd);
-
-  if (id >= STM32_USB_DEV_ID_NUM)
-  {
-    return;
-  }
-
-  auto usb = STM32USBDevice::map_[id];
-
-  if (!usb)
-  {
-    return;
-  }
-  usb->Init(true);
+  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  if (usb) usb->OnResume(true);
 }
 
 extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
@@ -170,12 +145,11 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
   }
 }
 
-ErrorCode STM32USBDeviceOtgFS::SetAddress(uint8_t address,
-                                          USB::DeviceCore::Context context)
+ErrorCode STM32USBDeviceOtgFS::SetAddress(uint8_t address, USB::ControlContext context)
 {
   HAL_StatusTypeDef ans = HAL_OK;
 
-  if (context == USB::DeviceCore::Context::STATUS_IN_ARMED)
+  if (context == USB::ControlContext::STATUS_IN_ARMED)
   {
     ans = HAL_PCD_SetAddress(hpcd_, address);
   }
@@ -250,12 +224,11 @@ STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
   }
 }
 
-ErrorCode STM32USBDeviceOtgHS::SetAddress(uint8_t address,
-                                          USB::DeviceCore::Context context)
+ErrorCode STM32USBDeviceOtgHS::SetAddress(uint8_t address, USB::ControlContext context)
 {
   HAL_StatusTypeDef ans = HAL_OK;
 
-  if (context == USB::DeviceCore::Context::STATUS_IN_ARMED)
+  if (context == USB::ControlContext::STATUS_IN_ARMED)
   {
     ans = HAL_PCD_SetAddress(hpcd_, address);
   }
@@ -343,12 +316,11 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
   ASSERT(buffer_offset <= LIBXR_STM32_USB_PMA_SIZE);
 }
 
-ErrorCode STM32USBDeviceDevFs::SetAddress(uint8_t address,
-                                          USB::DeviceCore::Context context)
+ErrorCode STM32USBDeviceDevFs::SetAddress(uint8_t address, USB::ControlContext context)
 {
   HAL_StatusTypeDef ans = HAL_OK;
 
-  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
+  if (context == USB::ControlContext::STATUS_IN_COMPLETE)
   {
     ans = HAL_PCD_SetAddress(hpcd_, address);
   }

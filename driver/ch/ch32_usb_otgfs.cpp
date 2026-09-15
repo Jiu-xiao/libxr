@@ -51,6 +51,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     return;
   }
 
+  USB::EndpointPool::InterruptScope interrupt_scope(*usb);
+
   auto& map = LibXR::CH32EndpointOtgFs::map_otg_fs_;
 
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
@@ -88,11 +90,8 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     {
       USBFSD->DEV_ADDR = 0;
 
-      usb->Deinit(true);
-      usb->Init(true);
+      usb->OnBusReset(true);
 
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
       out0->tog_ = true;
       in0->tog_ = true;
 
@@ -106,17 +105,10 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
     // suspend 走与 reset 相同的 EP0 恢复路径；resume 由后续主机时序体现。
     if (PENDING & USBFS_UIF_SUSPEND)
     {
-      usb->Deinit(true);
-      usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      out0->tog_ = true;
-      in0->tog_ = true;
-
-      USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
-      USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
-
+      if (USBFSD->MIS_ST & USBFS_UMS_SUSPEND)
+        usb->OnSuspend(true);
+      else
+        usb->OnResume(true);
       clear_mask |= USBFS_UIF_SUSPEND;
     }
 
@@ -138,8 +130,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
           USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
           USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_NAK;
 
-          out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-          in0->SetState(LibXR::USB::Endpoint::State::IDLE);
           out0->tog_ = true;
           in0->tog_ = true;
 
@@ -171,6 +161,11 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBFS_IRQHandle
           break;
         }
 
+#if defined(USBFS_UIS_TOKEN_SOF) && defined(USBFS_UIE_DEV_SOF)
+        case USBFS_UIS_TOKEN_SOF:
+          usb->OnSof(true, 0xffffU);  // No readable device frame counter in this IP.
+          break;
+#endif
         default:
           break;
       }
@@ -192,9 +187,11 @@ CH32USBOtgFS::CH32USBOtgFS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
-                      pid, bcd, LANG_LIST, CONFIGS, uid)
+      USB::DeviceCore<USB::FullSpeedCapabilities>(*this, USB::USBSpec::USB_2_1,
+                                                  USB::Speed::FULL, packet_size, vid, pid,
+                                                  bcd, LANG_LIST, CONFIGS, uid)
 {
+  ConfigureCH32USBGuard(*this);
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgFs::EP_OTG_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -234,16 +231,23 @@ CH32USBOtgFS::CH32USBOtgFS(
   }
 }
 
-LibXR::ErrorCode CH32USBOtgFS::SetAddress(uint8_t address,
-                                          USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBOtgFS::SetAddress(uint8_t address, USB::ControlContext context)
 {
-  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
+  if (context == USB::ControlContext::STATUS_IN_COMPLETE)
   {
     USBFSD->DEV_ADDR = (USBFSD->DEV_ADDR & USBFS_UDA_GP_BIT) | address;
     USBFSD->UEP0_TX_CTRL = USBFS_UEP_T_RES_NAK;
     USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;
   }
   return LibXR::ErrorCode::OK;
+}
+
+void CH32USBOtgFS::OnControlReady()
+{
+  USBFSD->UEP0_RX_CTRL = USBFS_UEP_R_RES_ACK;
+#if defined(USBFS_UIE_DEV_SOF)
+  if (WantsBusTime()) USBFSD->INT_EN |= USBFS_UIE_DEV_SOF;
+#endif
 }
 
 void CH32USBOtgFS::Start(bool)

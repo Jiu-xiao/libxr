@@ -174,3 +174,10 @@ target_include_directories(
   PRIVATE core/print/print $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
           "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Eigen"
 )
+
+# Real Endpoint/CDC/RW code; only the hardware segment is controlled by the test.
+add_executable(test_usb_endpoint driver/usb/core/test_endpoint.cpp)
+target_link_libraries(test_usb_endpoint PRIVATE xr)
+target_include_directories(test_usb_endpoint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_endpoint COMMAND test_usb_endpoint)
+set_tests_properties(usb_endpoint PROPERTIES TIMEOUT 30)

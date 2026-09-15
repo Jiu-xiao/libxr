@@ -19,7 +19,7 @@ ESP32USBEndpoint::ESP32USBEndpoint(ESP32USBDevice& device, EPNumber number,
 {
 }
 
-void ESP32USBEndpoint::Configure(const Config& cfg)
+void ESP32USBEndpoint::ConfigureHardware(const Config& cfg)
 {
   ASSERT(cfg.direction == Direction::IN || cfg.direction == Direction::OUT);
 
@@ -31,7 +31,7 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
     ep_cfg.max_packet_size = (cfg.type == Type::ISOCHRONOUS) ? 1023U : 64U;
   }
 
-  auto buffer = GetBuffer();
+  auto buffer = HardwareBuffer();
   if (buffer.size_ < ep_cfg.max_packet_size)
   {
     ep_cfg.max_packet_size = static_cast<uint16_t>(buffer.size_);
@@ -42,6 +42,12 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
   if (device_.DmaEnabled() && (buffer.size_ > 0U) && !EnsureDmaShadow(buffer.size_))
   {
     SetState(State::ERROR);
+    return;
+  }
+
+  if (IsPlanning())
+  {
+    SetState(State::IDLE);
     return;
   }
 
@@ -71,7 +77,7 @@ void ESP32USBEndpoint::Configure(const Config& cfg)
   SetState(State::IDLE);
 }
 
-void ESP32USBEndpoint::Close()
+void ESP32USBEndpoint::CloseHardware()
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
@@ -112,14 +118,9 @@ void ESP32USBEndpoint::Close()
   SetState(State::DISABLED);
 }
 
-ErrorCode ESP32USBEndpoint::Stall()
+ErrorCode ESP32USBEndpoint::StallHardware()
 {
   const bool is_in = (GetDirection() == Direction::IN);
-  if ((GetState() == State::BUSY) && is_in)
-  {
-    return ErrorCode::BUSY;
-  }
-
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
@@ -150,7 +151,7 @@ ErrorCode ESP32USBEndpoint::Stall()
   return ErrorCode::OK;
 }
 
-ErrorCode ESP32USBEndpoint::ClearStall()
+ErrorCode ESP32USBEndpoint::ClearStallHardware()
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
@@ -186,14 +187,8 @@ ErrorCode ESP32USBEndpoint::ClearStall()
   return ErrorCode::OK;
 }
 
-ErrorCode ESP32USBEndpoint::Transfer(size_t size)
+ErrorCode ESP32USBEndpoint::StartHardware(RawData buffer, size_t size)
 {
-  if (GetState() == State::BUSY)
-  {
-    return ErrorCode::BUSY;
-  }
-
-  auto buffer = GetBuffer();
   if (buffer.size_ < size)
   {
     return ErrorCode::NO_BUFF;
@@ -210,29 +205,24 @@ ErrorCode ESP32USBEndpoint::Transfer(size_t size)
     ep0_out_phase_ = (size == 0U) ? Ep0OutPhase::STATUS : Ep0OutPhase::DATA;
   }
 
-  if (UseDoubleBuffer() && GetDirection() == Direction::IN && size > 0U)
-  {
-    SwitchBuffer();
-  }
-
   if (!PrepareTransferBuffer(size))
   {
     ResetTransferState();
     return ErrorCode::NO_MEM;
   }
 
-  SetState(State::BUSY);
   ProgramTransfer(size);
   return ErrorCode::OK;
 }
 
-size_t ESP32USBEndpoint::MaxTransferSize() const
+size_t ESP32USBEndpoint::MaxHardwareTransferSize() const
 {
   if (GetNumber() == EPNumber::EP0)
   {
     return MaxPacketSize();
   }
-  return GetBuffer().size_;
+  const size_t size = HardwareBuffer().size_;
+  return size - size % MaxPacketSize();
 }
 
 void ESP32USBEndpoint::ResetHardwareState()
@@ -291,21 +281,12 @@ void ESP32USBEndpoint::HandleInInterrupt(bool in_isr)
 
 void ESP32USBEndpoint::FinishPendingEp0InStatus(bool in_isr)
 {
-  if (!device_.DmaEnabled() || (device_.endpoint_map_.in[0] == nullptr))
+  if (device_.endpoint_map_.in[0] == nullptr) return;
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  if (dev->diepint0_reg.xfercompl)
   {
-    return;
-  }
-
-  auto* ep0_in = static_cast<ESP32USBEndpoint*>(device_.endpoint_map_.in[0]);
-  if ((ep0_in->GetState() != State::BUSY) || (ep0_in->transfer_request_size_ != 0U))
-  {
-    return;
-  }
-
-  ep0_in->OnTransferCompleteCallback(in_isr, 0U);
-  if (ep0_in->GetState() != State::BUSY)
-  {
-    ep0_in->ResetTransferState();
+    auto* input = static_cast<ESP32USBEndpoint*>(device_.endpoint_map_.in[0]);
+    input->HandleInInterrupt(in_isr);
   }
 }
 
@@ -372,7 +353,6 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
     FinishPendingEp0InStatus(in_isr);
     ep0_out_phase_ = Ep0OutPhase::SETUP;
     ResetTransferState();
-    SetState(State::IDLE);
 
     if (device_.endpoint_map_.in[0] != nullptr)
     {
@@ -380,7 +360,6 @@ void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
       if (ep0_in->GetState() == State::BUSY)
       {
         ep0_in->ResetTransferState();
-        ep0_in->SetState(State::IDLE);
       }
     }
 
@@ -508,7 +487,7 @@ bool ESP32USBEndpoint::PrepareTransferBuffer(size_t size)
   }
   else
   {
-    auto buffer = GetBuffer();
+    auto buffer = TransferBuffer();
     if (ESPUSBDetail::CanUseDirectOutDmaBuffer(buffer.addr_, buffer.size_))
     {
       transfer_direct_sync_size_ = buffer.size_;
@@ -516,10 +495,7 @@ bool ESP32USBEndpoint::PrepareTransferBuffer(size_t size)
     }
   }
 
-  if (!EnsureDmaShadow(size))
-  {
-    return false;
-  }
+  if (dma_shadow_buffer_ == nullptr || dma_shadow_size_ < size) return false;
 
   transfer_hw_buffer_ = dma_shadow_buffer_;
   transfer_uses_shadow_ = true;

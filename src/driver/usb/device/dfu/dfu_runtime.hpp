@@ -37,24 +37,31 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   // Runtime DFU 只有一个延迟动作：DETACH 超时后跳到板级 bootloader 入口。
   // Runtime DFU only has one deferred action: jump to the board-specific
   // bootloader entry after the DETACH timeout expires.
-  void Process()
+  // Application policy retains the final switch. Processing/timeout readiness
+  // does not depend on an external per-class loop; this is only a compatibility
+  // application-triggered launch helper.
+  void Process() { (void)TryConsumeBootloaderLaunch(); }
+
+  bool ReadyToDetach() const
   {
-    if (!detach_pending_)
-    {
-      return;
-    }
+    return launch_phase_.load(std::memory_order_acquire) == READY;
+  }
 
-    const uint32_t now_ms = static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
-    if (static_cast<int32_t>(now_ms - detach_deadline_ms_) < 0)
-    {
-      return;
-    }
+  bool TryConsumeBootloaderLaunch()
+  {
+    uint32_t expected = READY;
+    if (!launch_phase_.compare_exchange_strong(expected, IDLE, std::memory_order_acq_rel))
+      return false;
+    if (jump_to_bootloader_) jump_to_bootloader_(jump_ctx_);
+    return true;
+  }
 
-    detach_pending_ = false;
-    if (jump_to_bootloader_ != nullptr)
-    {
-      jump_to_bootloader_(jump_ctx_);
-    }
+  void OnService(bool) override
+  {
+    if (launch_phase_.load(std::memory_order_acquire) == WAITING &&
+        static_cast<int32_t>(static_cast<uint32_t>(Timebase::GetMilliseconds()) -
+                             detach_deadline_ms_) >= 0)
+      launch_phase_.store(READY, std::memory_order_release);
   }
 
  protected:
@@ -113,6 +120,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
     UpdateWinUsbFunctionInterface(interface_num_);
     current_alt_setting_ = 0u;
     detach_pending_ = false;
+    launch_phase_.store(IDLE, std::memory_order_release);
     detach_timeout_ms_ = default_detach_timeout_ms_;
     state_ = DFUState::APP_IDLE;
     desc_block_.interface_desc.bInterfaceNumber = interface_num_;
@@ -131,6 +139,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
     // 解绑阶段只清理 runtime detach 状态；这里不持有额外 backend 资源。
     // Unbind only clears runtime detach state; no backend-owned resources live here.
     detach_pending_ = false;
+    launch_phase_.store(IDLE, std::memory_order_release);
     state_ = DFUState::APP_IDLE;
     inited_ = false;
   }
@@ -177,6 +186,27 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
     return ErrorCode::OK;
   }
 
+  void OnControlComplete(bool, const SetupPacket& setup) override
+  {
+    if ((setup.bmRequestType & REQ_TYPE_MASK) ==
+            static_cast<uint8_t>(RequestType::CLASS) &&
+        setup.bRequest == static_cast<uint8_t>(DFURequest::DETACH))
+    {
+      detach_deadline_ms_ =
+          static_cast<uint32_t>(Timebase::GetMilliseconds()) + detach_timeout_ms_;
+      launch_phase_.store(WAITING, std::memory_order_release);
+    }
+  }
+  void OnControlAbort(bool, const SetupPacket& setup) override
+  {
+    if (setup.bRequest == static_cast<uint8_t>(DFURequest::DETACH))
+    {
+      launch_phase_.store(IDLE, std::memory_order_release);
+      detach_pending_ = false;
+      state_ = DFUState::APP_IDLE;
+    }
+  }
+
   ErrorCode OnClassRequest(bool, uint8_t bRequest, uint16_t wValue, uint16_t wLength,
                            uint16_t wIndex, ControlTransferResult& result) override
   {
@@ -205,9 +235,7 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
           return ErrorCode::ARG_ERR;
         }
         detach_timeout_ms_ = (wValue == 0u) ? default_detach_timeout_ms_ : wValue;
-        detach_deadline_ms_ = static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) +
-                              detach_timeout_ms_;
-        detach_pending_ = true;
+        detach_pending_ = true;  // Readiness starts at actual control completion.
         state_ = DFUState::APP_DETACH;
         desc_block_.func_desc.wDetachTimeOut = detach_timeout_ms_;
         result.SendStatusInZLP() = true;
@@ -248,16 +276,18 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   }
 
  private:
+  static constexpr uint32_t IDLE = 0U, WAITING = 1U, READY = 2U;
+  std::atomic<uint32_t> launch_phase_{IDLE};
   DescriptorBlock desc_block_ = {};            ///< 描述符缓存 / Descriptor cache
   StatusResponse status_response_ = {};        ///< GETSTATUS 缓冲区 / GETSTATUS buffer
   JumpCallback jump_to_bootloader_ = nullptr;  ///< 跳 boot 回调 / Boot jump callback
-  void* jump_ctx_ = nullptr;                   ///< 跳转上下文 / Jump callback context
+  void* jump_ctx_ = nullptr;     ///< 跳转上下文 / Jump callback context
   uint8_t state_response_ = 0u;  ///< GETSTATE 缓冲字节 / GETSTATE byte buffer
   bool detach_pending_ = false;  ///< 是否等待 detach 超时 / Waiting for detach timeout
   uint16_t default_detach_timeout_ms_ =
-      50u;                               ///< 默认 detach 超时 / Default detach timeout
-  uint16_t detach_timeout_ms_ = 50u;     ///< 当前 detach 超时 / Active detach timeout
-  uint32_t detach_deadline_ms_ = 0u;     ///< detach 截止时刻 / Detach deadline tick
+      50u;                            ///< 默认 detach 超时 / Default detach timeout
+  uint16_t detach_timeout_ms_ = 50u;  ///< 当前 detach 超时 / Active detach timeout
+  uint32_t detach_deadline_ms_ = 0u;  ///< detach 截止时刻 / Detach deadline tick
   DFUState state_ = DFUState::APP_IDLE;  ///< Runtime DFU 状态 / Runtime DFU state
 };
 

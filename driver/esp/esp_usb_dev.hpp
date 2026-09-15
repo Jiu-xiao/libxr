@@ -6,6 +6,7 @@
 
 #include "esp_def.hpp"
 #include "esp_intr_alloc.h"
+#include "freertos/FreeRTOS.h"
 #include "libxr_type.hpp"
 #include "usb/core/ep_pool.hpp"
 #include "usb/device/dev_core.hpp"
@@ -21,7 +22,8 @@ class ESP32USBEndpoint;
 /**
  * @brief ESP32-S3 USB OTG 设备核心实现 / ESP32-S3 USB OTG device-core implementation
  */
-class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
+class ESP32USBDevice : public USB::EndpointPool,
+                       public USB::DeviceCore<USB::FullSpeedCapabilities>
 {
  public:
   /**
@@ -96,12 +98,14 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
    * @brief 去初始化 USB device core 状态 / Deinitialize the USB device-core state
    */
   void Deinit(bool in_isr) override;
+  void OnControllerReset() override;
+  void OnControlReady() override;
 
   /**
    * @brief 在控制传输阶段写入设备地址 / Write the device address during control-transfer
    * sequencing
    */
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
 
   /**
    * @brief 启动 USB device controller / Start the USB device controller
@@ -289,6 +293,7 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
    */
   bool EnsureRxFifo(uint16_t packet_size);
 
+  portMUX_TYPE hardware_mux_ = portMUX_INITIALIZER_UNLOCKED;
   EndpointMap endpoint_map_ = {};  ///< Endpoint 所有权映射表 / Endpoint ownership map
   FifoState fifo_state_ =
       {};  ///< FIFO 尺寸与分配账本 / FIFO sizing and allocation bookkeeping

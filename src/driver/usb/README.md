@@ -1,78 +1,118 @@
-# XRUSB
+# USB device core and endpoint ownership
 
-<div align="center">
+This directory implements the event-driven USB 2.0 device path. The controller owns
+one serialized software execution domain; it does not create a USB service thread.
+USB hardware, class callbacks, and ordinary callers can provide progress events.
+Each logical endpoint has one application/class owner; callers serialize submissions.
 
-<img src="https://github.com/Jiu-xiao/LibXR_CppCodeGenerator/raw/main/imgs/XRobot.jpeg" width="300">
+## Transmit
 
-A truly tiny and beautiful, ultra-fast and modern USB stack for embedded systems.
+An IN endpoint owns two fixed CPU-accessible DATA buffers and at most one prepared
+DATA block. The producer is `Callback<Endpoint::TxFill&>`:
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://xrobot.work/libxr/)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FJiu-xiao%2Flibxr?ref=badge_shield)
+```cpp
+void Fill(bool in_isr, Endpoint::TxFill& fill)
+{
+  // Buffer() is valid because the state machine already established capacity.
+  // Fill the bytes, then register their stable storage before any RW scope ends.
+  const size_t length = Produce(fill.Buffer());
+  if (length != 0) fill.SetSize(length);
+}
+```
 
-</div>
+No `SetSize` means no data, not failure. `SetSize(0)` explicitly supplies a normal
+zero-length transfer and is valid only when `CanStart()` is true. A zero-length
+transfer is active until its real hardware completion; length zero does not mean
+idle. It uses no DATA storage, but only one DATA block can be prepared behind it.
 
-## Introduction
+`RequestTx(in_isr)` is a retained progress doorbell. An idle endpoint fills/starts
+one block and can immediately prefill the alternate. A completion retires the old
+transfer, starts prepared DATA, and permits another fill. There is no transfer
+queue, nullable writable-buffer acquisition, or software role derived from a
+controller DATA toggle. A producer returning no data is not polled for retries.
 
-XRUSB is a standalone, modern C++ USB protocol stack. It is provided both as a [LibXR](https://github.com/Jiu-xiao/libxr) subtree and as an independent repository. XRUSB focuses on portability, high performance, and easy integration.
+CDC Write admission and completion remain RW concepts. A whole Write finishes
+when accepted into stable endpoint storage, including PREPARED storage, not when
+the host application reads it. Queue settlement must follow `fill.SetSize()`.
+CDC owns its not-yet-started termination intent; the endpoint never appends an
+unrequested Bulk ZLP merely because a block length is a packet-size multiple.
 
-## Key Features
+## Receive
 
-* **Modern C++ Implementation**: Written in C++17, using classes and template-based modular encapsulation for easy extension.
-* **Lock-Free Data Structures**: All data transfers and event handling are lock-free and thread-safe for maximum efficiency.
-* **Double Buffering Mechanism**: Fully utilizes hardware/software double buffers and DMA. Alternating read/write greatly increases data throughput.
-* **Dynamic Endpoint Allocation**: Endpoints are allocated on demand during enumeration; multiple classes can automatically manage and reuse endpoints to avoid resource waste.
-* **One-Time Memory Allocation**: All memory is determined at compile time and allocated once at construction. No redundant space is reserved for strings/descriptors.
-* **Interrupt-Driven**: Operates fully by hardware interrupts, with no reliance on polling or background threads.
-* **Interrupt-Safe**: Driver functions can be called directly from ISR (Interrupt Service Routine).
-* **Optimized Memory Copy**: Achieves higher throughput for bulk transfers and descriptor processing.
+`ArmReceive(length)` authorizes one bounded receive into endpoint-owned storage.
+Completion (including a real zero-length completion) retains the current result.
+The class must explicitly rearm after consumption; a callback returning or an
+unused hardware bank does not authorize the next request. `ReceiveResult()` is
+used only within the controller-owned synchronous scope. Memory capacity, receive
+extent, packet size, and a class message boundary are different quantities.
 
-## Device Drivers
+## Core and lifecycle
 
-This repository only contains platform-independent stack code. For platform-specific device drivers, please refer to the corresponding drivers in libxr, such as:
+`DeviceCore<Capabilities>` has explicit compile-time `SPEEDS`, `BOS`, and `BUS_TIME`
+policies. Optional BOS and bus-time state use separate empty/selected feature
+bases; disabled dispatch does not rely on LTO. Negotiated speed/configuration are
+runtime facts. Class composition stays non-templated at this boundary.
 
-- `driver/st/stm32_usb_ep.cpp`
-- `driver/ch/ch32_usb_endpoint_otghs.cpp`
-- `driver/esp/esp_usb_dev.cpp`
+EP0 is a separate single-request machine, without ordinary endpoint prewrite.
+The core owns data/status sequencing and actual success/abort notifications.
+The legacy class request result is an adapter; `read_zlp`/`write_zlp` no longer
+instruct a class to drive control handshakes. OUT stages are delivered whole and
+bounded. Handler failures do not receive a successful status stage.
 
-Note:
+Descriptors/resources are planned during initialization. Data endpoints are not
+activated by a descriptor read. Configuration changes apply before successful
+status. Suspend preserves the session; reset/deconfiguration discard old EP work
+without clearing unconsumed upstream RW data. Endpoint halt/clear-halt never
+blindly replays an interrupted transfer.
 
-- `USB-DEVICE` below refers to the native USB device controller path used by XRUSB.
-- Mainline libxr currently provides `CDC-JTAG` on ESP32-C3/ESP32-C6 via `driver/esp/esp_cdc_jtag.*`; this is a separate dedicated USB Serial/JTAG UART backend, not the generic XRUSB device-controller path.
+DFU owns one immutable Flash job/data area. A first busy GETSTATUS must complete
+before destructive work can start through the ordinary-context Timer. The slot
+remains occupied until USB-side result accounting. Reset cancels unstarted work
+or stops after the currently claimed noncancelable Flash call. The application
+retains the final jump decision (`TryConsumeAppLaunch` /
+`TryConsumeBootloaderLaunch`). Registered classes have initialization lifetime;
+the Timer does not make Flash erase/code-fetch limitations disappear.
 
-## Support Status
+## Backend migration
 
-### Device Stack
+- Endpoint `Config`'s fourth field is logical transfer-buffer capacity, not the old
+  hardware/software `double_buffer` boolean. Supply zero for supplied capacity,
+  or the class's declared maximum logical block size.
+- Replace backend Configure/Close/Transfer overrides with `ConfigureHardware`,
+  `CloseHardware`, `StartHardware(RawData,size_t)`, and hardware halt methods.
+  `HardwareBuffer()` is the controller-accessible arena; `TransferBuffer()` is
+  the current CPU destination/source, not an arbitrary next writable bank.
+- `TransferMultiBulk` and controller-driven software `SwitchBuffer` are removed.
+  Classes use a fixed owned block plus the producer/receive contract. Backends
+  segment a block and report one logical completion.
+- Use `EndpointPool::InterruptScope` around a complete raw USB IRQ batch. Capture
+  data/completion and clear old hardware sources before it permits class work.
+  `HardwareScope` protects short start/stop/register handoffs only, never a class
+  callback or Flash operation. DMA stop/quiescence is still a hardware obligation.
+- STM32 BSP USB IRQ handlers should call
+  `LibXR::STM32USBDevice::IRQHandler(&hpcd_...)` instead of directly calling
+  `HAL_PCD_IRQHandler`. This wraps the unchanged vendor HAL and closes the
+  raw-IRQ versus rearm handoff. CH32 and ESP wrappers are inside their backend.
+  External BSP/generator files are not modified by this branch.
+- PMA Bulk uses hardware single buffering initially; software TX prewrite remains.
+  CH32 ordinary DMA paths do not reserve the opposite direction for hardware banks.
+- A bus-time frame value `0xffff` means the backend cannot supply a frame counter;
+  microframe `0xff` means unavailable. No historical SOF callbacks are invented.
+  The inspected CH32V203 USBFS SDK lacks a device-SOF interrupt selector, so that
+  path does not promise periodic notifications. Other enabled sources are wired.
 
-| Protocol   | Status                        | Notes                                                                                          |
-| ---------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| CDC-ACM    | Supported                     | Implemented as LibXR’s UART class                                                              |
-| HID        | Supported                     | Only standard keyboard/mouse and remote controller; other types require you to derive your own |
-| UAC        | Supported                     | Currently implements a UAC 1.0 microphone only                                                 |
-| GSUSB      | Supported (CAN/FDCAN)         | Driverless SocketCAN on Linux                                                                  |
-| DAPLINK V2 | Supports (SWD interface only) | Can be used with Keil/OpenOCD                                                                  |
+## Scope and validation limits
 
-### Host Stack
+SuperSpeed/H417, Bulk Streams, and a general deferred EP0 reply API are not enabled
+here. A SuperSpeed capability is rejected at compile time instead of advertising
+unimplemented descriptors/link operations. These require a separate completed
+backend/profile integration; USB2 BOS is not the same thing as SuperSpeed support.
 
-TODO
-
-### Platform Support
-
-| Platform | Phy           | Status             | Test Device                |
-| -------- | ------------- | ------------------ | -------------------------- |
-| STM32    | USB_DEVICE_FS | Supported          | STM32F103                  |
-| STM32    | USB_DRV_FS    | Supported (Device) | STM32G431                  |
-| STM32    | USB_OTG_FS    | Supported (Device) | STM32F407                  |
-| STM32    | USB_OTG_HS    | Supported (Device) | STM32F407/STM32H750        |
-| ESP32-S3 | USB_OTG_FS    | Supported (Device) | ESP32-S3                   |
-| CH32     | USB_DEVICE_FS | Supported          | CH32V203                   |
-| CH32     | USB_OTG_FS    | Supported (Device) | CH32V307/CH32V203/CH32V208 |
-| CH32     | USB_OTG_HS    | Supported (Device) | CH32V307                   |
-
-Note:
-
-- The current ESP native USB device backend is implemented for `ESP32-S3`.
-
-## Documentation
-
-Released together with the [LibXR documentation](https://xrobot.work/en/docs/xrusb).
+Durable tests run real Endpoint, DeviceCore, CDC, HID, DAP, UAC and DFU code with
+controlled hardware/Flash boundaries. They cover prewrite, exact zero completion,
+reentry, multi-core publication, retained RX, control stages, reset/cancellation,
+HS/FS descriptors, integer audio frames and single execution of DAP commands.
+They do not certify physical bus timing, cache/MMIO behavior, or USB compliance.
+STM32/CH32 real-SDK translation units and an ESP-IDF S3 component are additionally
+cross-compiled. Actual boards and the migrated BSP IRQ entry remain validation
+requirements before merging this branch.

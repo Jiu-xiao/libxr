@@ -360,17 +360,18 @@ static void disable_rx(USB::Endpoint::EPNumber ep_num)
 
 CH32EndpointOtgHs::CH32EndpointOtgHs(EPNumber ep_num, Direction dir,
                                      LibXR::RawData buffer, bool double_buffer)
-    : Endpoint(ep_num, dir, buffer), hw_double_buffer_(double_buffer), dma_buffer_(buffer)
+    : Endpoint(ep_num, dir, buffer), dma_buffer_(buffer)
 {
+  UNUSED(double_buffer);
   map_otg_hs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
   if (dir == Direction::IN)
   {
-    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, double_buffer);
+    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
   }
   else
   {
-    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, double_buffer);
+    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
   }
 
   if (dir == Direction::IN)
@@ -384,43 +385,36 @@ CH32EndpointOtgHs::CH32EndpointOtgHs(EPNumber ep_num, Direction dir,
   }
 }
 
-void CH32EndpointOtgHs::Configure(const Config& cfg)
+void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
 {
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
 
-  const int EP_IDX = EPNumberToInt8(GetNumber());
+  const int ep_idx = EPNumberToInt8(GetNumber());
+  const uint8_t in_idx = static_cast<uint8_t>(Direction::IN);
+  const uint8_t out_idx = static_cast<uint8_t>(Direction::OUT);
+  const bool has_in = map_otg_hs_[ep_idx][in_idx] != nullptr;
+  const bool has_out = map_otg_hs_[ep_idx][out_idx] != nullptr;
 
-  const uint8_t IN_IDX = static_cast<uint8_t>(Direction::IN);
-  const uint8_t OUT_IDX = static_cast<uint8_t>(Direction::OUT);
-
-  const bool HAS_IN = (map_otg_hs_[EP_IDX][IN_IDX] != nullptr);
-  const bool HAS_OUT = (map_otg_hs_[EP_IDX][OUT_IDX] != nullptr);
-
-  // 双缓冲策略：EP0 不使用 double buffer。
-  // Double-buffer policy: EP0 does not use double buffering.
-  bool enable_double = (GetNumber() != EPNumber::EP0) && hw_double_buffer_;
-  if (enable_double && HAS_IN && HAS_OUT)
-  {
-    ASSERT(false);  // 双缓冲端点必须是单向
-                    // / Double-buffer endpoints must be single-direction.
-    enable_double = false;
-  }
-  ep_cfg.double_buffer = enable_double;
-
-  const size_t buffer_size = GetBuffer().size_;
+  const size_t buffer_size = HardwareBuffer().size_;
   if (ep_cfg.type == Type::BULK)
   {
     // CH32 USBHS bulk endpoints always use the hardware-fixed 512-byte packet size.
     // CH32 USBHS 的 BULK 端点始终使用硬件固定的 512 字节包长。
     ASSERT(buffer_size >= 512u);
-    ep_cfg.max_packet_size = 512u;
+    ep_cfg.max_packet_size = cfg.max_packet_size;
   }
   else if (ep_cfg.max_packet_size > buffer_size)
   {
     // 非 BULK 端点的包长按缓冲区大小截断。
     // Clamp non-bulk packet sizes to the endpoint buffer size.
     ep_cfg.max_packet_size = buffer_size;
+  }
+
+  if (IsPlanning())
+  {
+    SetState(State::IDLE);
+    return;
   }
 
   if (GetDirection() == Direction::IN)
@@ -484,58 +478,64 @@ void CH32EndpointOtgHs::Configure(const Config& cfg)
       disable_tx(GetNumber());
     }
 
-    if (!HAS_OUT)
+    if (!has_out)
     {
       disable_rx(GetNumber());
     }
 
-    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, enable_double);
+    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
   }
   else
   {
     enable_rx(GetNumber());
 
-    if (!HAS_IN)
+    if (!has_in)
     {
       disable_tx(GetNumber());
     }
 
-    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, enable_double);
+    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
   }
 
   SetState(State::IDLE);
 }
 
-void CH32EndpointOtgHs::Close()
+void CH32EndpointOtgHs::CloseHardware()
 {
-  disable_tx(GetNumber());
-  disable_rx(GetNumber());
-
-  *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
-  *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
-
-  SetState(State::DISABLED);
+  if (GetDirection() == Direction::IN)
+  {
+    *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
+    disable_tx(GetNumber());
+  }
+  else
+  {
+    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
+    disable_rx(GetNumber());
+  }
 }
 
-ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
+ErrorCode CH32EndpointOtgHs::StartHardware(RawData buffer, size_t size)
 {
-  if (GetState() == State::BUSY)
-  {
-    return ErrorCode::BUSY;
-  }
-
-  auto buffer = GetBuffer();
   if (buffer.size_ < size)
   {
     return ErrorCode::NO_BUFF;
   }
 
   bool IS_IN = (GetDirection() == Direction::IN);
-
-  if (IS_IN && UseDoubleBuffer() && GetType() != Type::ISOCHRONOUS)
+  const auto arena = HardwareBuffer();
+  const uintptr_t base = reinterpret_cast<uintptr_t>(arena.addr_);
+  const uintptr_t address = reinterpret_cast<uintptr_t>(buffer.addr_);
+  const bool direct = address >= base && address - base <= arena.size_ &&
+                      size <= arena.size_ - (address - base);
+  transfer_dma_ = direct ? buffer : arena;
+  if (IS_IN)
   {
-    SwitchBuffer();
+    if (transfer_dma_.addr_ != buffer.addr_ && size != 0U)
+      Memory::FastCopy(transfer_dma_.addr_, buffer.addr_, size);
+    set_tx_dma_buffer(GetNumber(), transfer_dma_.addr_, transfer_dma_.size_, false);
   }
+  else
+    set_rx_dma_buffer(GetNumber(), transfer_dma_.addr_, transfer_dma_.size_, false);
 
   if (GetNumber() == EPNumber::EP0)
   {
@@ -547,7 +547,6 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
   }
 
   last_transfer_size_ = size;
-  SetState(State::BUSY);
 
   if (IS_IN)
   {
@@ -623,13 +622,9 @@ ErrorCode CH32EndpointOtgHs::Transfer(size_t size)
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgHs::Stall()
+ErrorCode CH32EndpointOtgHs::StallHardware()
 {
   const bool IS_IN = (GetDirection() == Direction::IN);
-  if (GetState() != State::IDLE && !(GetState() == State::BUSY && !IS_IN))
-  {
-    return ErrorCode::BUSY;
-  }
 
   if (IS_IN)
   {
@@ -643,23 +638,14 @@ ErrorCode CH32EndpointOtgHs::Stall()
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgHs::ClearStall()
+ErrorCode CH32EndpointOtgHs::ClearStallHardware()
 {
-  if (GetState() != State::STALLED)
-  {
-    return ErrorCode::FAILED;
-  }
-
-  bool IS_IN = (GetDirection() == Direction::IN);
-  if (IS_IN)
-  {
-    *get_tx_control_addr(GetNumber()) &= ~USBHS_UEP_T_RES_STALL;
-  }
+  if (GetDirection() == Direction::IN)
+    *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;
   else
-  {
-    *get_rx_control_addr(GetNumber()) &= ~USBHS_UEP_R_RES_STALL;
-  }
-  SetState(State::IDLE);
+    *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_AUTO;
+  tog0_ = false;
+  tog1_ = false;
   return ErrorCode::OK;
 }
 
@@ -705,8 +691,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
         ((USBHSD->INT_ST & USBHS_UIS_TOG_OK) == USBHS_UIS_TOG_OK);  // NOLINT
     if (!TOG_OK)
     {
-      SetState(State::IDLE);
-      (void)Transfer(last_transfer_size_);
+      (void)StartHardware(TransferBuffer(), last_transfer_size_);
       return;
     }
   }
@@ -738,25 +723,16 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
           static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK);
     }
   }
+  if (IS_OUT && size != 0U && transfer_dma_.addr_ != TransferBuffer().addr_)
+  {
+    if (size > TransferBuffer().size_)
+    {
+      OnTransferCompleteCallback(true, size, ErrorCode::OUT_OF_RANGE);
+      return;
+    }
+    Memory::FastCopy(TransferBuffer().addr_, transfer_dma_.addr_, size);
+  }
   OnTransferCompleteCallback(true, size);
-}
-
-void CH32EndpointOtgHs::SwitchBuffer()
-{
-  if (GetDirection() == Direction::IN)
-  {
-    const auto* tx_ctrl = get_tx_control_addr(GetNumber());
-    const bool TOG_IS_DATA1 =
-        ((*tx_ctrl & USBHS_UEP_T_TOG_MASK) == USBHS_UEP_T_TOG_DATA1);
-    SetActiveBlock(!TOG_IS_DATA1);
-  }
-  else
-  {
-    const auto* rx_ctrl = get_rx_control_addr(GetNumber());
-    const bool TOG_IS_DATA1 =
-        ((*rx_ctrl & USBHS_UEP_R_TOG_MASK) == USBHS_UEP_R_TOG_DATA1);
-    SetActiveBlock(TOG_IS_DATA1);
-  }
 }
 
 #endif

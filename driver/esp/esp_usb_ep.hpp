@@ -21,13 +21,13 @@ class ESP32USBEndpoint : public USB::Endpoint
 
   friend class ESP32USBDevice;
 
-  void Configure(const Config& cfg) override;
-  void Close() override;
-  ErrorCode Stall() override;
-  ErrorCode ClearStall() override;
-  ErrorCode Transfer(size_t size) override;
+  void ConfigureHardware(const Config& cfg) override;
+  void CloseHardware() override;
+  ErrorCode StallHardware() override;
+  ErrorCode ClearStallHardware() override;
+  ErrorCode StartHardware(RawData buffer, size_t size) override;
 
-  size_t MaxTransferSize() const override;
+  size_t MaxHardwareTransferSize() const override;
 
  private:
   enum class Ep0OutPhase : uint8_t

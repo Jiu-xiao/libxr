@@ -1,8 +1,10 @@
 #pragma once
+#include <atomic>
 #include <cstring>
 
 #include "dev_core.hpp"
 #include "libxr_mem.hpp"
+#include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
 
 namespace LibXR::USB
@@ -70,11 +72,11 @@ class HID : public DeviceClass
   {
     uint8_t bLength;                    ///< 描述符长度 / Descriptor length
     HIDDescriptorType bDescriptorType;  ///< 描述符类型 / Descriptor type (0x21)
-    uint16_t bcdHID;                    ///< HID 版本号 / HID class specification release
-    uint8_t bCountryCode;               ///< 国家码 / Country code
+    uint16_t bcdHID;          ///< HID 版本号 / HID class specification release
+    uint8_t bCountryCode;     ///< 国家码 / Country code
     uint8_t bNumDescriptors;  ///< 后续描述符数量 / Number of subordinate descriptors
     HIDDescriptorType
-        bReportDescriptorType;         ///< 报告描述符类型 / Report descriptor type (0x22)
+        bReportDescriptorType;  ///< 报告描述符类型 / Report descriptor type (0x22)
     uint16_t wReportDescriptorLength;  ///< 报告描述符长度 / Report descriptor length
   };
 
@@ -153,14 +155,20 @@ class HID : public DeviceClass
     auto ans = endpoint_pool.Get(ep_in_, Endpoint::Direction::IN, in_ep_num_);
     ASSERT(ans == ErrorCode::OK);
     ep_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, TX_REPORT_LEN});
+        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT,
+         static_cast<uint16_t>(LibXR::min<size_t>(
+             TX_REPORT_LEN, endpoint_pool.GetSpeed() == Speed::HIGH ? 1024U : 64U)),
+         TX_REPORT_LEN});
 
     if (enable_out_endpoint_)
     {
       ans = endpoint_pool.Get(ep_out_, Endpoint::Direction::OUT, out_ep_num_);
       ASSERT(ans == ErrorCode::OK);
       ep_out_->Configure(
-          {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, RX_REPORT_LEN});
+          {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT,
+           static_cast<uint16_t>(LibXR::min<size_t>(
+               RX_REPORT_LEN, endpoint_pool.GetSpeed() == Speed::HIGH ? 1024U : 64U)),
+           RX_REPORT_LEN});
     }
 
     // 填充接口描述符
@@ -191,7 +199,7 @@ class HID : public DeviceClass
         static_cast<uint8_t>(DescriptorType::ENDPOINT),
         ep_in_->GetAddress(),
         static_cast<uint8_t>(Endpoint::Type::INTERRUPT),
-        TX_REPORT_LEN,
+        ep_in_->MaxPacketSize(),
         in_ep_interval_  // 轮询间隔ms
     };
 
@@ -202,7 +210,7 @@ class HID : public DeviceClass
                       static_cast<uint8_t>(DescriptorType::ENDPOINT),
                       ep_out_->GetAddress(),
                       static_cast<uint8_t>(Endpoint::Type::INTERRUPT),
-                      RX_REPORT_LEN,
+                      ep_out_->MaxPacketSize(),
                       out_ep_interval_};
     }
 
@@ -217,6 +225,7 @@ class HID : public DeviceClass
     }
 
     ep_in_->SetOnTransferCompleteCallback(on_data_in_complete_cb_);
+    ep_in_->SetOnTxFill(fill_report_cb_);
 
     if (enable_out_endpoint_)
     {
@@ -225,6 +234,11 @@ class HID : public DeviceClass
     }
 
     inited_ = true;
+    last_input_length_ = 0;
+    input_endpoint_.store(ep_in_, std::memory_order_release);
+    uint32_t expected = DISABLED;
+    (void)input_phase_.compare_exchange_strong(
+        expected, AVAILABLE, std::memory_order_release, std::memory_order_relaxed);
   }
 
   static void OnDataOutCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
@@ -234,7 +248,6 @@ class HID : public DeviceClass
       return;
     }
     self->OnDataOutComplete(in_isr, data);
-    self->ep_out_->Transfer(RX_REPORT_LEN);
   }
 
   static void OnDataInCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
@@ -243,6 +256,10 @@ class HID : public DeviceClass
     {
       return;
     }
+    uint32_t expected = IN_FLIGHT;
+    (void)self->input_phase_.compare_exchange_strong(expected, AVAILABLE,
+                                                     std::memory_order_acq_rel);
+    self->last_report_ms_ = static_cast<uint32_t>(Timebase::GetMilliseconds());
     self->OnDataInComplete(in_isr, data);
   }
 
@@ -250,6 +267,9 @@ class HID : public DeviceClass
   {
     UNUSED(in_isr);
     UNUSED(data);
+    // This is the default HID class policy, not an unconditional core rearm
+    // after a derived class's callback. DAP may withhold this permission.
+    if (ep_out_) (void)ep_out_->ArmReceive(RX_REPORT_LEN);
   }
 
   virtual void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data)
@@ -267,6 +287,8 @@ class HID : public DeviceClass
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
+    input_endpoint_.store(nullptr, std::memory_order_release);
+    CancelInput();
     if (ep_in_)
     {
       ep_in_->Close();
@@ -597,33 +619,29 @@ class HID : public DeviceClass
    * @param report 输入报告数据指针及长度 / Input report data and length
    * @return ErrorCode 错误码 / Error code
    */
-  ErrorCode SendInputReport(ConstRawData report)
+  ErrorCode SendInputReport(ConstRawData report, bool in_isr = false)
   {
-    if (!inited_ || !ep_in_)
-    {
-      return ErrorCode::FAILED;
-    }
-    if (!report.addr_ || report.size_ == 0 || report.size_ > TX_REPORT_LEN)
-    {
+    if (report.addr_ == nullptr || report.size_ == 0U || report.size_ > TX_REPORT_LEN)
       return ErrorCode::ARG_ERR;
-    }
-
-    if (ep_in_->GetState() != Endpoint::State::IDLE)
+    Endpoint* endpoint = input_endpoint_.load(std::memory_order_acquire);
+    if (!endpoint) return ErrorCode::FAILED;
+    uint32_t expected = AVAILABLE;
+    if (!input_phase_.compare_exchange_strong(expected, WRITING,
+                                              std::memory_order_acq_rel))
+      return expected == DISABLED ? ErrorCode::FAILED : ErrorCode::BUSY;
+    Memory::FastCopy(input_pending_, report.addr_, report.size_);
+    input_pending_size_ = report.size_;
+    expected = WRITING;
+    if (!input_phase_.compare_exchange_strong(expected, READY, std::memory_order_release,
+                                              std::memory_order_relaxed))
     {
-      return ErrorCode::BUSY;
+      input_phase_.store(
+          input_endpoint_.load(std::memory_order_acquire) ? AVAILABLE : DISABLED,
+          std::memory_order_release);
+      return ErrorCode::FAILED;  // A reset cancelled this not-yet-published report.
     }
-
-    // 数据拷贝到端点缓冲区
-    auto buf = ep_in_->GetBuffer();
-    if (report.size_ > buf.size_)
-    {
-      return ErrorCode::NO_BUFF;
-    }
-
-    LibXR::Memory::FastCopy(buf.addr_, report.addr_, report.size_);
-
-    // 启动端点传输
-    return ep_in_->Transfer(report.size_);
+    endpoint->RequestTx(in_isr);
+    return ErrorCode::OK;
   }
 
   /**
@@ -656,7 +674,94 @@ class HID : public DeviceClass
    */
   bool HasOutEndpoint() const { return enable_out_endpoint_; }
 
+  ConstRawData LastInputReport() const { return {last_input_, last_input_length_}; }
+
+ public:
+  bool WantsBusTime() const override { return true; }
+  size_t GetControlReceiveCapacity() const override
+  {
+    return LibXR::max<size_t>(64U, LibXR::max<size_t>(TX_REPORT_LEN, RX_REPORT_LEN));
+  }
+  void OnBusTime(bool in_isr, const BusTime&) override
+  {
+    if (inited_ && idle_rate_ != 0U && last_input_length_ != 0U &&
+        static_cast<uint32_t>(Timebase::GetMilliseconds()) - last_report_ms_ >=
+            static_cast<uint32_t>(idle_rate_) * 4U)
+    {
+      uint32_t expected = AVAILABLE;
+      if (input_phase_.compare_exchange_strong(expected, IN_FLIGHT,
+                                               std::memory_order_acq_rel))
+      {
+        idle_report_pending_ = true;
+        ep_in_->RequestTx(in_isr);
+      }
+    }
+  }
+  void OnDeviceEvent(bool in_isr, DeviceEvent event, uint8_t endpoint) override
+  {
+    if (event == DeviceEvent::ENDPOINT_HALTED && ep_in_ &&
+        endpoint == ep_in_->GetAddress())
+      CancelInput();
+    if (event == DeviceEvent::ENDPOINT_RESUMED)
+    {
+      if (ep_in_ && endpoint == ep_in_->GetAddress())
+      {
+        uint32_t expected = DISABLED;
+        (void)input_phase_.compare_exchange_strong(expected, AVAILABLE,
+                                                   std::memory_order_acq_rel);
+      }
+      if (ep_out_ && endpoint == ep_out_->GetAddress())
+        (void)ep_out_->ArmReceive(RX_REPORT_LEN);
+    }
+    UNUSED(in_isr);
+  }
+
  private:
+  static constexpr uint32_t DISABLED = 0U, AVAILABLE = 1U, WRITING = 2U, READY = 3U,
+                            IN_FLIGHT = 4U, CANCEL_WRITING = 5U;
+  std::atomic<uint32_t> input_phase_{DISABLED};
+  std::atomic<Endpoint*> input_endpoint_{nullptr};
+  uint8_t input_pending_[TX_REPORT_LEN]{};
+  size_t input_pending_size_ = 0;
+  uint8_t last_input_[TX_REPORT_LEN]{};
+  size_t last_input_length_ = 0;
+  uint32_t last_report_ms_ = 0;
+  bool idle_report_pending_ = false;
+
+  void CancelInput()
+  {
+    uint32_t state = input_phase_.load(std::memory_order_acquire);
+    while (!input_phase_.compare_exchange_weak(
+        state, state == WRITING || state == CANCEL_WRITING ? CANCEL_WRITING : DISABLED,
+        std::memory_order_acq_rel))
+    {
+    }
+    idle_report_pending_ = false;
+  }
+
+  void FillReport(bool, Endpoint::TxFill& fill)
+  {
+    if (input_phase_.load(std::memory_order_acquire) == READY)
+    {
+      const size_t size = input_pending_size_;
+      REQUIRE(size <= fill.Buffer().size_);
+      Memory::FastCopy(fill.Buffer().addr_, input_pending_, size);
+      Memory::FastCopy(last_input_, input_pending_, size);
+      last_input_length_ = size;
+      fill.SetSize(size);
+      input_phase_.store(IN_FLIGHT, std::memory_order_release);
+    }
+    else if (idle_report_pending_)
+    {
+      idle_report_pending_ = false;
+      Memory::FastCopy(fill.Buffer().addr_, last_input_, last_input_length_);
+      fill.SetSize(last_input_length_);
+    }
+  }
+  Callback<Endpoint::TxFill&> fill_report_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool context, HID* self, Endpoint::TxFill& fill)
+      { self->FillReport(context, fill); }, this);
+
   uint8_t in_ep_interval_;         ///< 输入端点间隔 / IN endpoint interval
   uint8_t out_ep_interval_;        ///< 输出端点间隔 / OUT endpoint interval
   HIDDescBlockINOUT desc_;         ///< HID 描述符块/ Descriptor block
@@ -670,7 +775,7 @@ class HID : public DeviceClass
   const char* interface_string_ = nullptr;  ///< 接口字符串 / Interface string
 
   Protocol protocol_ = Protocol::REPORT;  ///< 当前协议类型 / Current protocol
-  uint8_t idle_rate_ = 0;                 ///< 当前空闲率/ Current idle rate (unit 4ms)
+  uint8_t idle_rate_ = 0;  ///< 当前空闲率/ Current idle rate (unit 4ms)
   uint8_t last_output_report_id_ =
       0;  ///< 最近的 Output Report ID / Last Output Report ID
 

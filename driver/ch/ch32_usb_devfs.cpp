@@ -270,6 +270,8 @@ static void usbdev_fs_irqhandler()
     return;
   }
 
+  USB::EndpointPool::InterruptScope interrupt_scope(*usb);
+
   auto& map = LibXR::CH32EndpointDevFs::map_dev_fs_;
 
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
@@ -287,6 +289,14 @@ static void usbdev_fs_irqhandler()
     // 之后才继续处理新的 CTR 事件。
     // Bus reset rebuilds the PMA allocator and EP0 default state before
     // processing new CTR events again.
+    if (ISTR & 0x0200U)
+    {
+      usbdev_clear_istr(0x0200U);
+      const uint16_t frame =
+          *reinterpret_cast<volatile uint16_t*>(USBDEV_REG_BASE + 0x48U);
+      usb->OnSof(true, frame & 0x7ffU);
+    }
+
     if (ISTR & USB_ISTR_RESET)
     {
       usbdev_clear_istr(USB_ISTR_RESET);
@@ -294,13 +304,7 @@ static void usbdev_fs_irqhandler()
       *usbdev_daddr() = USB_DADDR_EF;
       *usbdev_btable() = 0;
 
-      LibXR::CH32EndpointDevFs::ResetPMAAllocator();
-
-      usb->Deinit(true);
-      usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
+      usb->OnBusReset(true);
 
       LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
       LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
@@ -314,21 +318,14 @@ static void usbdev_fs_irqhandler()
     if (ISTR & USB_ISTR_SUSP)
     {
       usbdev_clear_istr(USB_ISTR_SUSP);
-
-      usb->Deinit(true);
-      usb->Init(true);
-
-      out0->SetState(LibXR::USB::Endpoint::State::IDLE);
-      in0->SetState(LibXR::USB::Endpoint::State::IDLE);
-
-      LibXR::CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
-      LibXR::CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_NAK);
+      usb->OnSuspend(true);
       continue;
     }
 
     if (ISTR & USB_ISTR_WKUP)
     {
       usbdev_clear_istr(USB_ISTR_WKUP);
+      usb->OnResume(true);
       continue;
     }
 
@@ -356,6 +353,7 @@ static void usbdev_fs_irqhandler()
           if (epr & USB_EP_CTR_TX)
           {
             LibXR::CH32EndpointDevFs::ClearEpCtrTx(0);
+            in0->TransferComplete(0);
           }
           LibXR::CH32EndpointDevFs::ClearEpCtrRx(0);
 
@@ -432,9 +430,11 @@ CH32USBDeviceFS::CH32USBDeviceFS(
         CONFIGS,
     ConstRawData uid)
     : USB::EndpointPool(EP_CFGS.size() * 2),
-      USB::DeviceCore(*this, USB::USBSpec::USB_2_1, USB::Speed::FULL, packet_size, vid,
-                      pid, bcd, LANG_LIST, CONFIGS, uid)
+      USB::DeviceCore<USB::FullSpeedCapabilities>(*this, USB::USBSpec::USB_2_1,
+                                                  USB::Speed::FULL, packet_size, vid, pid,
+                                                  bcd, LANG_LIST, CONFIGS, uid)
 {
+  ConfigureCH32USBGuard(*this);
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);
 
   auto cfgs_itr = EP_CFGS.begin();
@@ -478,10 +478,9 @@ CH32USBDeviceFS::CH32USBDeviceFS(
   }
 }
 
-LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address,
-                                             USB::DeviceCore::Context context)
+LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address, USB::ControlContext context)
 {
-  if (context == USB::DeviceCore::Context::STATUS_IN_COMPLETE)
+  if (context == USB::ControlContext::STATUS_IN_COMPLETE)
   {
     const uint8_t N_EP = static_cast<uint8_t>(CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);
     for (uint8_t i = 0; i < N_EP; i++)
@@ -493,8 +492,15 @@ LibXR::ErrorCode CH32USBDeviceFS::SetAddress(uint8_t address,
 
     CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
     CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
+    if (WantsBusTime()) *usbdev_cntr() |= 0x0200U;
   }
   return LibXR::ErrorCode::OK;
+}
+
+void CH32USBDeviceFS::OnControlReady()
+{
+  CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
+  if (WantsBusTime()) *usbdev_cntr() |= 0x0200U;
 }
 
 void CH32USBDeviceFS::Start(bool)
@@ -542,6 +548,7 @@ void CH32USBDeviceFS::Start(bool)
 
   CH32EndpointDevFs::SetEpTxStatus(0, USB_EP_TX_NAK);
   CH32EndpointDevFs::SetEpRxStatus(0, USB_EP_RX_VALID);
+  if (WantsBusTime()) *usbdev_cntr() |= 0x0200U;
 
   // DeviceCore::Init() 可能早于 FSDEV reset/BTABLE 初始化就预挂起 OUT 端点；
   // 因此这里在硬件初始化完成后补一次 non-EP0 OUT 端点重装填。

@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 
@@ -77,8 +78,10 @@ class UAC1MicrophoneQ : public DeviceClass
         interval_(interval),
         speed_(speed),
         sr_hz_(sample_rate_hz),
+        supported_rate_(sample_rate_hz),
         pcm_queue_(queue_bytes)
   {
+    REQUIRE(sr_hz_ != 0U && sr_hz_ <= 0xffffffU);
     RecomputeTiming();
     // 缓存端点采样率（3 字节小端） / Cache current sampling frequency (3‑byte LE)
     sf_cur_[0] = static_cast<uint8_t>(sr_hz_ & 0xFF);
@@ -294,7 +297,7 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   struct UAC1DescBlock
   {
-    IADDescriptor iad;             ///< 接口关联描述符 / Interface association descriptor
+    IADDescriptor iad;  ///< 接口关联描述符 / Interface association descriptor
     InterfaceDescriptor ac_intf;   ///< AC 接口 / AC interface
     CSACHeader ac_hdr;             ///< AC 头 / AC header
     ACInputTerminal it_mic;        ///< 输入端子 / Input terminal
@@ -322,6 +325,8 @@ class UAC1MicrophoneQ : public DeviceClass
     inited_ = false;
     streaming_ = false;
     acc_rem_ = 0;
+    speed_ = endpoint_pool.GetSpeed();
+    RecomputeTiming();
 
     if (speed_ == Speed::HIGH)
     {
@@ -329,7 +334,6 @@ class UAC1MicrophoneQ : public DeviceClass
     }
     else
     {
-      ASSERT(interval_ == 1);
       ASSERT(w_max_packet_size_ <= 1023);
     }
 
@@ -340,7 +344,8 @@ class UAC1MicrophoneQ : public DeviceClass
     ASSERT(ans == ErrorCode::OK);
 
     ep_iso_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::ISOCHRONOUS,
-                           static_cast<uint16_t>(w_max_packet_size_), true});
+                           static_cast<uint16_t>(w_max_packet_size_),
+                           w_max_packet_size_});
 
     itf_ac_num_ = start_itf_num;
     itf_as_num_ = static_cast<uint8_t>(start_itf_num + 1);
@@ -443,11 +448,14 @@ class UAC1MicrophoneQ : public DeviceClass
     // IN 传输完成后继续投下一帧。
     // Kick the next frame after each IN transfer completes.
     ep_iso_in_->SetOnTransferCompleteCallback(on_in_complete_cb_);
+    ep_iso_in_->SetOnTxFill(fill_audio_cb_);
+    ep_iso_in_->SetOnTransferError(error_cb_);
 
     // 把整块描述符数据交给 DeviceClass。
     // Publish the full descriptor block to DeviceClass.
     SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
+    ep_iso_in_->Close();  // Alternate zero does not activate a data endpoint.
     inited_ = true;
   }
 
@@ -500,7 +508,7 @@ class UAC1MicrophoneQ : public DeviceClass
         case GET_CUR:
           if (wLength == 3)
           {
-            r.write_data = ConstRawData{sf_cur_, 3};
+            r.write_data = ConstRawData{sf_pending_, 3};
             return ErrorCode::OK;
           }
           break;
@@ -508,7 +516,7 @@ class UAC1MicrophoneQ : public DeviceClass
           if (wLength == 3)
           {
             pending_set_sf_ = true;
-            r.read_data = RawData{sf_cur_, 3};
+            r.read_data = RawData{sf_pending_, 3};
             return ErrorCode::OK;
           }
           break;
@@ -516,7 +524,7 @@ class UAC1MicrophoneQ : public DeviceClass
         case GET_MAX:
           if (wLength == 3)
           {
-            r.write_data = ConstRawData{sf_cur_, 3};
+            r.write_data = ConstRawData{sf_pending_, 3};
             return ErrorCode::OK;
           }  // 单一频点 / single discrete rate
           break;
@@ -630,21 +638,17 @@ class UAC1MicrophoneQ : public DeviceClass
    * @brief 处理类请求数据阶段（应用 SET_CUR 的采样率）
    *        Handle class request data stage (apply SET_CUR sampling freq)
    */
-  ErrorCode OnClassData(bool /*in_isr*/, uint8_t bRequest,
-                        LibXR::ConstRawData& /*data*/) override
+  ErrorCode OnClassData(bool, uint8_t bRequest, ConstRawData& data) override
   {
     if (bRequest == SET_CUR && pending_set_sf_)
     {
-      const uint32_t NEW_SR = static_cast<uint32_t>(sf_cur_[0]) |
-                              (static_cast<uint32_t>(sf_cur_[1]) << 8) |
-                              (static_cast<uint32_t>(sf_cur_[2]) << 16);
-      if (NEW_SR > 0 && NEW_SR != sr_hz_)
-      {
-        sr_hz_ = NEW_SR;
-        RecomputeTiming();
-      }
       pending_set_sf_ = false;
-      return ErrorCode::OK;
+      if (data.size_ != 3U) return ErrorCode::ARG_ERR;
+      const uint32_t rate = static_cast<uint32_t>(sf_pending_[0]) |
+                            (static_cast<uint32_t>(sf_pending_[1]) << 8U) |
+                            (static_cast<uint32_t>(sf_pending_[2]) << 16U);
+      if (rate != supported_rate_) return ErrorCode::ARG_ERR;
+      Memory::FastCopy(sf_cur_, sf_pending_, sizeof(sf_cur_));
     }
     return ErrorCode::OK;
   }
@@ -689,7 +693,8 @@ class UAC1MicrophoneQ : public DeviceClass
 
       case 1:  // Alt 1：一个 Iso IN 端点 / Alt 1: one Iso IN endpoint
         ep_iso_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::ISOCHRONOUS,
-                               static_cast<uint16_t>(w_max_packet_size_), false});
+                               static_cast<uint16_t>(w_max_packet_size_),
+                               w_max_packet_size_});
         ep_iso_in_->SetActiveLength(0);
         acc_rem_ = 0;  // 重置余数累加器 / reset remainder accumulator
         streaming_ = true;
@@ -739,11 +744,8 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   void OnInComplete(bool, ConstRawData&)
   {
-    if (!streaming_)
-    {
-      return;
-    }
-    KickOneFrame();
+    // Generic Endpoint performs the same retire/promote/refill sequence as for
+    // ordinary TX. No callback-local second double-buffer state machine.
   }
 
   /**
@@ -752,50 +754,45 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   void KickOneFrame()
   {
-    if (!streaming_)
-    {
-      return;  // 仅 Alt=1 允许 / Only allowed at Alt=1
-    }
-    if (!ep_iso_in_ || ep_iso_in_->GetState() != Endpoint::State::IDLE)
-    {
-      return;
-    }
+    if (streaming_ && ep_iso_in_) ep_iso_in_->RequestTx(false);
+  }
 
-    // 本帧应发送字节数 = floor + 余数累加决定是否 +1。
-    // Bytes sent this frame = floor(bytes/service) plus one when remainder carries.
-    uint16_t to_send = static_cast<uint16_t>(base_bytes_per_service_);
-    acc_rem_ += rem_bytes_per_service_;
-    if (acc_rem_ >= service_hz_)
+  void FillAudio(bool, Endpoint::TxFill& fill)
+  {
+    if (!streaming_) return;
+    size_t frames = base_frames_per_service_;
+    acc_rem_ += rem_frames_per_service_;
+    if (acc_rem_ >= service_denominator_)
     {
-      ++to_send;
-      acc_rem_ -= service_hz_;
+      ++frames;
+      acc_rem_ -= service_denominator_;
     }
-
-    if (to_send > w_max_packet_size_)
+    const size_t amount = frames * FRAME_BYTES;
+    REQUIRE(amount <= w_max_packet_size_ && amount <= fill.Buffer().size_);
+    size_t available = LibXR::min(pcm_queue_.Size(), amount);
+    available -= available % FRAME_BYTES;
+    if (available)
+      pcm_queue_.PopBatch(static_cast<uint8_t*>(fill.Buffer().addr_), available);
+    if (available < amount)
     {
-      to_send = static_cast<uint16_t>(w_max_packet_size_);
+      underruns_.fetch_add(1U, std::memory_order_relaxed);
+      // This UAC class declares silence as its fallback. The generic USB core
+      // has no PCM/audio-specific fallback and does not overwrite active memory.
+      Memory::FastSet(static_cast<uint8_t*>(fill.Buffer().addr_) + available, 0,
+                      amount - available);
     }
+    if (amount == 0U && !fill.CanStart()) return;
+    fill.SetSize(amount);
+  }
 
-    auto buf = ep_iso_in_->GetBuffer();
-    if (buf.size_ < to_send)
-    {
-      to_send = static_cast<uint16_t>(buf.size_);
-    }
-
-    // 从队列取可用字节 / pop available bytes from queue
-    size_t have = pcm_queue_.Size();
-    size_t take = (have >= to_send) ? to_send : have;
-
-    if (take)
-    {
-      pcm_queue_.PopBatch(reinterpret_cast<uint8_t*>(buf.addr_), take);
-    }
-    if (take < to_send)
-    {
-      LibXR::Memory::FastSet(static_cast<uint8_t*>(buf.addr_) + take, 0, to_send - take);
-    }
-
-    ep_iso_in_->Transfer(to_send);
+  void OnTransportError(bool in_isr, ErrorCode)
+  {
+    transport_misses_.fetch_add(1U, std::memory_order_relaxed);
+    if (!streaming_ || !ep_iso_in_) return;
+    ep_iso_in_->Close();
+    ep_iso_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::ISOCHRONOUS,
+                           w_max_packet_size_, w_max_packet_size_});
+    ep_iso_in_->RequestTx(in_isr);
   }
 
   /**
@@ -804,50 +801,20 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   void RecomputeTiming()
   {
-    // 1) 计算每秒服务次数（FS=1000Hz；HS=8000/2^(bInterval-1)）。
-    // 1) Compute service frequency (FS=1000Hz; HS=8000/2^(bInterval-1)).
-    if (speed_ == Speed::HIGH)
-    {
-      uint8_t eff = interval_ ? interval_ : 1;
-      if (eff > 16)
-      {
-        eff = 16;
-      }
-      const uint32_t MICROFRAMES = 1u
-                                   << (eff - 1u);  // 2^(bInterval-1) 个微帧 / microframes
-      service_hz_ = 8000u / MICROFRAMES;  // 8000 微帧/秒 / microframes per second
-    }
-    else
-    {
-      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 / FS isochronous
-                            // requires bInterval=1
-    }
-
-    // 2) 计算每服务周期应送字节。
-    // 2) Compute the target bytes per service interval.
-    bytes_per_sec_ = static_cast<uint32_t>(sr_hz_) * CHANNELS * K_SUBFRAME_SIZE;
-    base_bytes_per_service_ = bytes_per_sec_ / service_hz_;
-    rem_bytes_per_service_ = bytes_per_sec_ % service_hz_;
-    uint32_t ceil_bpt = base_bytes_per_service_ + (rem_bytes_per_service_ ? 1u : 0u);
-
-    // 3) 钳制每事务上限（FS 1023，HS 1024；此处只做单事务上限，未用 HS multiplier）。
-    // 3) Clamp the per-transaction limit (FS 1023, HS 1024; no HS multiplier here).
-    const uint32_t PER_TX_LIMIT = (speed_ == Speed::HIGH) ? 1024u : 1023u;
-    if (ceil_bpt > PER_TX_LIMIT)
-    {
-      ceil_bpt = PER_TX_LIMIT;
-    }
-
-    w_max_packet_size_ = static_cast<uint16_t>(ceil_bpt);
-
-    // 4) 若已构建过描述符，则运行时能力不得超过宣告值。
-    // 4) Once descriptors are built, runtime capability must not exceed the advertised
-    // value.
-    if (desc_block_.ep_in.wMaxPacketSize != 0 &&
-        w_max_packet_size_ > desc_block_.ep_in.wMaxPacketSize)
-    {
-      w_max_packet_size_ = desc_block_.ep_in.wMaxPacketSize;
-    }
+    REQUIRE(interval_ >= 1U && interval_ <= 16U);
+    const uint32_t ticks = speed_ == Speed::HIGH ? (1U << (interval_ - 1U)) : 1U;
+    service_denominator_ = speed_ == Speed::HIGH ? 8000U : 1000U;
+    const uint64_t numerator = static_cast<uint64_t>(sr_hz_) * ticks;
+    base_frames_per_service_ = static_cast<uint32_t>(numerator / service_denominator_);
+    rem_frames_per_service_ = static_cast<uint32_t>(numerator % service_denominator_);
+    // One extra complete audio frame also leaves room for the async source's
+    // packet-size variation. No byte-wise rounding can split a sample frame.
+    const uint64_t maximum =
+        (static_cast<uint64_t>(base_frames_per_service_) + 1U) * FRAME_BYTES;
+    const uint32_t limit = speed_ == Speed::HIGH ? 1024U : 1023U;
+    REQUIRE(maximum <= limit);
+    w_max_packet_size_ = static_cast<uint16_t>(maximum);
+    acc_rem_ = 0;
   }
 
   // 端点与接口状态。
@@ -878,18 +845,20 @@ class UAC1MicrophoneQ : public DeviceClass
   // 采样与分帧参数。
   // Sampling and framing parameters.
   uint32_t sr_hz_;
-  uint32_t bytes_per_sec_ = 0;
-  uint32_t base_bytes_per_service_ = 0;
-  uint32_t rem_bytes_per_service_ = 0;
+  const uint32_t supported_rate_;
+  static constexpr size_t FRAME_BYTES = CHANNELS * K_SUBFRAME_SIZE;
+  uint32_t base_frames_per_service_ = 0;
+  uint32_t rem_frames_per_service_ = 0;
   uint32_t acc_rem_ = 0;  // 0..999 / fixed-point remainder accumulator
   uint16_t w_max_packet_size_ = 0;
-  uint32_t service_hz_ = 1000;
+  uint32_t service_denominator_ = 1000;
 
   UAC1DescBlock desc_block_;
 
   // 端点采样率缓存（Hz，小端 3 字节）与状态。
   // Endpoint sampling-frequency cache (3-byte LE) and flags.
   uint8_t sf_cur_[3] = {0, 0, 0};
+  uint8_t sf_pending_[3] = {0, 0, 0};
   bool pending_set_sf_ = false;
 
   // PCM 字节队列。
@@ -898,6 +867,26 @@ class UAC1MicrophoneQ : public DeviceClass
 
   // 端点回调包装。
   // Endpoint callback wrapper.
+  std::atomic<uint32_t> underruns_{0};
+  std::atomic<uint32_t> transport_misses_{0};
+  BusTime last_bus_time_{};
+  Callback<Endpoint::TxFill&> fill_audio_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool context, UAC1MicrophoneQ* self, Endpoint::TxFill& fill)
+      { self->FillAudio(context, fill); }, this);
+  Callback<ErrorCode> error_cb_ =
+      Callback<ErrorCode>::Create([](bool context, UAC1MicrophoneQ* self, ErrorCode error)
+                                  { self->OnTransportError(context, error); }, this);
+
+ public:
+  bool WantsBusTime() const override { return true; }
+  void OnBusTime(bool, const BusTime& time) override { last_bus_time_ = time; }
+  uint32_t UnderrunCount() const { return underruns_.load(std::memory_order_relaxed); }
+  uint32_t MissedTransferCount() const
+  {
+    return transport_misses_.load(std::memory_order_relaxed);
+  }
+
+ private:
   LibXR::Callback<LibXR::ConstRawData&> on_in_complete_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnInCompleteStatic, this);
 };

@@ -185,15 +185,16 @@ class DapLinkV2Class : public DeviceClass
 
     // Configure endpoints
     // - Use upper bound; core will choose a valid max packet size <= this limit.
-    // - Enable double_buffer for USB pipeline overlap.
-    ep_data_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
+    // Logical command storage is independent from the wire packet size.
+    ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX,
+                             MAX_DAP_PACKET_SIZE});
     ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, MAX_DAP_PACKET_SIZE});
 
     // Hook callbacks
     ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
     ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
+    ep_data_in_->SetOnTxFill(fill_response_cb_);
 
     // Interface descriptor (vendor specific, 2 endpoints)
     desc_block_.intf = {9,
@@ -518,97 +519,28 @@ class DapLinkV2Class : public DeviceClass
    */
   void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
   {
-    (void)in_isr;
-
-    if (!inited_ || !ep_data_in_ || !ep_data_out_)
-    {
-      return;
-    }
-
-    const auto* req = static_cast<const uint8_t*>(data.addr_);
-    const uint16_t REQ_LEN = static_cast<uint16_t>(data.size_);
-
-    // Fast path: when IN is idle and no backlog exists, build directly
-    // in the IN endpoint buffer and submit without extra response copy.
-    if (!HasDeferredResponseInEpBuffer() && IsResponseQueueEmpty() &&
-        ep_data_in_->GetState() == Endpoint::State::IDLE &&
-        CanBuildResponseDirectlyInEpBuffer())
-    {
-      auto tx_buff = ep_data_in_->GetBuffer();
-      if (tx_buff.addr_ && tx_buff.size_ > 0u)
-      {
-        auto* tx_buf = static_cast<uint8_t*>(tx_buff.addr_);
-        uint16_t out_len = 0u;
-        auto ans = ProcessOneCommand(in_isr, req, REQ_LEN, tx_buf,
-                                     static_cast<uint16_t>(tx_buff.size_), out_len);
-        UNUSED(ans);
-
-        out_len = ClipResponseLength(out_len, static_cast<uint16_t>(tx_buff.size_));
-        if (StartInTransferFromCurrentBuffer(out_len))
-        {
-          return;
-        }
-
-        if (!EnqueueResponse(tx_buf, out_len))
-        {
-          (void)SubmitNextQueuedResponseIfIdle();
-          (void)EnqueueResponse(tx_buf, out_len);
-        }
-
-        (void)SubmitNextQueuedResponseIfIdle();
-        ArmOutTransferIfIdle();
-        return;
-      }
-    }
-
-    // Deferred fast path: when IN is busy and no backlog exists, build the next
-    // response in the alternate IN double buffer to avoid queue copy.
-    if (!HasDeferredResponseInEpBuffer() && IsResponseQueueEmpty() &&
-        ep_data_in_->GetState() == Endpoint::State::BUSY &&
-        CanBuildResponseDirectlyInEpBuffer())
-    {
-      auto tx_buff = ep_data_in_->GetBuffer();
-      if (tx_buff.addr_ && tx_buff.size_ > 0u)
-      {
-        auto* tx_buf = static_cast<uint8_t*>(tx_buff.addr_);
-        uint16_t out_len = 0u;
-        auto ans = ProcessOneCommand(in_isr, req, REQ_LEN, tx_buf,
-                                     static_cast<uint16_t>(tx_buff.size_), out_len);
-        UNUSED(ans);
-
-        out_len = ClipResponseLength(out_len, static_cast<uint16_t>(tx_buff.size_));
-        SetDeferredResponseInEpBuffer(out_len);
-        ArmOutTransferIfIdle();
-        return;
-      }
-    }
-
-    if (TryBuildAndEnqueueResponse(in_isr, req, REQ_LEN))
-    {
-      (void)SubmitDeferredResponseIfIdle();
-      (void)SubmitNextQueuedResponseIfIdle();
-      ArmOutTransferIfIdle();
-      return;
-    }
-
-    // Should not happen with proper backpressure; drain once and retry queue build.
-    (void)SubmitNextQueuedResponseIfIdle();
-    (void)TryBuildAndEnqueueResponse(in_isr, req, REQ_LEN);
-
-    (void)SubmitDeferredResponseIfIdle();
-    (void)SubmitNextQueuedResponseIfIdle();
+    if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
+    // Every authorized OUT already reserved response capacity. Process once;
+    // never retry a side-effecting command after an enqueue/start failure.
+    REQUIRE(!IsResponseQueueFull());
+    auto& response = resp_q_[resp_q_tail_];
+    uint16_t size = 0;
+    const auto result = ProcessOneCommand(in_isr, static_cast<const uint8_t*>(data.addr_),
+                                          static_cast<uint16_t>(data.size_),
+                                          response.payload, RESP_SLOT_SIZE, size);
+    UNUSED(result);
+    REQUIRE(size != 0U && size <= RESP_SLOT_SIZE);
+    response.len = size;
+    resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
+    ++resp_q_count_;
+    ep_data_in_->RequestTx(in_isr);
     ArmOutTransferIfIdle();
   }
 
   /**
    * @brief IN complete callback instance method
    */
-  void OnDataInComplete(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
-  {
-    (void)SubmitDeferredResponseIfIdle();
-    (void)SubmitNextQueuedResponseIfIdle();
-    ArmOutTransferIfIdle();
-  }
+  void OnDataInComplete(bool, LibXR::ConstRawData&) { ArmOutTransferIfIdle(); }
 
  private:
   /**
@@ -620,80 +552,6 @@ class DapLinkV2Class : public DeviceClass
     constexpr uint16_t RAW_PS =
         (MaxDapPacketSize == 0u) ? DefaultDapPacketSize : MaxDapPacketSize;
     return (RAW_PS > OPENOCD_SAFE_PS) ? OPENOCD_SAFE_PS : RAW_PS;
-  }
-  bool CanBuildResponseDirectlyInEpBuffer() const
-  {
-    if (!ep_data_in_)
-    {
-      return false;
-    }
-    auto tx_buff = ep_data_in_->GetBuffer();
-    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
-    {
-      return false;
-    }
-    return GetDapPacketSize() <= static_cast<uint16_t>(tx_buff.size_);
-  }
-
-  bool StartInTransferFromCurrentBuffer(uint16_t len)
-  {
-    if (!ep_data_in_)
-    {
-      return false;
-    }
-    auto tx_buff = ep_data_in_->GetBuffer();
-    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
-    {
-      return false;
-    }
-    uint16_t tx_len = len;
-    if (tx_len > tx_buff.size_)
-    {
-      tx_len = static_cast<uint16_t>(tx_buff.size_);
-    }
-    if (tx_len <= static_cast<uint16_t>(ep_data_in_->MaxTransferSize()))
-    {
-      return ep_data_in_->Transfer(tx_len) == ErrorCode::OK;
-    }
-    LibXR::RawData in_multi{tx_buff.addr_, tx_len};
-    return ep_data_in_->TransferMultiBulk(in_multi) == ErrorCode::OK;
-  }
-  bool StartInTransferFromPayload(const uint8_t* data, uint16_t len)
-  {
-    if (!ep_data_in_ || !data)
-    {
-      return false;
-    }
-    auto tx_buff = ep_data_in_->GetBuffer();
-    if (!tx_buff.addr_ || tx_buff.size_ == 0u)
-    {
-      return false;
-    }
-    uint16_t tx_len = len;
-    if (tx_len > MAX_DAP_PACKET_SIZE)
-    {
-      tx_len = MAX_DAP_PACKET_SIZE;
-    }
-    const uint16_t MAX_XFER = static_cast<uint16_t>(ep_data_in_->MaxTransferSize());
-    if (tx_len <= MAX_XFER && tx_len <= static_cast<uint16_t>(tx_buff.size_))
-    {
-      if (tx_len > 0u)
-      {
-        Memory::FastCopy(tx_buff.addr_, data, tx_len);
-      }
-      return ep_data_in_->Transfer(tx_len) == ErrorCode::OK;
-    }
-    if (tx_len > static_cast<uint16_t>(sizeof(in_tx_multi_storage_)))
-    {
-      tx_len = static_cast<uint16_t>(sizeof(in_tx_multi_storage_));
-    }
-    if (tx_len > 0u && data != in_tx_multi_storage_)
-    {
-      Memory::FastCopy(in_tx_multi_storage_, data, tx_len);
-    }
-    in_tx_multi_buf_.addr_ = in_tx_multi_storage_;
-    in_tx_multi_buf_.size_ = tx_len;
-    return ep_data_in_->TransferMultiBulk(in_tx_multi_buf_) == ErrorCode::OK;
   }
 
   /**
@@ -727,35 +585,6 @@ class DapLinkV2Class : public DeviceClass
     resp_q_head_ = 0u;
     resp_q_tail_ = 0u;
     resp_q_count_ = 0u;
-    deferred_in_resp_valid_ = false;
-    deferred_in_resp_len_ = 0u;
-  }
-
-  bool HasDeferredResponseInEpBuffer() const { return deferred_in_resp_valid_; }
-
-  void SetDeferredResponseInEpBuffer(uint16_t len)
-  {
-    deferred_in_resp_len_ = len;
-    deferred_in_resp_valid_ = true;
-  }
-
-  bool SubmitDeferredResponseIfIdle()
-  {
-    if (!deferred_in_resp_valid_ || !ep_data_in_ ||
-        ep_data_in_->GetState() != Endpoint::State::IDLE)
-    {
-      return false;
-    }
-
-    const uint16_t TX_LEN = deferred_in_resp_len_;
-    if (!StartInTransferFromCurrentBuffer(TX_LEN))
-    {
-      return false;
-    }
-
-    deferred_in_resp_valid_ = false;
-    deferred_in_resp_len_ = 0u;
-    return true;
   }
 
   bool IsResponseQueueEmpty() const { return resp_q_count_ == 0u; }
@@ -1015,120 +844,26 @@ class DapLinkV2Class : public DeviceClass
     return true;
   }
 
-  bool TryBuildAndEnqueueResponse(bool in_isr, const uint8_t* req, uint16_t req_len)
-  {
-    if (!req || IsResponseQueueFull())
-    {
-      return false;
-    }
-
-    auto& slot = resp_q_[resp_q_tail_];
-    uint16_t out_len = 0u;
-    auto ans =
-        ProcessOneCommand(in_isr, req, req_len, slot.payload, RESP_SLOT_SIZE, out_len);
-    UNUSED(ans);
-    slot.len = ClipResponseLength(out_len, RESP_SLOT_SIZE);
-
-    resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
-    ++resp_q_count_;
-    return true;
-  }
-
   uint8_t OutstandingResponseCount() const
   {
-    const uint8_t IN_FLIGHT =
-        (ep_data_in_ && ep_data_in_->GetState() == Endpoint::State::BUSY) ? 1u : 0u;
-    const uint8_t DEFERRED = deferred_in_resp_valid_ ? 1u : 0u;
-    return static_cast<uint8_t>(resp_q_count_ + IN_FLIGHT + DEFERRED);
-  }
-
-  bool EnqueueResponse(const uint8_t* data, uint16_t len)
-  {
-    if (!data || IsResponseQueueFull())
-    {
-      return false;
-    }
-
-    auto& slot = resp_q_[resp_q_tail_];
-    const uint16_t CLIPPED = ClipResponseLength(len, RESP_SLOT_SIZE);
-    slot.len = CLIPPED;
-    if (CLIPPED > 0u)
-    {
-      Memory::FastCopy(slot.payload, data, CLIPPED);
-    }
-
-    resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
-    ++resp_q_count_;
-    return true;
-  }
-
-  bool SubmitNextQueuedResponseIfIdle()
-  {
-    if (!ep_data_in_ || ep_data_in_->GetState() != Endpoint::State::IDLE ||
-        IsResponseQueueEmpty())
-    {
-      return false;
-    }
-    auto& slot = resp_q_[resp_q_head_];
-    if (!StartInTransferFromPayload(slot.payload, slot.len))
-    {
-      return false;
-    }
-    resp_q_head_ = NextRespQueueIndex(resp_q_head_);
-    --resp_q_count_;
-    return true;
+    const uint8_t active =
+        ep_data_in_ && ep_data_in_->GetState() == Endpoint::State::BUSY ? 1U : 0U;
+    const uint8_t prepared =
+        ep_data_in_ && ep_data_in_->GetActiveLength() != 0U ? 1U : 0U;
+    return static_cast<uint8_t>(resp_q_count_ + active + prepared);
   }
 
   void ArmOutTransferIfIdle()
   {
-    if (!inited_ || ep_data_out_ == nullptr || ep_data_in_ == nullptr)
-    {
+    if (!inited_ || !ep_data_out_ || !ep_data_in_ || IsResponseQueueFull() ||
+        OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
       return;
-    }
-
-    if (ep_data_out_->GetState() != Endpoint::State::IDLE)
-    {
+    if (ep_data_out_->GetState() != Endpoint::State::IDLE &&
+        !ep_data_out_->HasReceiveResult())
       return;
-    }
-
-    // Backpressure on total outstanding responses (in-flight + queued).
-    if (OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
-    {
-      return;
-    }
-
-    uint16_t out_rx_len = GetDapPacketSize();
-    if (out_rx_len == 0u)
-    {
-      out_rx_len = DEFAULT_DAP_PACKET_SIZE;
-    }
-    if (out_rx_len > MAX_DAP_PACKET_SIZE)
-    {
-      out_rx_len = MAX_DAP_PACKET_SIZE;
-    }
-
-    const uint16_t OUT_MAX_XFER = static_cast<uint16_t>(ep_data_out_->MaxTransferSize());
-    if (OUT_MAX_XFER == 0u)
-    {
-      return;
-    }
-
-    if (out_rx_len <= OUT_MAX_XFER)
-    {
-      (void)ep_data_out_->Transfer(out_rx_len);
-      return;
-    }
-
-    if (out_rx_len > static_cast<uint16_t>(sizeof(out_req_multi_storage_)))
-    {
-      out_rx_len = static_cast<uint16_t>(sizeof(out_req_multi_storage_));
-    }
-
-    // Endpoint MPS is capped by hardware (HS bulk = 512), so larger DAP requests
-    // must be received with multi-bulk reassembly.
-    out_req_multi_buf_.addr_ = out_req_multi_storage_;
-    out_req_multi_buf_.size_ = out_rx_len;
-    (void)ep_data_out_->TransferMultiBulk(out_req_multi_buf_);
+    const size_t length = GetDapPacketSize();
+    REQUIRE(length != 0U && length <= ep_data_out_->MaxTransferSize());
+    (void)ep_data_out_->ArmReceive(length);
   }
 
  private:
@@ -4102,7 +3837,7 @@ class DapLinkV2Class : public DeviceClass
       static_cast<uint16_t>((255u * 5u) + 4u);
   static constexpr uint8_t JTAG_MAX_DEVICES = 16u;
   // Host-visible CMSIS-DAP packet size; endpoint MPS limits are handled by
-  // TransferMultiBulk segmentation/reassembly.
+  // Endpoint-owned logical segmentation/reassembly.
   static constexpr uint16_t MAX_DAP_PACKET_SIZE = MaxDapPacketSize;
   static constexpr uint16_t QUEUED_REQ_BUFFER_SIZE = QueuedRequestBufferSize;
   static constexpr uint16_t QUEUED_CMD_COUNT_MAX = QueuedCommandCountMax;
@@ -4143,17 +3878,10 @@ class DapLinkV2Class : public DeviceClass
   uint8_t resp_q_head_ = 0u;
   uint8_t resp_q_tail_ = 0u;
   uint8_t resp_q_count_ = 0u;
-  bool deferred_in_resp_valid_ = false;
-  uint16_t deferred_in_resp_len_ = 0u;
 
   uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
   uint16_t queued_request_length_ = 0u;
   uint16_t queued_command_count_ = 0u;
-
-  uint8_t out_req_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
-  LibXR::RawData out_req_multi_buf_{out_req_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
-  uint8_t in_tx_multi_storage_[MAX_DAP_PACKET_SIZE] = {};
-  LibXR::RawData in_tx_multi_buf_{in_tx_multi_storage_, DEFAULT_DAP_PACKET_SIZE};
 
   LIBXR_PACKED_BEGIN
   /**
@@ -4239,6 +3967,26 @@ class DapLinkV2Class : public DeviceClass
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
+
+  void FillResponse(bool, Endpoint::TxFill& fill)
+  {
+    if (!inited_) return;
+    if (IsResponseQueueEmpty())
+    {
+      ArmOutTransferIfIdle();
+      return;
+    }
+    const auto& response = resp_q_[resp_q_head_];
+    REQUIRE(response.len != 0U && response.len <= fill.Buffer().size_);
+    Memory::FastCopy(fill.Buffer().addr_, response.payload, response.len);
+    fill.SetSize(response.len);
+    resp_q_head_ = NextRespQueueIndex(resp_q_head_);
+    --resp_q_count_;
+    ArmOutTransferIfIdle();
+  }
+  Callback<Endpoint::TxFill&> fill_response_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool context, DapLinkV2Class* self, Endpoint::TxFill& fill)
+      { self->FillResponse(context, fill); }, this);
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);

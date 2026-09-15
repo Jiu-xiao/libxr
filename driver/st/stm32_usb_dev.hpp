@@ -14,11 +14,16 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd);
 
 namespace LibXR
 {
+#if defined(USB_OTG_HS)
+using STM32USBDeviceCore = USB::DeviceCore<USB::HighSpeedCapabilities>;
+#else
+using STM32USBDeviceCore = USB::DeviceCore<USB::FullSpeedCapabilities>;
+#endif
 
 /**
  * @brief STM32 USB 设备核心实现 / STM32 USB device core implementation
  */
-class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::DeviceCore
+class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCore
 {
  public:
   /**
@@ -34,20 +39,42 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
       ConstRawData uid = {nullptr, 0}, USB::Speed speed = USB::Speed::FULL,
       USB::USBSpec spec = USB::USBSpec::USB_2_1)
       : LibXR::USB::EndpointPool(max_ep_num),
-        LibXR::USB::DeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
-                               CONFIGS, uid),
+        STM32USBDeviceCore(*this, spec, speed, packet_size, vid, pid, bcd, LANG_LIST,
+                           CONFIGS, uid),
         hpcd_(hpcd),
         id_(id)
   {
+    SetHardwareGuard(
+        this,
+        [](void*) -> uintptr_t
+        {
+          const uint32_t saved = __get_PRIMASK();
+          __disable_irq();
+          __DMB();
+          return saved;
+        },
+        [](void*, uintptr_t saved)
+        {
+          __DMB();
+          __set_PRIMASK(static_cast<uint32_t>(saved));
+        });
   }
 
-  void Init(bool in_isr) override { LibXR::USB::DeviceCore::Init(in_isr); }
+  void Init(bool in_isr) override { STM32USBDeviceCore::Init(in_isr); }
 
-  void Deinit(bool in_isr) override { LibXR::USB::DeviceCore::Deinit(in_isr); }
+  void Deinit(bool in_isr) override { STM32USBDeviceCore::Deinit(in_isr); }
 
   void Start(bool) override
   {
     map_[id_] = this;
+    if (WantsBusTime())
+    {
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+      hpcd_->Instance->GINTMSK |= USB_OTG_GINTMSK_SOFM;
+#else
+      hpcd_->Instance->CNTR |= USB_CNTR_SOFM;
+#endif
+    }
     HAL_PCD_Start(hpcd_);
   }
   void Stop(bool) override
@@ -57,6 +84,28 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public LibXR::USB::Devic
     {
       map_[id_] = nullptr;
     }
+  }
+
+  USB::Speed ReadBusSpeed() const override
+  {
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+    return hpcd_->Init.speed == PCD_SPEED_HIGH ? USB::Speed::HIGH : USB::Speed::FULL;
+#else
+    return USB::Speed::FULL;
+#endif
+  }
+
+  static void IRQHandler(PCD_HandleTypeDef* hpcd)
+  {
+    const auto id = STM32USBDeviceGetID(hpcd);
+    auto* device = map_[id];
+    if (device)
+    {
+      USB::EndpointPool::InterruptScope interrupt_scope(*device);
+      HAL_PCD_IRQHandler(hpcd);
+    }
+    else
+      HAL_PCD_IRQHandler(hpcd);
   }
 
   PCD_HandleTypeDef* hpcd_;
@@ -101,7 +150,7 @@ class STM32USBDeviceOtgFS : public STM32USBDevice
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
 };
 
 #endif
@@ -139,7 +188,7 @@ class STM32USBDeviceOtgHS : public STM32USBDevice
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
 };
 #endif
 
@@ -278,7 +327,7 @@ class STM32USBDeviceDevFs : public STM32USBDevice
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 
-  ErrorCode SetAddress(uint8_t address, USB::DeviceCore::Context context) override;
+  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
 };
 #endif
 

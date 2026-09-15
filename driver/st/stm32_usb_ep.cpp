@@ -63,7 +63,7 @@ STM32Endpoint::STM32Endpoint(EPNumber ep_num, stm32_usb_dev_id_t id,
 }
 #endif
 
-void STM32Endpoint::Configure(const Config& cfg)
+void STM32Endpoint::ConfigureHardware(const Config& cfg)
 {
   ASSERT(cfg.direction == Direction::IN || cfg.direction == Direction::OUT);
 
@@ -142,7 +142,7 @@ void STM32Endpoint::Configure(const Config& cfg)
   }
 #endif
 
-  auto buffer = GetBuffer();
+  auto buffer = HardwareBuffer();
 
   if (packet_size_limit > buffer.size_)
   {
@@ -163,6 +163,12 @@ void STM32Endpoint::Configure(const Config& cfg)
     max_packet_size = 8;
   }
 
+  if (IsPlanning())
+  {
+    SetState(State::IDLE);
+    return;
+  }
+
   if (HAL_PCD_EP_Open(hpcd_, addr, max_packet_size, type) == HAL_OK)
   {
     SetState(State::IDLE);
@@ -173,98 +179,67 @@ void STM32Endpoint::Configure(const Config& cfg)
   }
 }
 
-void STM32Endpoint::Close()
+void STM32Endpoint::CloseHardware()
 {
   uint8_t addr = EPNumberToAddr(GetNumber(), GetDirection());
   HAL_PCD_EP_Close(hpcd_, addr);
   SetState(State::DISABLED);
 }
 
-ErrorCode STM32Endpoint::Transfer(size_t size)
+ErrorCode STM32Endpoint::StartHardware(RawData buffer, size_t size)
 {
-  if (GetState() == State::BUSY)
-  {
-    return ErrorCode::BUSY;
-  }
-
-  bool is_in = GetDirection() == Direction::IN;
-  auto ep_addr = EPNumberToAddr(GetNumber(), GetDirection());
-
+  const bool is_in = GetDirection() == Direction::IN;
+  const uint8_t ep_addr = EPNumberToAddr(GetNumber(), GetDirection());
   PCD_EPTypeDef* ep = is_in ? &hpcd_->IN_ep[ep_addr & EP_ADDR_MSK]
                             : &hpcd_->OUT_ep[ep_addr & EP_ADDR_MSK];
-
-  auto buffer = GetBuffer();
-
-  if (buffer.size_ < size)
+  hardware_transfer_ = size == 0U ? HardwareBuffer() : buffer;
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  if (hpcd_->Init.dma_enable == 1U && size != 0U)
   {
-    return ErrorCode::NO_BUFF;
+    const RawData arena = HardwareBuffer();
+    const uintptr_t base = reinterpret_cast<uintptr_t>(arena.addr_);
+    const uintptr_t address = reinterpret_cast<uintptr_t>(buffer.addr_);
+    const size_t extent =
+        is_in ? size
+              : ((size + MaxPacketSize() - 1U) / MaxPacketSize()) * MaxPacketSize();
+    const bool in_arena = address >= base && address - base <= arena.size_ &&
+                          extent <= arena.size_ - (address - base) &&
+                          extent <= buffer.size_;
+    if (!in_arena)
+    {
+      ASSERT(size <= arena.size_);
+      hardware_transfer_ = arena;
+      if (is_in) Memory::FastCopy(arena.addr_, buffer.addr_, size);
+    }
+    // Clean before an OUT DMA as well, so dirty CPU cache lines cannot later
+    // evict over freshly received bytes. Invalidation follows real completion.
+    STM32_CleanDCacheByAddr(hardware_transfer_.addr_, size);
   }
-
-  ep->xfer_buff = reinterpret_cast<uint8_t*>(buffer.addr_);
-
-  if (UseDoubleBuffer() && GetDirection() == Direction::IN && size > 0)
-  {
-    SwitchBuffer();
-  }
-
+#endif
+  ep->xfer_buff = static_cast<uint8_t*>(hardware_transfer_.addr_);
   ep->xfer_len = size;
   ep->xfer_count = 0U;
   ep->is_in = is_in ? 1U : 0U;
   ep->num = ep_addr & EP_ADDR_MSK;
   last_transfer_size_ = size;
-
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   if (hpcd_->Init.dma_enable == 1U)
-  {
-    ep->dma_addr = reinterpret_cast<uint32_t>(ep->xfer_buff);
-
-    if (is_in == true)
-    {
-      STM32_CleanDCacheByAddr(buffer.addr_, size);
-    }
-  }
-#endif
-
-#if defined(USB_BASE) || defined(USB_DRD_FS)
+    ep->dma_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ep->xfer_buff));
+  const auto result = USB_EPStartXfer(hpcd_->Instance, ep, hpcd_->Init.dma_enable);
+#else
   if (is_in)
   {
     ep->xfer_fill_db = 0U;
     ep->xfer_len_db = 0U;
   }
+  const auto result = USB_EPStartXfer(hpcd_->Instance, ep);
 #endif
-
-  SetState(State::BUSY);
-
-#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
-  auto ans = USB_EPStartXfer(hpcd_->Instance, ep, hpcd_->Init.dma_enable);
-#else
-  auto ans = USB_EPStartXfer(hpcd_->Instance, ep);
-  if (size == 0 && GetNumber() == USB::Endpoint::EPNumber::EP0 &&
-      GetDirection() == Direction::OUT)
-  {
-    OnTransferCompleteCallback(false, 0);
-  }
-#endif
-
-  if (ans == HAL_OK)
-  {
-    return ErrorCode::OK;
-  }
-  else
-  {
-    SetState(State::ERROR);
-    return ErrorCode::FAILED;
-  }
+  // Arming STATUS OUT is not its completion. Wait for the actual hardware event.
+  return result == HAL_OK ? ErrorCode::OK : ErrorCode::FAILED;
 }
 
-ErrorCode STM32Endpoint::Stall()
+ErrorCode STM32Endpoint::StallHardware()
 {
-  const bool is_in = (GetDirection() == Direction::IN);
-  if (GetState() != State::IDLE && !(GetState() == State::BUSY && !is_in))
-  {
-    return ErrorCode::BUSY;
-  }
-
   uint8_t addr = EPNumberToAddr(GetNumber(), GetDirection());
   if (HAL_PCD_EP_SetStall(hpcd_, addr) == HAL_OK)
   {
@@ -278,7 +253,7 @@ ErrorCode STM32Endpoint::Stall()
   }
 }
 
-ErrorCode STM32Endpoint::ClearStall()
+ErrorCode STM32Endpoint::ClearStallHardware()
 {
   if (GetState() != State::STALLED)
   {
@@ -305,16 +280,14 @@ ErrorCode STM32Endpoint::ClearStall()
   }
 }
 
-size_t STM32Endpoint::MaxTransferSize() const
+size_t STM32Endpoint::MaxHardwareTransferSize() const
 {
-  if (GetNumber() == USB::Endpoint::EPNumber::EP0)
-  {
-    return MaxPacketSize();
-  }
-  else
-  {
-    return GetBuffer().size_;
-  }
+  // HAL handles packet progression within this DMA/PMA buffer. Cap a segment to
+  // the supplied DMA arena and the register-size limit; the core handles larger
+  // logical buffers. EP0 remains packet-oriented.
+  if (GetNumber() == EPNumber::EP0) return MaxPacketSize();
+  const size_t size = LibXR::min<size_t>(HardwareBuffer().size_, 65535U);
+  return size - size % MaxPacketSize();
 }
 
 // --- HAL C 回调桥接 ---
@@ -384,7 +357,11 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
 
   if (STM32USBUsesDma(hpcd))
   {
-    STM32_InvalidateDCacheByAddr(ep->GetBuffer().addr_, actual_transfer_size);
+    STM32_InvalidateDCacheByAddr(ep->hardware_transfer_.addr_, actual_transfer_size);
+    if (ep->hardware_transfer_.addr_ != ep->TransferBuffer().addr_ &&
+        actual_transfer_size <= ep->TransferBuffer().size_)
+      Memory::FastCopy(ep->TransferBuffer().addr_, ep->hardware_transfer_.addr_,
+                       actual_transfer_size);
   }
 
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
@@ -406,7 +383,7 @@ extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t
     return;
   }
 
-  ep->OnTransferCompleteCallback(true, 0);
+  ep->OnTransferCompleteCallback(true, 0, ErrorCode::FAILED);
 }
 
 extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
@@ -425,6 +402,6 @@ extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_
     return;
   }
 
-  ep->OnTransferCompleteCallback(true, 0);
+  ep->OnTransferCompleteCallback(true, 0, ErrorCode::FAILED);
 }
 #endif

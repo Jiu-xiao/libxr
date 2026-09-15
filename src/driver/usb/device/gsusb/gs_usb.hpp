@@ -1,7 +1,7 @@
 #pragma once
-
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -201,6 +201,13 @@ class GsUsbClass : public DeviceClass
    */
   bool IsHostFormatOK() const { return host_format_ok_; }
 
+  void OnService(bool in_isr) override
+  {
+    if (!inited_) return;
+    if (ep_data_in_) ep_data_in_->RequestTx(in_isr);
+    MaybeArmOutTransfer();
+  }
+
  protected:
   /**
    * @brief 初始化接口与端点资源 / Initialize interface and endpoints
@@ -223,9 +230,9 @@ class GsUsbClass : public DeviceClass
     // UINT16_MAX is only an upper bound; the backend still chooses the largest valid
     // length.
     ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, WIRE_MAX_SIZE});
     ep_data_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
+        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, WIRE_MAX_SIZE});
 
     desc_block_.intf = {9,
                         static_cast<uint8_t>(DescriptorType::INTERFACE),
@@ -255,6 +262,7 @@ class GsUsbClass : public DeviceClass
 
     ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
     ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
+    ep_data_in_->SetOnTxFill(fill_frame_cb_);
 
     host_format_ok_ = false;
 
@@ -901,7 +909,7 @@ class GsUsbClass : public DeviceClass
   Endpoint* ep_data_in_ = nullptr;   ///< Bulk IN 端点对象 / Bulk IN endpoint object
   Endpoint* ep_data_out_ = nullptr;  ///< Bulk OUT 端点对象 / Bulk OUT endpoint object
 
-  bool inited_ = false;                     ///< 是否已初始化 / Initialized
+  std::atomic<uint32_t> inited_{0};         ///< 是否已初始化 / Initialized
   uint8_t interface_num_ = 0;               ///< 接口号 / Interface number
   const char* interface_string_ = nullptr;  ///< 接口字符串 / Interface string
 
@@ -912,11 +920,27 @@ class GsUsbClass : public DeviceClass
 
   LibXR::Database* database_ = nullptr;  ///< 数据库存储（可选，用于 USER_ID） / Database
                                          ///< storage (optional, used by USER_ID)
-  uint32_t user_id_ram_ = 0;             ///< USER_ID 的 RAM 备份 / USER_ID RAM backup
+  uint32_t user_id_ram_ = 0;  ///< USER_ID 的 RAM 备份 / USER_ID RAM backup
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic,
                                                     this);  ///< OUT 回调 / OUT callback
+
+  void FillFrame(bool, Endpoint::TxFill& fill)
+  {
+    if (!inited_) return;
+    QueueItem item;
+    if (echo_queue_.Pop(item) != ErrorCode::OK && rx_queue_.Pop(item) != ErrorCode::OK)
+      return;
+    const size_t size = PackQueueItemToWire(
+        item, static_cast<uint8_t*>(fill.Buffer().addr_), fill.Buffer().size_);
+    REQUIRE(size != 0U && size <= fill.Buffer().size_);
+    fill.SetSize(size);
+    MaybeArmOutTransfer();
+  }
+  Callback<Endpoint::TxFill&> fill_frame_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool context, GsUsbClass* self, Endpoint::TxFill& fill)
+      { self->FillFrame(context, fill); }, this);
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic,
@@ -950,13 +974,16 @@ class GsUsbClass : public DeviceClass
 
   bool host_format_ok_ = false;  ///< HOST_FORMAT 是否通过 / HOST_FORMAT OK
 
-  bool can_enabled_[CanChNum] = {
-      false};  ///< 通道启用（classic） / Channel enabled (classic)
-  bool berr_enabled_[CanChNum] = {false};  ///< 错误报告启用 / Bus error reporting enabled
-  bool fd_enabled_[CanChNum] = {false};    ///< 通道启用（FD） / Channel enabled (FD)
+  std::atomic<uint32_t>
+      can_enabled_[CanChNum]{};  ///< 通道启用（classic） / Channel enabled (classic)
+  std::atomic<uint32_t>
+      berr_enabled_[CanChNum]{};  ///< 错误报告启用 / Bus error reporting enabled
+  std::atomic<uint32_t>
+      fd_enabled_[CanChNum]{};  ///< 通道启用（FD） / Channel enabled (FD)
 
-  bool timestamps_enabled_ch_[CanChNum] = {
-      false};  ///< 通道时间戳启用 / Per-channel timestamp enabled
+  std::atomic<uint32_t>
+      timestamps_enabled_ch_[CanChNum]{};  ///< 通道时间戳启用 / Per-channel timestamp
+                                           ///< enabled
   GsUsb::TerminationState term_state_[CanChNum] = {
       GsUsb::TerminationState::OFF};  ///< 终端电阻状态 / Termination state
   uint8_t ctrl_target_channel_ =
@@ -973,10 +1000,6 @@ class GsUsbClass : public DeviceClass
     EndpointDescriptor ep_in;   ///< IN 端点描述符 / IN endpoint descriptor
   } desc_block_{};
   LIBXR_PACKED_END
-
-  uint8_t rx_buf_[WIRE_MAX_SIZE]{};  ///< OUT 接收缓冲区 / OUT receive buffer
-  std::array<uint8_t, WIRE_MAX_SIZE>
-      tx_buf_{};  ///< IN 发送暂存区 / IN transmit staging buffer
 
   // ================= CAN RX 回调 & BULK IN 发送队列 / CAN RX callbacks & Bulk IN TX
   // queues =================
@@ -1050,9 +1073,9 @@ class GsUsbClass : public DeviceClass
     std::array<uint8_t, 64> data;  ///< 数据段 / Data bytes
   };
 
-  LibXR::SPSCQueue<QueueItem>
+  LibXR::MPMCQueue<QueueItem>
       rx_queue_;  ///< RX 队列（Device->Host） / RX queue (Device->Host)
-  LibXR::SPSCQueue<QueueItem>
+  LibXR::MPMCQueue<QueueItem>
       echo_queue_;  ///< Echo 队列（回送 echo_id） / Echo queue (echo back echo_id)
 
   /**
@@ -1060,7 +1083,7 @@ class GsUsbClass : public DeviceClass
    */
   void OnCanRx(bool in_isr, uint8_t ch, const LibXR::CAN::ClassicPack& pack)
   {
-    if (ch >= can_count_ || !ep_data_in_)
+    if (ch >= can_count_ || !inited_.load(std::memory_order_acquire))
     {
       return;
     }
@@ -1130,7 +1153,6 @@ class GsUsbClass : public DeviceClass
     }
 
     TryKickTx(in_isr);
-    MaybeArmOutTransfer();
     return true;
   }
 
@@ -1138,63 +1160,19 @@ class GsUsbClass : public DeviceClass
    * @brief 尝试启动 Bulk IN 发送 / Try to start Bulk IN transmit
    * @param in_isr 是否在中断上下文 / Whether in ISR
    */
-  void TryKickTx(bool in_isr)
-  {
-    UNUSED(in_isr);
-
-    if (!ep_data_in_)
-    {
-      return;
-    }
-    if (ep_data_in_->GetState() != Endpoint::State::IDLE)
-    {
-      return;
-    }
-
-    QueueItem qi;
-    ErrorCode ec = echo_queue_.Pop(qi);
-    if (ec != ErrorCode::OK)
-    {
-      ec = rx_queue_.Pop(qi);
-      if (ec != ErrorCode::OK)
-      {
-        return;
-      }
-    }
-
-    const std::size_t SEND_LEN = PackQueueItemToWire(qi, tx_buf_.data(), tx_buf_.size());
-    if (SEND_LEN == 0)
-    {
-      return;
-    }
-
-    RawData tx_raw{tx_buf_.data(), SEND_LEN};
-    (void)ep_data_in_->TransferMultiBulk(tx_raw);
-
-    MaybeArmOutTransfer();
-  }
+  void TryKickTx(bool in_isr) { RequestClassService(in_isr); }
 
   /**
    * @brief 确保 Bulk OUT 保持挂起接收 / Ensure Bulk OUT is armed for receiving
    */
   void MaybeArmOutTransfer()
   {
-    if (!ep_data_out_)
-    {
+    if (!inited_ || !ep_data_out_) return;
+    if (ep_data_out_->GetState() != Endpoint::State::IDLE &&
+        !ep_data_out_->HasReceiveResult())
       return;
-    }
-    if (ep_data_out_->GetState() != Endpoint::State::IDLE)
-    {
-      return;
-    }
-
-    if (rx_queue_.EmptySize() == 0 || echo_queue_.EmptySize() == 0)
-    {
-      return;
-    }
-
-    RawData rx_raw{rx_buf_, static_cast<size_t>(WIRE_MAX_SIZE)};
-    (void)ep_data_out_->TransferMultiBulk(rx_raw);
+    if (echo_queue_.EmptySize() == 0U) return;
+    (void)ep_data_out_->ArmReceive(WIRE_MAX_SIZE);
   }
 
   // ================= 业务处理函数 / Handlers =================
@@ -1694,7 +1672,9 @@ class GsUsbClass : public DeviceClass
     }
 
     const uint8_t CH = qi.hdr.channel;
-    const bool TS = (CH < can_count_) ? timestamps_enabled_ch_[CH] : false;
+    const bool TS = (CH < can_count_)
+                        ? timestamps_enabled_ch_[CH].load(std::memory_order_relaxed) != 0U
+                        : false;
     const std::size_t PAYLOAD = qi.is_fd ? WIRE_FD_DATA_SIZE : WIRE_CLASSIC_DATA_SIZE;
     const std::size_t TOTAL = WIRE_HDR_SIZE + PAYLOAD + (TS ? WIRE_TS_SIZE : 0);
 

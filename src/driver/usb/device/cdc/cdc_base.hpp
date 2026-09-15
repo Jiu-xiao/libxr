@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstring>
 
 #include "dev_core.hpp"
@@ -32,8 +33,8 @@ class CDCBase : public DeviceClass
   {
     HEADER = 0x00,  ///< 头功能描述符 / Header functional descriptor
     CALL_MANAGEMENT =
-        0x01,      ///< 呼叫管理功能描述符 / Call management functional descriptor
-    ACM = 0x02,    ///< 抽象控制模型描述符 / Abstract control model descriptor
+        0x01,    ///< 呼叫管理功能描述符 / Call management functional descriptor
+    ACM = 0x02,  ///< 抽象控制模型描述符 / Abstract control model descriptor
     UNION = 0x06,  ///< 联合功能描述符 / Union functional descriptor
   };
 
@@ -64,8 +65,8 @@ class CDCBase : public DeviceClass
   /// CDC类特定请求 / CDC class-specific requests
   enum class ClassRequest : uint8_t
   {
-    SET_LINE_CODING = 0x20,         ///< 设置串行线路编码 / Set line coding parameters
-    GET_LINE_CODING = 0x21,         ///< 获取当前线路编码 / Get current line coding
+    SET_LINE_CODING = 0x20,  ///< 设置串行线路编码 / Set line coding parameters
+    GET_LINE_CODING = 0x21,  ///< 获取当前线路编码 / Get current line coding
     SET_CONTROL_LINE_STATE = 0x22,  ///< 设置控制线路状态 / Set control line state
     SEND_BREAK = 0x23               ///< 发送BREAK信号 / Send BREAK signal
   };
@@ -91,7 +92,7 @@ class CDCBase : public DeviceClass
    */
   struct CDCLineCoding
   {
-    uint32_t dwDTERate;   ///< 波特率（小端格式） / Baud rate (little-endian)
+    uint32_t dwDTERate;  ///< 波特率（小端格式） / Baud rate (little-endian)
     uint8_t bCharFormat;  ///< 停止位：0=1位，1=1.5位，2=2位 / Stop bits: 0=1, 1=1.5, 2=2
     uint8_t bParityType;  ///< 校验：0=None,1=Odd,2=Even,3=Mark,4=Space / Parity:
                           ///< 0=None,1=Odd,2=Even,3=Mark,4=Space
@@ -110,10 +111,10 @@ class CDCBase : public DeviceClass
     uint8_t bmRequestType;  ///< 请求类型（固定为 0xA1） / Request type (fixed to 0xA1)
     uint8_t bNotification;  ///< 通知类型（固定为 SERIAL_STATE） / Notification type
                             ///< (fixed to SERIAL_STATE)
-    uint16_t wValue;        ///< 值（固定为 0） / Value (fixed to 0)
-    uint16_t wIndex;        ///< 接口号 / Interface number
-    uint16_t wLength;       ///< 数据长度（固定为2）| Data length (fixed to 2)
-    uint16_t serialState;   ///< 串行状态位图 / Serial state bitmap
+    uint16_t wValue;       ///< 值（固定为 0） / Value (fixed to 0)
+    uint16_t wIndex;       ///< 接口号 / Interface number
+    uint16_t wLength;      ///< 数据长度（固定为2）| Data length (fixed to 2)
+    uint16_t serialState;  ///< 串行状态位图 / Serial state bitmap
   };
   LIBXR_PACKED_END
 
@@ -184,41 +185,16 @@ class CDCBase : public DeviceClass
    * 通过中断端点向主机报告当前串行端口状态
    * Reports current serial port state to host via interrupt endpoint
    */
-  ErrorCode SendSerialState()
+  ErrorCode SendSerialState(bool in_isr = false)
   {
-    if (ep_comm_in_->GetState() == Endpoint::State::BUSY)
-    {
-      return ErrorCode::BUSY;
-    }
-    auto buffer = ep_comm_in_->GetBuffer();
-    ASSERT(buffer.size_ >= sizeof(SerialStateNotification));
-    SerialStateNotification* notification =
-        reinterpret_cast<SerialStateNotification*>(buffer.addr_);
-    notification->wIndex = itf_comm_in_num_;
-
-    // 设置串行状态位。
-    // Fill the serial-state bitmap.
-    if (IsDtrSet())
-    {
-      // DTR 有效时报告载波检测（DCD）和数据集就绪（DSR）。
-      // When DTR is asserted, report DCD and DSR as active.
-      notification->serialState = 0x03;  // DCD / DSR
-    }
-    else
-    {
-      notification->serialState = 0x00;  // 无状态
-    }
-
-    // 填充固定字段。
-    // Fill the fixed notification header fields.
-    notification->bmRequestType = 0xA1;  // 设备到主机，类，接口
-    notification->bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
-    notification->wValue = 0;
-    notification->wLength = 2;
-
-    ep_comm_in_->Transfer(sizeof(SerialStateNotification));
-
+    serial_state_pending_.store(1U, std::memory_order_release);
+    RequestClassService(in_isr);
     return ErrorCode::OK;
+  }
+
+  void OnService(bool in_isr) override
+  {
+    if (inited_ && ep_comm_in_) ep_comm_in_->RequestTx(in_isr);
   }
 
   /**
@@ -273,9 +249,10 @@ class CDCBase : public DeviceClass
     // 配置端点参数。
     // Configure endpoint parameters.
     ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, 0});
     ep_data_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
+        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, 0});
+    ep_comm_in_->SetOnTxFill(serial_state_fill_cb_);
     ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16});
 
     // === 填充CDC描述符块 ===
@@ -511,8 +488,8 @@ class CDCBase : public DeviceClass
         {
           return ErrorCode::ARG_ERR;
         }
-        result.read_data =
-            RawData{reinterpret_cast<uint8_t*>(&line_coding_), sizeof(line_coding_)};
+        result.read_data = RawData{reinterpret_cast<uint8_t*>(&pending_line_coding_),
+                                   sizeof(pending_line_coding_)};
         return ErrorCode::OK;
 
       case ClassRequest::GET_LINE_CODING:
@@ -532,7 +509,7 @@ class CDCBase : public DeviceClass
         // Update the DTR / RTS control-line state.
         control_line_state_ = wValue;
         result.write_zlp = true;
-        SendSerialState();
+        SendSerialState(in_isr);
         if (has_control_line_state_cb_)
         {
           on_set_control_line_state_cb_.Run(in_isr, IsDtrSet(), IsRtsSet());
@@ -554,52 +531,54 @@ class CDCBase : public DeviceClass
    * @brief 处理类请求数据阶段
    *        Handle class request data stage
    */
-  ErrorCode OnClassData(bool in_isr, uint8_t bRequest, LibXR::ConstRawData& data) override
+  ErrorCode OnClassData(bool in_isr, uint8_t request, ConstRawData& data) override
+  {
+    if (request != static_cast<uint8_t>(ClassRequest::SET_LINE_CODING))
+      return ErrorCode::NOT_SUPPORT;
+    if (data.size_ != sizeof(CDCLineCoding)) return ErrorCode::ARG_ERR;
+    UART::Configuration cfg{};
+    const CDCLineCoding next = pending_line_coding_;
+    if (next.dwDTERate == 0U || (next.bCharFormat != 0U && next.bCharFormat != 2U) ||
+        next.bParityType > 2U ||
+        (next.bDataBits != 5U && next.bDataBits != 6U && next.bDataBits != 7U &&
+         next.bDataBits != 8U && next.bDataBits != 16U))
+      return ErrorCode::ARG_ERR;
+    cfg.baudrate = next.dwDTERate;
+    cfg.stop_bits = next.bCharFormat == 2U ? 2U : 1U;
+    cfg.parity = next.bParityType == 1U   ? UART::Parity::ODD
+                 : next.bParityType == 2U ? UART::Parity::EVEN
+                                          : UART::Parity::NO_PARITY;
+    cfg.data_bits = next.bDataBits;
+    const ErrorCode result = ApplyLineCoding(in_isr, cfg);
+    if (result != ErrorCode::OK) return result;
+    line_coding_ = next;
+    if (has_line_coding_cb_) on_set_line_coding_cb_.Run(in_isr, cfg);
+    return ErrorCode::OK;
+  }
+
+  virtual ErrorCode ApplyLineCoding(bool in_isr, UART::Configuration config)
   {
     UNUSED(in_isr);
-    UNUSED(data);
+    UNUSED(config);
+    return ErrorCode::OK;
+  }
 
-    switch (static_cast<ClassRequest>(bRequest))
-    {
-      case ClassRequest::SET_LINE_CODING:
-      {
-        // 将 CDC 线路编码转换为 UART 配置。
-        // Convert CDC line coding into a UART configuration.
-        LibXR::UART::Configuration cfg;
-        cfg.baudrate = line_coding_.dwDTERate;
-        switch (line_coding_.bCharFormat)
-        {
-          case 0:
-            cfg.stop_bits = 1;
-            break;
-          // TODO: 1.5
-          case 2:
-            cfg.stop_bits = 2;
-            break;
-          default:
-            cfg.stop_bits = 1;
-        }
-        switch (line_coding_.bParityType)
-        {
-          case 1:
-            cfg.parity = LibXR::UART::Parity::ODD;
-            break;
-          case 2:
-            cfg.parity = LibXR::UART::Parity::EVEN;
-            break;
-          default:
-            cfg.parity = LibXR::UART::Parity::NO_PARITY;
-        }
-        cfg.data_bits = line_coding_.bDataBits;
-        if (has_line_coding_cb_)
-        {
-          on_set_line_coding_cb_.Run(in_isr, cfg);
-        }
-      }
-        return ErrorCode::OK;
-      default:
-        return ErrorCode::NOT_SUPPORT;
-    }
+  ErrorCode OnControlRequest(bool in_isr, const SetupPacket& setup,
+                             ControlTransferResult& result) override
+  {
+    if ((setup.bmRequestType & REQ_TYPE_MASK) != static_cast<uint8_t>(RequestType::CLASS))
+      return DeviceClass::OnControlRequest(in_isr, setup, result);
+    const auto request = static_cast<ClassRequest>(setup.bRequest);
+    const bool input = request == ClassRequest::GET_LINE_CODING;
+    if ((setup.bmRequestType & REQ_DIRECTION_MASK) != (input ? 0x80U : 0U) ||
+        setup.wIndex != itf_comm_in_num_)
+      return ErrorCode::ARG_ERR;
+    if ((request == ClassRequest::SEND_BREAK ||
+         request == ClassRequest::SET_CONTROL_LINE_STATE) &&
+        setup.wLength != 0U)
+      return ErrorCode::ARG_ERR;
+    return OnClassRequest(in_isr, setup.bRequest, setup.wValue, setup.wLength,
+                          setup.wIndex, result);
   }
 
   LIBXR_PACKED_BEGIN
@@ -656,7 +635,7 @@ class CDCBase : public DeviceClass
     InterfaceDescriptor data_intf;  ///< 数据接口描述符 / Data interface descriptor
 
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
-    EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
+    EndpointDescriptor data_ep_in;  ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
   LIBXR_PACKED_END
 
@@ -676,7 +655,7 @@ class CDCBase : public DeviceClass
   // Endpoint numbers.
   Endpoint::EPNumber data_in_ep_num_;   ///< 数据IN端点号 / Data IN endpoint number
   Endpoint::EPNumber data_out_ep_num_;  ///< 数据OUT端点号 / Data OUT endpoint number
-  Endpoint::EPNumber comm_ep_num_;      ///< 通信端点号 / Communication endpoint number
+  Endpoint::EPNumber comm_ep_num_;  ///< 通信端点号 / Communication endpoint number
   const char* control_interface_string_ =
       nullptr;  ///< 控制接口字符串 / Control interface string
   const char* data_interface_string_ =
@@ -716,8 +695,27 @@ class CDCBase : public DeviceClass
 
   // CDC 参数。
   // CDC parameters.
+  std::atomic<uint32_t> serial_state_pending_{0};
+  void FillSerialState(bool, Endpoint::TxFill& fill)
+  {
+    if (serial_state_pending_.exchange(0U, std::memory_order_acq_rel) == 0U) return;
+    REQUIRE(fill.Buffer().size_ >= sizeof(SerialStateNotification));
+    SerialStateNotification message{};
+    message.bmRequestType = 0xA1;
+    message.bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
+    message.wValue = 0;
+    message.wIndex = itf_comm_in_num_;
+    message.wLength = 2;
+    message.serialState = IsDtrSet() ? 0x03 : 0;
+    Memory::FastCopy(fill.Buffer().addr_, &message, sizeof(message));
+    fill.SetSize(sizeof(message));
+  }
+  Callback<Endpoint::TxFill&> serial_state_fill_cb_ = Callback<Endpoint::TxFill&>::Create(
+      [](bool context, CDCBase* self, Endpoint::TxFill& fill)
+      { self->FillSerialState(context, fill); }, this);
+  CDCLineCoding pending_line_coding_{};
   CDCLineCoding line_coding_ = {115200, 0, 0, 8};  ///< 当前线路编码 / Current line coding
-  uint16_t control_line_state_ = 0;                ///< 控制线路状态 / Control line state
+  uint16_t control_line_state_ = 0;  ///< 控制线路状态 / Control line state
 };
 
 }  // namespace LibXR::USB

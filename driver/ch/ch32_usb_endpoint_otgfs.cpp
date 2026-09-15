@@ -31,33 +31,49 @@ static void set_dma_buffer(USB::Endpoint::EPNumber ep_num, void* value,
 {
   *get_dma_addr(ep_num) = (uint32_t)value;
 
-  if (!double_buffer)
-  {
-    return;
-  }
-
   switch (ep_num)
   {
     case USB::Endpoint::EPNumber::EP1:
-      USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
+      else
+        USBFSD->UEP4_1_MOD &= ~USBFS_UEP1_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP2:
-      USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
+      else
+        USBFSD->UEP2_3_MOD &= ~USBFS_UEP2_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP3:
-      USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
+      else
+        USBFSD->UEP2_3_MOD &= ~USBFS_UEP3_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP4:
-      USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
+      else
+        USBFSD->UEP4_1_MOD &= ~USBFS_UEP4_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP5:
-      USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
+      else
+        USBFSD->UEP5_6_MOD &= ~USBFS_UEP5_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP6:
-      USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
+      else
+        USBFSD->UEP5_6_MOD &= ~USBFS_UEP6_BUF_MOD;
       break;
     case USB::Endpoint::EPNumber::EP7:
-      USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
+      if (double_buffer)
+        USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
+      else
+        USBFSD->UEP7_MOD &= ~USBFS_UEP7_BUF_MOD;
       break;
     default:
       break;
@@ -197,7 +213,8 @@ static LibXR::RawData select_buffer(USB::Endpoint::EPNumber ep_num,
     return buffer;
   }
 
-  const size_t half = buffer.size_ / 2u;
+  const size_t half = 64U;
+  ASSERT(buffer.size_ >= 128U);
   ASSERT(half > 0u);
 
   if (dir == USB::Endpoint::Direction::OUT)
@@ -217,6 +234,7 @@ CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
       single_direction_(single_direction),
       dma_buffer_(buffer)
 {
+  if (!single_direction && ep_num != EPNumber::EP0) RequireStaging();
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
   set_dma_buffer(GetNumber(), dma_buffer_.addr_, false);
@@ -232,7 +250,7 @@ CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
   }
 }
 
-void CH32EndpointOtgFs::Configure(const Config& cfg)
+void CH32EndpointOtgFs::ConfigureHardware(const Config& cfg)
 {
   auto& ep_cfg = GetConfig();
   ep_cfg = cfg;
@@ -252,72 +270,82 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
     ASSERT(dma_buffer_.size_ >= static_cast<size_t>(requested_mps) * 2u);
   }
 
-  ep_cfg.double_buffer = is_single_noniso;
+  UNUSED(is_single_noniso);
 
   // OTGFS MPS is clamped by request, effective buffer, and USB FS type limit.
   // OTGFS 包长同时受请求值、当前有效缓冲区和 USB FS 类型上限约束。
   ep_cfg.max_packet_size = LibXR::min<uint16_t>(
       requested_mps,
-      LibXR::min<uint16_t>(static_cast<uint16_t>(GetBuffer().size_), type_limit));
+      LibXR::min<uint16_t>(static_cast<uint16_t>(HardwareBuffer().size_), type_limit));
 
-  set_tx_len(GetNumber(), 0);
-
-  if (!is_isochronous_)
+  if (IsPlanning())
   {
-    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
-    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
+    SetState(State::IDLE);
+    return;
+  }
+
+  const uint8_t toggle = is_isochronous_ ? 0U : USBFS_UEP_T_AUTO_TOG;
+  if (!single_direction_)
+  {
+    // In single-bank bidirectional mode the IN address has a fixed +64 offset.
+    // Keep both enables stable; NAK is the per-direction activation gate.
     enable_tx(GetNumber());
     enable_rx(GetNumber());
   }
+  if (GetDirection() == Direction::IN)
+  {
+    set_tx_len(GetNumber(), 0);
+    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK | toggle;
+    enable_tx(GetNumber());
+    if (single_direction_) disable_rx(GetNumber());
+  }
   else
   {
-    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
-    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
-    if (GetDirection() == Direction::IN)
-    {
-      enable_tx(GetNumber());
-    }
-    else
-    {
-      enable_rx(GetNumber());
-    }
+    *get_rx_ctrl_addr(GetNumber()) =
+        USBFS_UEP_R_RES_NAK | (is_isochronous_ ? 0U : USBFS_UEP_R_AUTO_TOG);
+    enable_rx(GetNumber());
+    if (single_direction_) disable_tx(GetNumber());
   }
 
-  set_dma_buffer(GetNumber(), dma_buffer_.addr_, ep_cfg.double_buffer);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, false);
 
   SetState(State::IDLE);
 }
 
-void CH32EndpointOtgFs::Close()
+void CH32EndpointOtgFs::CloseHardware()
 {
-  disable_tx(GetNumber());
-  disable_rx(GetNumber());
-
-  *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
-  *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
-
-  SetState(State::DISABLED);
+  if (GetDirection() == Direction::IN)
+  {
+    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    if (single_direction_) disable_tx(GetNumber());
+  }
+  else
+  {
+    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+    if (single_direction_) disable_rx(GetNumber());
+  }
 }
 
-ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
+ErrorCode CH32EndpointOtgFs::StartHardware(RawData buffer, size_t size)
 {
-  if (GetState() == State::BUSY)
-  {
-    return ErrorCode::BUSY;
-  }
-
-  auto buffer = GetBuffer();
   if (buffer.size_ < size)
   {
     return ErrorCode::NO_BUFF;
   }
 
   bool is_in = (GetDirection() == Direction::IN);
-
-  if (is_in && UseDoubleBuffer())
-  {
-    SwitchBuffer();
-  }
+  const auto arena = HardwareBuffer();
+  const uintptr_t base = reinterpret_cast<uintptr_t>(arena.addr_);
+  const uintptr_t address = reinterpret_cast<uintptr_t>(buffer.addr_);
+  const bool direct = single_direction_ && address >= base &&
+                      address - base <= arena.size_ &&
+                      size <= arena.size_ - (address - base);
+  transfer_dma_ = direct ? buffer : arena;
+  if (is_in && transfer_dma_.addr_ != buffer.addr_ && size != 0U)
+    Memory::FastCopy(transfer_dma_.addr_, buffer.addr_, size);
+  if (single_direction_ || GetNumber() == EPNumber::EP0)
+    set_dma_buffer(GetNumber(), transfer_dma_.addr_, false);
+  last_transfer_size_ = size;
 
   if (is_in)
   {
@@ -354,18 +382,12 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
     tog_ = !tog_;
   }
 
-  last_transfer_size_ = size;
-  SetState(State::BUSY);
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgFs::Stall()
+ErrorCode CH32EndpointOtgFs::StallHardware()
 {
   const bool is_in = (GetDirection() == Direction::IN);
-  if (GetState() != State::IDLE && !(GetState() == State::BUSY && !is_in))
-  {
-    return ErrorCode::BUSY;
-  }
 
   if (is_in)
   {
@@ -379,23 +401,13 @@ ErrorCode CH32EndpointOtgFs::Stall()
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgFs::ClearStall()
+ErrorCode CH32EndpointOtgFs::ClearStallHardware()
 {
-  if (GetState() != State::STALLED)
-  {
-    return ErrorCode::FAILED;
-  }
-
-  bool is_in = (GetDirection() == Direction::IN);
-  if (is_in)
-  {
-    *get_tx_ctrl_addr(GetNumber()) &= ~USBFS_UEP_T_RES_STALL;
-  }
+  if (GetDirection() == Direction::IN)
+    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
   else
-  {
-    *get_rx_ctrl_addr(GetNumber()) &= ~USBFS_UEP_R_RES_STALL;
-  }
-  SetState(State::IDLE);
+    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
+  tog_ = false;
   return ErrorCode::OK;
 }
 
@@ -436,8 +448,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     const bool TOG_OK = ((USBFSD->INT_ST & USBFS_U_TOG_OK) == USBFS_U_TOG_OK);  // NOLINT
     if (!TOG_OK)
     {
-      SetState(State::IDLE);
-      (void)Transfer(last_transfer_size_);
+      (void)StartHardware(TransferBuffer(), last_transfer_size_);
       return;
     }
   }
@@ -455,21 +466,16 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_ACK;
   }
 
+  if (IS_OUT && size != 0U && transfer_dma_.addr_ != TransferBuffer().addr_)
+  {
+    if (size > TransferBuffer().size_)
+    {
+      OnTransferCompleteCallback(true, size, ErrorCode::OUT_OF_RANGE);
+      return;
+    }
+    Memory::FastCopy(TransferBuffer().addr_, transfer_dma_.addr_, size);
+  }
   OnTransferCompleteCallback(true, size);
-}
-
-void CH32EndpointOtgFs::SwitchBuffer()
-{
-  if (GetDirection() == Direction::IN)
-  {
-    tog_ = (*get_tx_ctrl_addr(GetNumber()) & USBFS_UEP_T_TOG) == USBFS_UEP_T_TOG;
-    SetActiveBlock(!tog_);
-  }
-  else
-  {
-    tog_ = (*get_rx_ctrl_addr(GetNumber()) & USBFS_UEP_R_TOG) == USBFS_UEP_R_TOG;
-    SetActiveBlock(tog_);
-  }
 }
 
 #endif
