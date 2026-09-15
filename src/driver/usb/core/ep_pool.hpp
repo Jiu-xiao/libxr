@@ -125,7 +125,7 @@ class EndpointPool
     hardware_leave_ = leave;
   }
 
-  // Short hardware-only critical region. It must not include class callbacks or
+  // Short hardware/control-mailbox critical region; never class callbacks or
   // blocking work. Backends mask local IRQs and, on SMP, serialize register access.
   class HardwareScope
   {
@@ -177,10 +177,16 @@ class EndpointPool
   /// Invoke synchronously if free; otherwise retain work for the current owner.
   void RequestService(bool in_isr);
   void SetControlHandler(Callback<uint32_t> callback) { control_handler_ = callback; }
-  void PostControl(uint32_t events, bool in_isr);
-  bool HasPendingControl() const
+  // Publish atomically with a hardware/mailbox change, then RequestService after
+  // releasing the short guard. Publication itself never invokes callbacks.
+  void PublishControl(uint32_t events)
   {
-    return control_pending_.load(std::memory_order_acquire) != 0U;
+    control_pending_.fetch_or(events, std::memory_order_release);
+  }
+  void PostControl(uint32_t events, bool in_isr);
+  bool HasPendingControl(uint32_t mask = UINT32_MAX) const
+  {
+    return (control_pending_.load(std::memory_order_acquire) & mask) != 0U;
   }
   bool CurrentContextIsISR() const { return current_in_isr_; }
   bool DataEnabled() const { return data_enabled_; }

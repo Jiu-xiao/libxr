@@ -91,13 +91,15 @@ class CDCUart : public CDCBase, public LibXR::UART
          cfg.data_bits != 8U && cfg.data_bits != 16U))
       return ErrorCode::ARG_ERR;
     config_sequence_.fetch_add(1U, std::memory_order_acq_rel);
-    config_baud_.store(cfg.baudrate, std::memory_order_relaxed);
+    // Payload release/acquire also orders the odd sequence marker. Observing a
+    // newer payload must make the final sequence check reject an older snapshot.
+    config_baud_.store(cfg.baudrate, std::memory_order_release);
     const uint32_t parity = cfg.parity == UART::Parity::ODD    ? 1U
                             : cfg.parity == UART::Parity::EVEN ? 2U
                                                                : 0U;
     config_format_.store((cfg.stop_bits == 2U ? 2U : 0U) | (parity << 8U) |
                              (static_cast<uint32_t>(cfg.data_bits) << 16U),
-                         std::memory_order_relaxed);
+                         std::memory_order_release);
     config_sequence_.fetch_add(1U, std::memory_order_release);
     RequestClassService(in_isr);
     return ErrorCode::OK;
@@ -108,8 +110,8 @@ class CDCUart : public CDCBase, public LibXR::UART
     const uint32_t before = config_sequence_.load(std::memory_order_acquire);
     if (before != applied_config_sequence_ && (before & 1U) == 0U)
     {
-      const uint32_t baud = config_baud_.load(std::memory_order_relaxed);
-      const uint32_t format = config_format_.load(std::memory_order_relaxed);
+      const uint32_t baud = config_baud_.load(std::memory_order_acquire);
+      const uint32_t format = config_format_.load(std::memory_order_acquire);
       if (config_sequence_.load(std::memory_order_acquire) == before)
       {
         auto& coding = GetLineCoding();

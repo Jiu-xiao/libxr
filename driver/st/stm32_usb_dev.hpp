@@ -95,10 +95,15 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
 #endif
   }
 
-  static void IRQHandler(PCD_HandleTypeDef* hpcd)
+  static STM32USBDevice* FindDevice(PCD_HandleTypeDef* hpcd)
   {
     const auto id = STM32USBDeviceGetID(hpcd);
-    auto* device = map_[id];
+    return id < STM32_USB_DEV_ID_NUM ? map_[id] : nullptr;
+  }
+
+  static void IRQHandler(PCD_HandleTypeDef* hpcd)
+  {
+    auto* device = FindDevice(hpcd);
     if (device)
     {
       USB::EndpointPool::InterruptScope interrupt_scope(*device);

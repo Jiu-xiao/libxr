@@ -101,11 +101,11 @@ class GsUsbClass : public DeviceClass
              const char* interface_string = DEFAULT_INTERFACE_STRING)
       : data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
+        interface_string_(interface_string),
         identify_gpio_(identify_gpio),
         database_(database),
         rx_queue_(rx_queue_size),
-        echo_queue_(echo_queue_size),
-        interface_string_(interface_string)
+        echo_queue_(echo_queue_size)
   {
     ASSERT(cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -162,11 +162,11 @@ class GsUsbClass : public DeviceClass
       : fd_supported_(true),
         data_in_ep_num_(data_in_ep_num),
         data_out_ep_num_(data_out_ep_num),
+        interface_string_(interface_string),
         identify_gpio_(identify_gpio),
         database_(database),
         rx_queue_(rx_queue_size),
-        echo_queue_(echo_queue_size),
-        interface_string_(interface_string)
+        echo_queue_(echo_queue_size)
   {
     ASSERT(fd_cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -199,7 +199,10 @@ class GsUsbClass : public DeviceClass
    * @return true 协商通过 / Passed
    * @return false 协商未通过 / Not passed
    */
-  bool IsHostFormatOK() const { return host_format_ok_; }
+  bool IsHostFormatOK() const
+  {
+    return host_format_ok_.load(std::memory_order_acquire) != 0U;
+  }
 
   void OnService(bool in_isr) override
   {
@@ -972,7 +975,7 @@ class GsUsbClass : public DeviceClass
   std::array<LibXR::FDCAN::Configuration, CanChNum>
       fd_config_{};  ///< FD 配置 / FD configuration
 
-  bool host_format_ok_ = false;  ///< HOST_FORMAT 是否通过 / HOST_FORMAT OK
+  std::atomic<uint32_t> host_format_ok_{0};  ///< Public cross-context status snapshot.
 
   std::atomic<uint32_t>
       can_enabled_[CanChNum]{};  ///< 通道启用（classic） / Channel enabled (classic)
@@ -1113,7 +1116,10 @@ class GsUsbClass : public DeviceClass
    */
   void OnFdCanRx(bool in_isr, uint8_t ch, const LibXR::FDCAN::FDPack& pack)
   {
-    if (!fd_supported_ || ch >= can_count_ || !fd_enabled_[ch] || !ep_data_in_)
+    // CAN producers never dereference binding-owned endpoint pointers. The queue
+    // and class-service doorbell remain stable across USB reconfiguration.
+    if (!fd_supported_ || ch >= can_count_ || !inited_.load(std::memory_order_acquire) ||
+        !fd_enabled_[ch])
     {
       return;
     }

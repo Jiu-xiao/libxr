@@ -115,6 +115,16 @@ LibXR::ErrorCode EndpointPool::Release(Endpoint* ep_info)
     }
   }
 
+  if (released)
+  {
+    // Callbacks belong to the class binding, not to the perpetual endpoint object.
+    // Close/HALT within the same binding deliberately keep their callbacks.
+    ep_info->on_tx_fill_ = {};
+    ep_info->on_work_ = {};
+    ep_info->on_started_ = {};
+    ep_info->on_transfer_complete_ = {};
+    ep_info->on_error_ = {};
+  }
   return released ? LibXR::ErrorCode::OK : LibXR::ErrorCode::NOT_FOUND;
 }
 
@@ -169,7 +179,7 @@ void EndpointPool::SetEndpoint0(Endpoint* ep0_in, Endpoint* ep0_out)
 
 void EndpointPool::PostControl(uint32_t events, bool in_isr)
 {
-  control_pending_.fetch_or(events, std::memory_order_release);
+  PublishControl(events);
   RequestService(in_isr);
 }
 
@@ -189,16 +199,18 @@ void EndpointPool::RequestService(bool in_isr)
                         control_pending_.exchange(0U, std::memory_order_acq_rel);
                     if (events != 0U) control_handler_.Run(current_isr, events);
                     if (HasPendingControl()) return;
-                    if (ep0_out_) ep0_out_->Service(current_isr, (events & 63U) != 0U);
+                    // Every control event can pause an already accepted transfer.
+                    // CLASS and TIME must resume it too, even without another Write.
+                    if (ep0_out_) ep0_out_->Service(current_isr, events != 0U);
                     if (!HasPendingControl() && ep0_in_)
-                      ep0_in_->Service(current_isr, (events & 63U) != 0U);
+                      ep0_in_->Service(current_isr, events != 0U);
                     for (size_t n = 1; n < SLOT_COUNT && !HasPendingControl(); ++n)
                     {
                       for (size_t d = 0; d < DIR_COUNT && !HasPendingControl(); ++d)
                       {
                         auto* ep = slots_[n][d];
                         if (ep && (d == 0U || ep != slots_[n][0]))
-                          ep->Service(current_isr, (events & 63U) != 0U);
+                          ep->Service(current_isr, events != 0U);
                       }
                     }
                   });

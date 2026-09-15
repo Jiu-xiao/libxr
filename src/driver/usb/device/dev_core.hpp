@@ -36,41 +36,16 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   DeviceCore(const DeviceCore&) = delete;
   DeviceCore& operator=(const DeviceCore&) = delete;
 
-  virtual void Init(bool in_isr)
-  {
-    desired_enabled_.store(1U, std::memory_order_release);
-    pool_.PostControl(INIT_EVENT, in_isr);
-  }
-  virtual void Deinit(bool in_isr)
-  {
-    desired_enabled_.store(0U, std::memory_order_release);
-    pool_.PostControl(DEINIT_EVENT, in_isr);
-  }
+  virtual void Init(bool in_isr) { RequestLifecycle(in_isr, INIT_EVENT, true); }
+  virtual void Deinit(bool in_isr) { RequestLifecycle(in_isr, DEINIT_EVENT, false); }
   virtual void Start(bool in_isr) = 0;
   virtual void Stop(bool in_isr) = 0;
   bool IsInited() const { return inited_.load(std::memory_order_acquire) != 0U; }
   void OnSetupPacket(bool in_isr, const SetupPacket* setup);
-  void OnBusReset(bool in_isr)
-  {
-    desired_enabled_.store(1U, std::memory_order_release);
-    requested_suspend_.store(0U, std::memory_order_release);
-    pool_.PostControl(RESET_EVENT, in_isr);
-  }
-  void OnDisconnect(bool in_isr)
-  {
-    desired_enabled_.store(0U, std::memory_order_release);
-    pool_.PostControl(DISCONNECT_EVENT, in_isr);
-  }
-  void OnSuspend(bool in_isr)
-  {
-    requested_suspend_.store(1U, std::memory_order_release);
-    pool_.PostControl(POWER_EVENT, in_isr);
-  }
-  void OnResume(bool in_isr)
-  {
-    requested_suspend_.store(0U, std::memory_order_release);
-    pool_.PostControl(POWER_EVENT, in_isr);
-  }
+  void OnBusReset(bool in_isr) { RequestLifecycle(in_isr, RESET_EVENT, true); }
+  void OnDisconnect(bool in_isr) { RequestLifecycle(in_isr, DISCONNECT_EVENT, false); }
+  void OnSuspend(bool in_isr) { RequestPower(in_isr, true); }
+  void OnResume(bool in_isr) { RequestPower(in_isr, false); }
   void OnSof(bool in_isr, uint16_t frame, uint8_t microframe = 0xff);
   bool WantsBusTime() const
   {
@@ -97,6 +72,32 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   static constexpr uint32_t SETUP_EVENT = 16U;
   static constexpr uint32_t POWER_EVENT = 32U;
   static constexpr uint32_t TIME_EVENT = 64U;
+  static constexpr uint32_t LIFECYCLE_EVENTS =
+      INIT_EVENT | DEINIT_EVENT | RESET_EVENT | DISCONNECT_EVENT;
+
+  void RequestLifecycle(bool in_isr, uint32_t event, bool enabled)
+  {
+    {
+      EndpointPool::HardwareScope hardware(&pool_);
+      // Invalidate only SETUP captured before this lifecycle boundary. A SETUP
+      // captured afterwards remains pending even when both event bits coalesce.
+      captured_setup_pending_ = false;
+      desired_enabled_.store(enabled ? 1U : 0U, std::memory_order_release);
+      requested_suspend_.store(0U, std::memory_order_release);
+      pool_.PublishControl(event);
+    }
+    pool_.RequestService(in_isr);
+  }
+
+  void RequestPower(bool in_isr, bool suspended)
+  {
+    {
+      EndpointPool::HardwareScope hardware(&pool_);
+      requested_suspend_.store(suspended ? 1U : 0U, std::memory_order_release);
+      pool_.PublishControl(POWER_EVENT);
+    }
+    pool_.RequestService(in_isr);
+  }
 
   enum class Phase : uint8_t
   {
@@ -125,7 +126,7 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   void Abort(bool in_isr);
   void Stall(bool in_isr);
   void DeliverBusTime(bool in_isr);
-  bool ReadCapturedSetup(SetupPacket& setup) const;
+  bool TakeCapturedSetup(SetupPacket& setup);
 
   EndpointPool& pool_;
   DeviceComposition composition_;
@@ -136,11 +137,10 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   std::atomic<uint32_t> desired_enabled_{0};
   std::atomic<uint32_t> inited_{0};
   std::atomic<uint32_t> requested_suspend_{0};
-  // IRQ-written fixed snapshot; atomic words avoid a C++ data race even when a
-  // later SETUP replaces it while a different core copies the snapshot.
-  std::atomic<uint32_t> setup_sequence_{0};
-  std::atomic<uint32_t> setup_words_[2]{};
-  uint32_t handled_setup_sequence_ = 0;
+  // Capture, invalidation and consumption use the backend's same short guard.
+  // No callback or packet processing executes inside this eight-byte mailbox.
+  SetupPacket captured_setup_{};
+  bool captured_setup_pending_ = false;
   SetupPacket setup_{};
   DeviceClass* control_class_ = nullptr;
   Phase phase_ = Phase::IDLE;

@@ -19,7 +19,7 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd)
 
 extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  auto* usb = STM32USBDevice::FindDevice(hpcd);
   if (!usb) return;
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   auto* device = reinterpret_cast<USB_OTG_DeviceTypeDef*>(
@@ -61,19 +61,19 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
 
 extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  auto* usb = STM32USBDevice::FindDevice(hpcd);
   if (usb) usb->OnBusReset(true);
 }
 
 extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  auto* usb = STM32USBDevice::FindDevice(hpcd);
   if (usb) usb->OnSuspend(true);
 }
 
 extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd)
 {
-  auto* usb = STM32USBDevice::map_[STM32USBDeviceGetID(hpcd)];
+  auto* usb = STM32USBDevice::FindDevice(hpcd);
   if (usb) usb->OnResume(true);
 }
 
