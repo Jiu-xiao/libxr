@@ -450,7 +450,8 @@ static uint32_t GetF7I2CClock(I2C_TypeDef* instance)
 }
 #endif
 
-static uint32_t GetI2CClock(I2C_TypeDef* instance)
+template <typename I2CInstance>
+static uint32_t GetI2CClock(I2CInstance* instance)
 {
 #if defined(STM32H7) && defined(HAL_RCC_MODULE_ENABLED)
   return GetH7I2CClock(instance);
@@ -618,14 +619,6 @@ static void RestoreI2CFilterState(I2C_HandleTypeDef* handle, I2CFilterState stat
   MODIFY_REG(handle->Instance->FLTR, I2C_FLTR_DNF, state.digital_filter);
 #endif
   SET_BIT(handle->Instance->CR1, was_enabled);
-}
-
-static bool ComputeTiming(I2C_HandleTypeDef* handle, uint32_t speed_hz,
-                          I2CFilterState filter_state, uint32_t& timing)
-{
-  return STM32I2CTiming::Compute(GetI2CClock(handle->Instance), speed_hz,
-                                 filter_state.analog_filter, filter_state.digital_filter,
-                                 timing);
 }
 
 static STM32I2C* FindI2C(I2C_HandleTypeDef* handle)
@@ -957,7 +950,9 @@ ErrorCode STM32I2C::SetConfig(Configuration config)
   }
   else if constexpr (HasTiming<decltype(i2c_handle_)>::value)
   {
-    if (!ComputeTiming(i2c_handle_, config.clock_speed, old_filter_state, timing))
+    if (!STM32I2CTiming::Compute(GetI2CClock(i2c_handle_->Instance), config.clock_speed,
+                                 old_filter_state.analog_filter,
+                                 old_filter_state.digital_filter, timing))
     {
       return ErrorCode::NOT_SUPPORT;
     }
