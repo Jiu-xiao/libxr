@@ -20,6 +20,26 @@ namespace LibXR
  * `Payload*` pointers, so `Payload` alignment does not add an extra semantic
  * constraint on the internal byte-buffer contract.
  *
+ * 适用场合：MPMC 保留为公共类型，适合任务或线程之间、调用方能等待或稍后
+ * 重试的场合，以及大容量、多核高争用的场合。单核上若某个操作在"占槽"与
+ * "发布"之间被抢占，其他上下文会看到瞬时的 FULL/EMPTY（假的满/空），因此：
+ * 被抢占时拿到的 FULL/EMPTY 可能是瞬时的，调用方要能等待或稍后重试；不要
+ * 在中断里循环重试，也不要断言入队一定成功；RTOS 里高优先级任务拿到
+ * FULL/EMPTY 时要让出 CPU 再试，不能原地自旋。中断会读写、拿到 FULL 只能
+ * 丢数据的场合，改用 `SlotPool`。
+ *
+ * Intended use: MPMC stays a public type for task/thread producers and
+ * consumers that can wait or retry later, and for large capacities with high
+ * multi-core contention. On a single core, when one context is preempted
+ * between claiming a cell and publishing it, other contexts observe transient
+ * FULL/EMPTY (spurious full/empty). Therefore: a FULL/EMPTY observed while
+ * someone is preempted may be transient and callers must be able to wait or
+ * retry later; never retry in a loop inside an interrupt and never assert that
+ * an enqueue must succeed; in an RTOS, a higher-priority task that observes
+ * FULL/EMPTY must yield the CPU before retrying instead of spinning; and when
+ * interrupts both read and write and a FULL can only drop data, use
+ * `SlotPool` instead.
+ *
  * @tparam Payload 队列存储的数据类型 / Queue element type.
  */
 template <typename Payload>

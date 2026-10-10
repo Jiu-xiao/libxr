@@ -85,6 +85,7 @@ void test_linux_uart_stream_config();
 void test_linux_uart_reconnect();
 void test_linux_uart_partial_disconnect();
 void test_linux_uart_initial_open_recovery();
+void test_slot_pool();
 
 namespace LinuxSharedTopicBench
 {
@@ -274,6 +275,7 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"system_tests", {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},
     {"system_tests", {"terminal_input", &RunVoidEntry<test_terminal_input>, true}},
     {"system_tests", {"terminal", &RunVoidEntry<test_terminal>, true}},
+    {"data_structure_tests", {"slot_pool", &RunVoidEntry<test_slot_pool>, false}},
 };
 }  // namespace
 
