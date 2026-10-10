@@ -12,7 +12,7 @@
 #endif
 
 #include "can.hpp"
-#include "queue.hpp"
+#include "slot_pool.hpp"
 
 typedef enum
 {
@@ -104,7 +104,24 @@ class STM32CAN : public CAN
   uint32_t txMailbox;
 
   /// 发送软件队列 / TX software queue.
-  MPMCQueue<ClassicPack> tx_queue_;
+  ///
+  /// 槽池替代 MPMC 队列的原因：MPMC 先占槽后拷贝，任务在 `TxService` 的
+  /// `Pop` 中途（已 CAS 队头、槽序号未发布）被中断打断时，中断里
+  /// `AddMessage` 的 `Push` 会在回绕到该槽的位置上拿到假的 FULL 而丢帧。
+  /// 槽池里被打断的操作只占住自己的槽（读取中），`Acquire` 扫描会跳过它；
+  /// 只要还有空闲槽，中断里的 `Put` 一定成功，FULL 只在确实没有空闲槽时
+  /// 出现。出队顺序从"认领先后"变为"发布完成先后"，同一发送者内部保序。
+  ///
+  /// Reason to replace the MPMC queue with a slot pool: MPMC claims a cell
+  /// before copying. When a task is interrupted inside `TxService`'s `Pop`
+  /// (head CAS done, cell sequence not published yet), `AddMessage` from an
+  /// interrupt wraps onto that cell and gets a false FULL, dropping the frame.
+  /// With the slot pool the interrupted operation only occupies its own slot
+  /// (reading), which the `Acquire` scan skips: as long as a free slot exists,
+  /// `Put` from an interrupt succeeds, and FULL appears only when no slot is
+  /// really free. Dequeue order changes from claim order to publish-completion
+  /// order; the order inside one sender is preserved.
+  SlotPool<ClassicPack> tx_queue_;
   /// 待重试帧有效标记 / Pending retry frame flag.
   bool tx_retry_valid_{false};
   /// 待重试帧 / Pending retry frame.

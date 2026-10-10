@@ -439,9 +439,9 @@ void STM32CAN::TxService()
       {
         p = tx_retry_pack_;
       }
-      else if (tx_queue_.Pop(p) != ErrorCode::OK)
+      else if (tx_queue_.Get(p) != ErrorCode::OK)
       {
-        break;  // 队列空
+        break;  // 队列空 / Queue empty.
       }
 
       CAN_TxHeaderTypeDef hdr{};
@@ -486,7 +486,15 @@ ErrorCode STM32CAN::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_queue_.Push(pack) != ErrorCode::OK)
+  // 任务在 TxService 的 Get（读取中）中途被打断时，它持有的槽不会被
+  // Publish/Release；这里的 Put 扫描会跳过该槽，只要还有空闲槽就返回 OK，
+  // 不再出现 MPMC 队列回绕到未完成 Pop 槽位时的假 FULL。
+  // When a task is interrupted in the middle of TxService's Get (reading), the
+  // slot it holds is never published/released; the Put below skips that slot in
+  // its scan and returns OK whenever another slot is free, so the false FULL
+  // that the MPMC queue produced by wrapping onto an unfinished Pop cell cannot
+  // happen any more.
+  if (tx_queue_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }

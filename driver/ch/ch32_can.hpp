@@ -6,7 +6,7 @@
 
 #include "can.hpp"
 #include "ch32_can_def.hpp"
-#include "queue.hpp"
+#include "slot_pool.hpp"
 
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
@@ -92,7 +92,21 @@ class CH32CAN : public CAN
   uint8_t filter_bank_{0};
 
   /// 发送软件队列 / TX software queue.
-  MPMCQueue<ClassicPack> tx_queue_;
+  ///
+  /// 槽池替代 MPMC 队列的原因与 `STM32CAN::tx_queue_` 相同：MPMC 的
+  /// `Pop` 中途被打断时，中断里 `AddMessage` 的 `Push` 回绕到该槽会拿到
+  /// 假的 FULL 丢帧；槽池的 `Put` 扫描跳过被打断者持有的槽，FULL 只在
+  /// 确实没有空闲槽时出现。出队顺序从"认领先后"变为"发布完成先后"，
+  /// 同一发送者内部保序。
+  ///
+  /// Reason to replace the MPMC queue with a slot pool is the same as
+  /// `STM32CAN::tx_queue_`: when a `Pop` is interrupted midway, `AddMessage`
+  /// from an interrupt wraps onto that cell and gets a false FULL, dropping
+  /// the frame; the pool's `Put` scan skips the slot held by the interrupted
+  /// operation, and FULL appears only when no slot is really free. Dequeue
+  /// order changes from claim order to publish-completion order and the order
+  /// inside one sender is preserved.
+  SlotPool<ClassicPack> tx_queue_;
   /// 待重试帧有效标记 / Pending retry frame flag.
   bool tx_retry_valid_{false};
   /// 待重试帧 / Pending retry frame.
