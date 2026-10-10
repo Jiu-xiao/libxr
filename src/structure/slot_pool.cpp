@@ -107,7 +107,7 @@ ErrorCode SlotPoolBase::Take(size_t& index)
 
   for (;;)
   {
-    size_t best = kInvalidIndex;
+    size_t best = INVALID_INDEX;
     uint32_t best_seq = 0;
 
     for (size_t i = 0; i < slot_count_; ++i)
@@ -118,14 +118,14 @@ ErrorCode SlotPoolBase::Take(size_t& index)
       }
 
       const uint32_t seq = seqs_[i].load(std::memory_order_relaxed);
-      if (best == kInvalidIndex || SeqBefore(seq, best_seq))
+      if (best == INVALID_INDEX || SeqBefore(seq, best_seq))
       {
         best = i;
         best_seq = seq;
       }
     }
 
-    if (best != kInvalidIndex)
+    if (best != INVALID_INDEX)
     {
       uint32_t expected = SLOT_READY;
       if (states_[best].compare_exchange_strong(expected, SLOT_READING,
@@ -177,6 +177,9 @@ void SlotPoolBase::Release(size_t index)
   release_count_.fetch_add(1, std::memory_order_release);
 
   uint32_t expected = states_[index].load(std::memory_order_relaxed);
+  // 只有持有者（写入中或读取中）才能释放 / Only the holder (writing or reading)
+  // may release.
+  ASSERT(expected == SLOT_WRITING || expected == SLOT_READING);
   const bool ok = states_[index].compare_exchange_strong(expected, SLOT_FREE,
                                                          std::memory_order_release,
                                                          std::memory_order_acquire);

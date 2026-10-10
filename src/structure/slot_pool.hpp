@@ -118,7 +118,7 @@ class SlotPoolBase
   [[nodiscard]] const void* SlotPtr(size_t index) const;
 
   /// 无效槽位下标 / Sentinel for "no slot chosen".
-  static constexpr size_t kInvalidIndex = static_cast<size_t>(-1);
+  static constexpr size_t INVALID_INDEX = static_cast<size_t>(-1);
 
   /// @brief 槽状态 / Slot state.
   enum SlotState : uint32_t
@@ -229,7 +229,7 @@ class SlotPool : public SlotPoolBase
   {
     static_assert(std::is_trivially_copyable_v<T>,
                   "SlotPool::Put requires a trivially copyable type");
-    size_t index = kInvalidIndex;
+    size_t index = INVALID_INDEX;
     const ErrorCode ec = Acquire(index);
     if (ec != ErrorCode::OK)
     {
@@ -253,7 +253,7 @@ class SlotPool : public SlotPoolBase
   {
     static_assert(std::is_trivially_copyable_v<T>,
                   "SlotPool::Get requires a trivially copyable type");
-    size_t index = kInvalidIndex;
+    size_t index = INVALID_INDEX;
     const ErrorCode ec = Take(index);
     if (ec != ErrorCode::OK)
     {

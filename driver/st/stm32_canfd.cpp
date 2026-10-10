@@ -255,11 +255,6 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  // 任务在 TxService 的 Get（读取中）中途被打断时，中断里的 Put 扫描会
-  // 跳过该槽，不再出现 MPMC 队列回绕到未完成 Pop 槽位时的假 FULL。
-  // When a task is interrupted in the middle of TxService's Get (reading), the
-  // Put below skips that slot in its scan, so the false FULL that the MPMC
-  // queue produced by wrapping onto an unfinished Pop cell cannot happen.
   if (tx_queue_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
@@ -619,9 +614,6 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
     return ErrorCode::FAILED;
   }
 
-  // 同 tx_queue_：中断里的 Put 不再因任务 Pop 被打断而拿到假 FULL。
-  // Same as tx_queue_: a Put from an interrupt no longer observes a false FULL
-  // caused by an interrupted task Pop.
   if (tx_fd_queue_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
