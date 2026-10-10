@@ -335,13 +335,15 @@ void test_slot_pool()
     TEST_ASSERT(pool.Get(popped) == LibXR::ErrorCode::EMPTY);
   }
 
-  // Per-producer FIFO with two concurrent producers and one consumer.
+  // Per-producer FIFO with three concurrent producers and one consumer. The
+  // small pool keeps publications landing in slots the consumer has already
+  // scanned, which is where a pass could pick a newer item of one producer.
   {
-    constexpr size_t PRODUCER_COUNT = 2;
-    constexpr size_t ITEMS_PER_PRODUCER = 20000;
+    constexpr size_t PRODUCER_COUNT = 3;
+    constexpr size_t ITEMS_PER_PRODUCER = 50000;
     constexpr size_t TOTAL_ITEMS = PRODUCER_COUNT * ITEMS_PER_PRODUCER;
 
-    Pool pool(8);
+    Pool pool(4);
     std::atomic<size_t> produced_done_count = 0;
     std::array<LibXR::Thread, PRODUCER_COUNT> producers;
 

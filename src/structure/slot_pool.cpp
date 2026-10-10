@@ -102,11 +102,14 @@ void SlotPoolBase::Publish(size_t index)
 
 ErrorCode SlotPoolBase::Take(size_t& index)
 {
-  uint32_t publish_begin = publish_seq_.load(std::memory_order_acquire);
   bool rescanned = false;
 
   for (;;)
   {
+    // 本轮开始时的发布计数：本轮开始前就绪的条目，序号都早于它。
+    // Publish count at the start of this pass: every item that was ready before
+    // the pass began has a sequence before it.
+    const uint32_t pass_begin = publish_seq_.load(std::memory_order_acquire);
     size_t best = INVALID_INDEX;
     uint32_t best_seq = 0;
 
@@ -127,6 +130,19 @@ ErrorCode SlotPoolBase::Take(size_t& index)
 
     if (best != INVALID_INDEX)
     {
+      // 选中的条目在本轮开始后才取得序号时，同一发布者更早的条目可能在本轮
+      // 扫过它的槽之后才就绪而被漏掉：重新扫描，直到选中的条目早于本轮开始。
+      // 单核上中断里的扫描不会被低优先级上下文的发布插入，不会走到这里。
+      // When the chosen item took its sequence after this pass began, an earlier
+      // item of the same publisher may have become ready only after the pass had
+      // scanned its slot: rescan until the chosen item predates the pass. On a
+      // single core, a scan inside an interrupt cannot be interleaved with
+      // publications from lower-priority contexts, so it never gets here.
+      if (!SeqBefore(best_seq, pass_begin))
+      {
+        continue;
+      }
+
       uint32_t expected = SLOT_READY;
       if (states_[best].compare_exchange_strong(expected, SLOT_READING,
                                                 std::memory_order_acq_rel,
@@ -158,11 +174,10 @@ ErrorCode SlotPoolBase::Take(size_t& index)
     }
 
     const uint32_t publish_end = publish_seq_.load(std::memory_order_acquire);
-    if (publish_end == publish_begin || rescanned)
+    if (publish_end == pass_begin || rescanned)
     {
       return ErrorCode::EMPTY;
     }
-    publish_begin = publish_end;
     rescanned = true;
   }
 }
