@@ -70,10 +70,12 @@ class SlotPoolBase
    *        sequence number.
    * @param index 已通过 `Acquire` 认领的槽位下标 / Slot index claimed via `Acquire`
    *
-   * 发布序号由全局计数器 `fetch_add` 取得；`Take` 按发布完成的先后出队。
-   * 调用方必须仍持有该槽（写入中），重复发布或发布未认领的槽是调用方错误。
-   * The sequence number comes from a global `fetch_add` counter; `Take` dequeues
-   * in publish-completion order. The caller must still own the slot (writing);
+   * 发布序号在 `Publish` 开始时由全局计数器 `fetch_add` 取得；`Take` 在已就绪
+   * 的槽中按序号先后出队。调用方必须仍持有该槽（写入中），重复发布或发布未
+   * 认领的槽是调用方错误。
+   * The sequence number comes from a global `fetch_add` counter when `Publish`
+   * begins; `Take` dequeues ready slots in sequence order. The caller must still
+   * own the slot (writing);
    * double publishing or publishing an unclaimed slot is a caller error.
    */
   void Publish(size_t index);
@@ -85,12 +87,11 @@ class SlotPoolBase
    *         Returns `ErrorCode::OK` on success; `ErrorCode::EMPTY` when no slot
    *         is ready
    *
-   * 槽之间按发布序号挑选（序号比较允许回绕），因此出队顺序是"发布完成的
-   * 先后"，同一发布者内部严格保序；一个还没发布的槽不会挡住其他就绪槽。
-   * Slots are selected by publish sequence (wraparound-safe comparison), so the
-   * dequeue order is publish-completion order and each publisher preserves its
-   * own order; a slot that has not been published yet never hides other ready
-   * slots.
+   * 槽之间按发布序号挑选（序号比较允许回绕）：同一发布者内部严格保序；一个
+   * 还没发布完的槽不会挡住其他就绪槽，因此不同发布者之间不保证先进先出。
+   * Slots are selected by publish sequence (wraparound-safe comparison): each
+   * publisher keeps its own order, and a slot that is not published yet never
+   * hides other ready slots, so there is no FIFO guarantee across publishers.
    */
   ErrorCode Take(size_t& index);
   /**
@@ -173,8 +174,8 @@ class SlotPoolBase
  * 一个被打断的操作只占住它自己的槽：任务停在 `Acquire`、写入、`Publish`、
  * `Take`、读取、`Release` 的任何中间点时，中断里的 `Put`/`Get` 都不会被挡住，
  * 拿到的 FULL/EMPTY 反映那一刻的真实状态。多生产者多消费者均可用；请勿在
- * NMI 中使用。出队顺序是发布完成的先后，同一发布者内部保序；不保证跨发布
- * 者的全局先进先出。
+ * NMI 中使用。出队顺序按发布序号，同一发布者内部保序；不保证跨发布者的
+ * 全局先进先出。
  *
  * Each slot carries one atomic state (free, writing, ready, reading) and every
  * state transition is a CAS; `Publish` takes a globally increasing sequence and
@@ -184,9 +185,9 @@ class SlotPoolBase
  * point of `Acquire`, writing, `Publish`, `Take`, reading or `Release`, a
  * `Put`/`Get` from an interrupt is never blocked by it, and the FULL/EMPTY it
  * observes reflects the true state at that moment. Any number of producers and
- * consumers may run concurrently; do not use it inside NMI. Dequeue order is
- * publish-completion order, order inside one publisher is preserved, and no
- * global cross-publisher FIFO is guaranteed.
+ * consumers may run concurrently; do not use it inside NMI. Dequeue order follows
+ * the publish sequence, order inside one publisher is preserved, and no global
+ * cross-publisher FIFO is guaranteed.
  *
  * @tparam T 槽存储的数据类型 / Slot element type.
  */
@@ -201,8 +202,7 @@ class SlotPool : public SlotPoolBase
    * @note 包含构造期内存分配，运行期不再分配 / Allocates at construction only;
    *       no allocation at run time.
    */
-  explicit SlotPool(size_t slot_count)
-      : SlotPoolBase(sizeof(T), alignof(T), slot_count)
+  explicit SlotPool(size_t slot_count) : SlotPoolBase(sizeof(T), alignof(T), slot_count)
   {
   }
 

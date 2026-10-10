@@ -4,9 +4,9 @@
  * Tests slot-pool state transitions, publish order, boundaries and multithreaded
  * transfers.
  *
- * 顺序用例检查状态转换与"发布完成先后"的出队顺序；并发用例逐项检查数据
+ * 顺序用例检查状态转换与按发布序号的出队顺序；并发用例逐项检查数据
  * 没有丢失、重复；同一生产者内部保序由多生产者、单消费者用例在线断言。
- * Sequential cases check state transitions and publish-completion dequeue order;
+ * Sequential cases check state transitions and publish-sequence dequeue order;
  * concurrent cases check loss and duplication item by item; per-producer ordering
  * is asserted online by the multi-producer, single-consumer case.
  */
@@ -177,10 +177,10 @@ void RunStress(size_t pool_capacity)
 
 struct OrderConsumerArg
 {
-  Pool* pool;                     ///< 共享槽池 / Shared pool instance.
-  size_t total_items;             ///< 目标总元素数 / Expected total item count.
-  size_t items_per_producer;      ///< 每个生产者的元素数 / Items per producer.
-  size_t producer_count;          ///< 生产者总数 / Total number of producers.
+  Pool* pool;                 ///< 共享槽池 / Shared pool instance.
+  size_t total_items;         ///< 目标总元素数 / Expected total item count.
+  size_t items_per_producer;  ///< 每个生产者的元素数 / Items per producer.
+  size_t producer_count;      ///< 生产者总数 / Total number of producers.
   std::atomic<size_t>* produced_done_count;  ///< 生产者完成计数
                                              ///< Producer completion counter.
 };
@@ -250,7 +250,7 @@ void test_slot_pool()
     TEST_ASSERT(pool.Take(taken) == LibXR::ErrorCode::EMPTY);
   }
 
-  // Dequeue order follows publish-completion order, not slot-index order.
+  // Dequeue order follows the publish sequence, not slot-index order.
   {
     Pool pool(2);
 
@@ -307,18 +307,31 @@ void test_slot_pool()
     TEST_ASSERT(pool.Get(value) == LibXR::ErrorCode::EMPTY);
   }
 
-  // Publish sequence wraparound: preset the counter next to 2^32 and keep the
-  // publish-completion order across the wrap point.
+  // Publish sequence wraparound: four ready slots whose sequences straddle 2^32
+  // and are published in reverse slot order, so only a wraparound-safe
+  // comparison drains them in publish order.
+  for (uint32_t start = 0xFFFFFFFCU; start != 0x00000002U; ++start)
   {
     WrapPool pool(4);
-    pool.PrimePublishSeq(0xFFFFFFFEU);
+    pool.PrimePublishSeq(start);
+
+    std::array<size_t, 4> slots{};
+    for (auto& slot : slots)
+    {
+      TEST_ASSERT(pool.Acquire(slot) == LibXR::ErrorCode::OK);
+    }
+    for (uint32_t order = 0; order < slots.size(); ++order)
+    {
+      const size_t slot = slots[slots.size() - 1U - order];
+      pool.At(slot) = order;
+      pool.Publish(slot);
+    }
 
     uint32_t value = 0;
-    for (uint32_t round = 0; round < 16; ++round)
+    for (uint32_t order = 0; order < slots.size(); ++order)
     {
-      TEST_ASSERT(pool.Put(round) == LibXR::ErrorCode::OK);
       TEST_ASSERT(pool.Get(value) == LibXR::ErrorCode::OK);
-      TEST_ASSERT(value == round);
+      TEST_ASSERT(value == order);
     }
     TEST_ASSERT(pool.Get(value) == LibXR::ErrorCode::EMPTY);
   }

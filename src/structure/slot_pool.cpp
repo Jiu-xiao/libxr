@@ -40,8 +40,10 @@ SlotPoolBase::SlotPoolBase(size_t slot_size, size_t slot_align, size_t slot_coun
 SlotPoolBase::~SlotPoolBase()
 {
   ::operator delete[](slots_, std::align_val_t(alloc_align_));
-  delete[] states_;
-  delete[] seqs_;
+  // 与构造时显式对齐的 new[] 配对 / Pairs with the explicitly aligned new[] of
+  // the constructor.
+  ::operator delete[](states_, std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT));
+  ::operator delete[](seqs_, std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT));
 }
 
 ErrorCode SlotPoolBase::Acquire(size_t& index)
@@ -94,9 +96,8 @@ void SlotPoolBase::Publish(size_t index)
   seqs_[index].store(seq, std::memory_order_relaxed);
 
   uint32_t expected = SLOT_WRITING;
-  const bool ok = states_[index].compare_exchange_strong(expected, SLOT_READY,
-                                                         std::memory_order_release,
-                                                         std::memory_order_acquire);
+  const bool ok = states_[index].compare_exchange_strong(
+      expected, SLOT_READY, std::memory_order_release, std::memory_order_acquire);
   ASSERT(ok);
 }
 
@@ -161,10 +162,8 @@ ErrorCode SlotPoolBase::Take(size_t& index)
           return ErrorCode::OK;
         }
         uint32_t reading = SLOT_READING;
-        const bool undone =
-            states_[best].compare_exchange_strong(reading, SLOT_READY,
-                                                  std::memory_order_release,
-                                                  std::memory_order_acquire);
+        const bool undone = states_[best].compare_exchange_strong(
+            reading, SLOT_READY, std::memory_order_release, std::memory_order_acquire);
         ASSERT(undone);
         continue;
       }
@@ -195,9 +194,8 @@ void SlotPoolBase::Release(size_t index)
   // 只有持有者（写入中或读取中）才能释放 / Only the holder (writing or reading)
   // may release.
   ASSERT(expected == SLOT_WRITING || expected == SLOT_READING);
-  const bool ok = states_[index].compare_exchange_strong(expected, SLOT_FREE,
-                                                         std::memory_order_release,
-                                                         std::memory_order_acquire);
+  const bool ok = states_[index].compare_exchange_strong(
+      expected, SLOT_FREE, std::memory_order_release, std::memory_order_acquire);
   ASSERT(ok);
 }
 
