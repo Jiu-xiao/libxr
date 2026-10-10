@@ -362,8 +362,8 @@ void CheckCoalescedCallbackWrites(bool double_buffer)
         TEST_ASSERT(result == ErrorCode::OK);
         ++self->calls;
         LibXR::WriteOperation operation;
-        TEST_ASSERT(self->cdc->Write({self->first.data(), self->first.size()},
-                                     operation, in_isr) == ErrorCode::OK);
+        TEST_ASSERT(self->cdc->Write({self->first.data(), self->first.size()}, operation,
+                                     in_isr) == ErrorCode::OK);
         TEST_ASSERT(self->cdc->Write({self->second.data(), self->second.size()},
                                      operation, in_isr) == ErrorCode::OK);
       },
