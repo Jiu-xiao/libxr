@@ -2,9 +2,9 @@
 
 #include "cdc_base.hpp"
 #include "ep.hpp"
-#include "flag.hpp"
 #include "libxr_def.hpp"
 #include "libxr_rw.hpp"
+#include "serialized_service.hpp"
 
 namespace LibXR::USB
 {
@@ -180,23 +180,21 @@ class CDCUart : public CDCBase, public LibXR::UART
 
  protected:
   /**
-   * @brief 绑定端点并发送配置前已排队的数据 / Bind endpoints and send data queued
-   * before configuration
+   * @brief 绑定端点并恢复配置前已排队的发送 / Bind endpoints and resume queued writes
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param start_itf_num 起始接口号 / Starting interface number
    * @param in_isr 是否在中断中调用 / Whether called in an ISR
    * @note 未配置时写入只入队，WriteFun 不启动传输；队列满后写入返回 FULL，
-   *       不再触发 WriteFun，所以必须在这里推进发送。
+   *       不再触发 WriteFun，所以必须在绑定后重新请求发送。发送推进统一经
+   *       RequestTx 进入，避免与完成中断路径交错。
    *       Writes before configuration are only queued and WriteFun starts no
    *       transfer; once the queue is full, writes return FULL without calling
-   *       WriteFun, so transmission must be advanced here.
+   *       WriteFun, so transmission must be re-requested after binding. TX progress
+   *       enters through RequestTx so it cannot interleave with the completion
+   *       interrupt path.
    */
   void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
-                     bool in_isr) override
-  {
-    CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
-    ProgressTx(in_isr);
-  }
+                     bool in_isr) override;
 
   /**
    * @brief 解绑端点并清理接收暂存状态 / Unbind endpoints and clear saved receive state
@@ -212,18 +210,11 @@ class CDCUart : public CDCBase, public LibXR::UART
   }
 
   /**
-   * @brief 推进发送队列 / Advance the transmit queue
+   * @brief 发送队列写入门铃 / Transmit queue write doorbell
    * @param port 写端口 / Write port
    * @param in_isr 是否在中断中调用 / Whether called in an ISR
    */
-  static void WriteFun(WritePort& port, bool in_isr)
-  {
-    auto* cdc = LibXR::ContainerOf(&port, &CDCUart::write_port_cdc_);
-    if (!cdc->in_write_isr_.IsSet())
-    {
-      cdc->ProgressTx(in_isr);
-    }
-  }
+  static void WriteFun(WritePort& port, bool in_isr);
 
   /**
    * @brief 将 OUT 数据放入接收队列 / Enqueue completed OUT data
@@ -252,50 +243,38 @@ class CDCUart : public CDCBase, public LibXR::UART
   }
 
   /**
-   * @brief 在 IN 完成后续发数据或零长度包 / Send more data or a ZLP after IN completion
+   * @brief 在 IN 完成后请求推进发送 / Request TX progress after IN completion
    * @param in_isr 是否在中断中调用 / Whether called in an ISR
    * @param data 已发送的端点数据，本实现不使用 / Sent endpoint data, unused here
    */
-  void OnDataInComplete(bool in_isr, ConstRawData& data) override
-  {
-    UNUSED(data);
-    Flag::ScopedRestore isr_flag(in_write_isr_);
-    auto* ep = GetDataInEndpoint();
-    if (ep == nullptr || !Inited())
-    {
-      return;
-    }
-
-    if (need_write_zlp_)
-    {
-      if (ep->GetActiveLength() == 0U && write_port_cdc_.Size() == 0U)
-      {
-        [[maybe_unused]] const auto ans = ep->TransferZLP();
-        DEV_ASSERT_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
-        need_write_zlp_ = false;
-        return;
-      }
-      need_write_zlp_ = false;
-    }
-    ProgressTx(in_isr);
-  }
+  void OnDataInComplete(bool in_isr, ConstRawData& data) override;
 
  private:
+  /**
+   * @brief 发布发送推进请求并尝试取得执行权 / Publish a TX progress request and try to
+   * claim execution
+   * @param in_isr 当前调用上下文 / Context of this call
+   * @note 重入或并发调用只发布事件，由当前消费者在自己的上下文中继续推进；取得执行权
+   *       的一方以自己的上下文执行 ServiceTx，完成回调的 in_isr 与之一致。
+   *       Reentrant or concurrent calls only publish events; the current consumer
+   *       continues in its own context. The claimer runs ServiceTx with its own
+   *       context, so completion callbacks observe the same in_isr.
+   */
+  void RequestTx(bool in_isr);
+
+  /**
+   * @brief 在唯一消费者中处理待发 ZLP 与续发 / Handle the pending ZLP and further
+   * progress in the sole consumer
+   * @param in_isr 取得执行权的上下文 / Context of the claimer
+   */
+  void ServiceTx(bool in_isr);
+
   /**
    * @brief 启动已填充的 IN 缓冲区 / Start the filled IN buffer
    * @param ep 数据 IN 端点 / Data IN endpoint
    * @param in_isr 是否在中断中调用 / Whether called in an ISR
    */
-  void StartTxBuffer(Endpoint& ep, bool in_isr)
-  {
-    const size_t LENGTH = ep.GetActiveLength();
-    DEV_ASSERT_FROM_CALLBACK(LENGTH != 0U, in_isr);
-    ep.SetActiveLength(0U);
-    const auto ans = ep.Transfer(LENGTH);
-    REQUIRE_FROM_CALLBACK(ans == ErrorCode::OK, in_isr);
-    const size_t MPS = ep.MaxPacketSize();
-    need_write_zlp_ = MPS != 0U && LENGTH % MPS == 0U;
-  }
+  void StartTxBuffer(Endpoint& ep, [[maybe_unused]] bool in_isr);
 
   /**
    * @brief 将队首数据复制到 IN 缓冲区 / Copy the front request into the IN buffer
@@ -304,75 +283,20 @@ class CDCUart : public CDCBase, public LibXR::UART
    * @note 完成回调前先发布缓冲区长度和传输状态。
    *       Publish buffer length and transfer state before the completion callback.
    */
-  void FillTxBuffer(Endpoint& ep, bool in_isr)
-  {
-    auto queue = write_port_cdc_.GetWriteQueue(in_isr);
-    if (queue.Empty())
-    {
-      return;
-    }
-
-    const auto buffer = ep.GetBuffer();
-    ASSERT(buffer.addr_ != nullptr && buffer.size_ != 0U);
-    const size_t LENGTH =
-        queue.PopWithWriter(buffer.size_,
-                            [buffer](const uint8_t* first, size_t first_size,
-                                     const uint8_t* second, size_t second_size) -> size_t
-                            {
-                              auto* dst = static_cast<uint8_t*>(buffer.addr_);
-                              if (first_size != 0U)
-                              {
-                                std::memcpy(dst, first, first_size);
-                              }
-                              if (second_size != 0U)
-                              {
-                                std::memcpy(dst + first_size, second, second_size);
-                              }
-                              return first_size + second_size;
-                            });
-    DEV_ASSERT_FROM_CALLBACK(LENGTH != 0U && LENGTH <= UINT16_MAX, in_isr);
-    ep.SetActiveLength(static_cast<uint16_t>(LENGTH));
-    need_write_zlp_ = false;
-    if (ep.GetState() == Endpoint::State::IDLE)
-    {
-      StartTxBuffer(ep, in_isr);
-    }
-  }
+  void FillTxBuffer(Endpoint& ep, bool in_isr);
 
   /**
    * @brief 续发已填充的数据并预填下一缓冲区 / Send prepared data and prefill the next
    * buffer
    * @param in_isr 是否在中断中调用 / Whether called in an ISR
    */
-  void ProgressTx(bool in_isr)
-  {
-    auto* ep = GetDataInEndpoint();
-    if (ep == nullptr || !Inited() || ep->GetState() != Endpoint::State::IDLE)
-    {
-      return;
-    }
-
-    if (ep->GetActiveLength() != 0U)
-    {
-      StartTxBuffer(*ep, in_isr);
-    }
-    else
-    {
-      FillTxBuffer(*ep, in_isr);
-    }
-
-    if (ep->GetState() == Endpoint::State::BUSY && ep->UseDoubleBuffer() &&
-        ep->GetActiveLength() == 0U)
-    {
-      FillTxBuffer(*ep, in_isr);
-    }
-  }
+  void ProgressTx(bool in_isr);
 
   CDCUartReadPort read_port_cdc_;    ///< CDC 接收端口 / CDC receive port
   LibXR::WritePort write_port_cdc_;  ///< CDC 发送端口 / CDC transmit port
-  Flag::Plain
-      in_write_isr_;  ///< IN 完成回调执行标志 / IN completion callback active flag
-  bool need_write_zlp_ = false;  ///< 待发送零长度包 / Pending zero-length packet
+  SerializedService tx_service_;     ///< 发送消费者与唤醒合并 / TX consumer and wakeup
+                                     ///< coalescing
+  bool need_write_zlp_ = false;      ///< 待发送零长度包 / Pending zero-length packet
 };
 
 inline void CDCUartReadPort::OnReadQueueSpaceAvailable(bool in_isr)
