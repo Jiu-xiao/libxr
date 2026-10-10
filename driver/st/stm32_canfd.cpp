@@ -255,7 +255,7 @@ ErrorCode STM32CANFD::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_queue_.Push(pack) != ErrorCode::OK)
+  if (tx_queue_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }
@@ -614,7 +614,7 @@ ErrorCode STM32CANFD::AddMessage(const FDPack& pack)
     return ErrorCode::FAILED;
   }
 
-  if (tx_fd_queue_.Push(pack) != ErrorCode::OK)
+  if (tx_fd_queue_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }
@@ -720,7 +720,7 @@ void STM32CANFD::TxService()
       }
       else
       {
-        has_fd = (tx_fd_queue_.Pop(pfd) == ErrorCode::OK);
+        has_fd = (tx_fd_queue_.Get(pfd) == ErrorCode::OK);
       }
 
       if (has_fd)
@@ -746,7 +746,7 @@ void STM32CANFD::TxService()
       }
       else
       {
-        has_classic = (tx_queue_.Pop(pc) == ErrorCode::OK);
+        has_classic = (tx_queue_.Get(pc) == ErrorCode::OK);
       }
 
       if (has_classic)

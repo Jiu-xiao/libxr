@@ -31,6 +31,7 @@
 #include "queue.hpp"
 #include "ramfs.hpp"
 #include "semaphore.hpp"
+#include "slot_pool.hpp"
 #include "stack.hpp"
 #include "terminal.hpp"
 #include "thread.hpp"

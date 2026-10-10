@@ -534,7 +534,7 @@ void CH32CAN::TxService()
       {
         p = tx_retry_pack_;
       }
-      else if (tx_queue_.Pop(p) != ErrorCode::OK)
+      else if (tx_queue_.Get(p) != ErrorCode::OK)
       {
         break;
       }
@@ -575,7 +575,7 @@ ErrorCode CH32CAN::AddMessage(const ClassicPack& pack)
     return ErrorCode::ARG_ERR;
   }
 
-  if (tx_queue_.Push(pack) != ErrorCode::OK)
+  if (tx_queue_.Put(pack) != ErrorCode::OK)
   {
     return ErrorCode::FULL;
   }

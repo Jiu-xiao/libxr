@@ -14,7 +14,7 @@
 #endif
 
 #include "can.hpp"
-#include "queue.hpp"
+#include "slot_pool.hpp"
 
 #ifndef FDCAN_MESSAGE_RAM_WORDS_MAX
 #define FDCAN_MESSAGE_RAM_WORDS_MAX 2560u
@@ -263,10 +263,10 @@ class STM32CANFD : public FDCAN
   FDCAN_HandleTypeDef* hcan_;
 
   stm32_fdcan_id_t id_;
-  /// Classic 发送软件队列 / Classic TX software queue.
-  MPMCQueue<ClassicPack> tx_queue_;
-  /// FD 发送软件队列 / FD TX software queue.
-  MPMCQueue<FDPack> tx_fd_queue_;
+  /// Classic 发送槽池 / Classic TX slot pool.
+  SlotPool<ClassicPack> tx_queue_;
+  /// FD 发送槽池 / FD TX slot pool.
+  SlotPool<FDPack> tx_fd_queue_;
   /// 待重试 Classic 帧有效标记 / Pending Classic retry frame flag.
   bool tx_classic_retry_valid_{false};
   /// 待重试 Classic 帧 / Pending Classic retry frame.

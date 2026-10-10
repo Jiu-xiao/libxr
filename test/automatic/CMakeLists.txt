@@ -121,6 +121,7 @@ add_executable(
   structure/queue/spsc_queue/test_spsc_prefix.cpp
   structure/queue/spsc_queue/test_spsc_queue.cpp
   structure/rbt/test_rbt.cpp
+  structure/slot_pool/test_slot_pool.cpp
   structure/stack/test_stack.cpp
   system/async/test_async.cpp
   system/thread/test_thread.cpp
