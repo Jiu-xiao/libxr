@@ -31,8 +31,10 @@
 
 #if defined(HPM_EWDG0) && __has_include("hpm_ewdg_drv.h")
 #include "hpm_ewdg_drv.h"
+/** Indicates that the HPM SDK EWDG driver is available. */
 #define LIBXR_HPM_EWDG_SUPPORTED 1
 #else
+/** Indicates that the HPM SDK EWDG driver is unavailable. */
 #define LIBXR_HPM_EWDG_SUPPORTED 0
 #endif
 
