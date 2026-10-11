@@ -6,7 +6,7 @@
 
 #include "can.hpp"
 #include "ch32_can_def.hpp"
-#include "queue.hpp"
+#include "slot_pool.hpp"
 
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
@@ -91,8 +91,8 @@ class CH32CAN : public CAN
   uint8_t fifo_{0};
   uint8_t filter_bank_{0};
 
-  /// 发送软件队列 / TX software queue.
-  MPMCQueue<ClassicPack> tx_queue_;
+  /// 发送槽池 / TX slot pool.
+  SlotPool<ClassicPack> tx_queue_;
   /// 待重试帧有效标记 / Pending retry frame flag.
   bool tx_retry_valid_{false};
   /// 待重试帧 / Pending retry frame.

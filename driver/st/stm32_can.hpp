@@ -12,7 +12,7 @@
 #endif
 
 #include "can.hpp"
-#include "queue.hpp"
+#include "slot_pool.hpp"
 
 typedef enum
 {
@@ -103,8 +103,8 @@ class STM32CAN : public CAN
 
   uint32_t txMailbox;
 
-  /// 发送软件队列 / TX software queue.
-  MPMCQueue<ClassicPack> tx_queue_;
+  /// 发送槽池 / TX slot pool.
+  SlotPool<ClassicPack> tx_queue_;
   /// 待重试帧有效标记 / Pending retry frame flag.
   bool tx_retry_valid_{false};
   /// 待重试帧 / Pending retry frame.

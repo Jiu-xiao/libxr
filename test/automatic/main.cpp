@@ -34,6 +34,7 @@ void test_inertia();
 void test_list();
 void test_lockfree_list();
 void test_kinematic();
+void test_latest_snapshot();
 void test_mpmc_queue();
 void test_object_pool();
 void test_linux_stdio_print();
@@ -46,6 +47,7 @@ void test_spsc_prefix();
 void test_serialized_service();
 void test_rbt();
 void test_ramfs();
+void test_power();
 void test_semaphore();
 void test_mutex();
 void test_stack();
@@ -83,6 +85,8 @@ void test_linux_uart_stream_config();
 void test_linux_uart_reconnect();
 void test_linux_uart_partial_disconnect();
 void test_linux_uart_initial_open_recovery();
+void test_slot_pool();
+void test_usb_cdc_tx();
 
 namespace LinuxSharedTopicBench
 {
@@ -200,6 +204,7 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"linux_uart_tests",
      {"uart_initial_recovery", &RunVoidEntry<test_linux_uart_initial_open_recovery>,
       true}},
+    {"usb_tests", {"cdc_tx", &RunVoidEntry<test_usb_cdc_tx>, false}},
     {"core_tests", {"assert", &RunVoidEntry<test_assert>, false}},
     {"core_tests", {"def", &RunVoidEntry<test_def>, false}},
     {"core_tests", {"callback", &RunVoidEntry<test_cb>, false}},
@@ -233,6 +238,8 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"data_structure_tests", {"list", &RunVoidEntry<test_list>, false}},
     {"data_structure_tests", {"lockfree_list", &RunVoidEntry<test_lockfree_list>, false}},
     {"data_structure_tests", {"double_buffer", &RunVoidEntry<test_double_buffer>, false}},
+    {"data_structure_tests",
+     {"latest_snapshot", &RunVoidEntry<test_latest_snapshot>, false}},
     {"data_structure_tests", {"type", &RunVoidEntry<test_type>, false}},
     {"data_structure_tests", {"string", &RunVoidEntry<test_string>, false}},
 
@@ -248,6 +255,7 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"control_tests", {"pid", &RunVoidEntry<test_pid>, false}},
 
     {"system_tests", {"ramfs", &RunVoidEntry<test_ramfs>, false}},
+    {"system_tests", {"power", &RunVoidEntry<test_power>, false}},
     {"system_tests", {"event", &RunVoidEntry<test_event>, false}},
     {"system_tests", {"message_topic", &RunVoidEntry<test_message_topic>, false}},
     {"system_tests",
@@ -269,6 +277,7 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"system_tests", {"terminal_display", &RunVoidEntry<test_terminal_display>, false}},
     {"system_tests", {"terminal_input", &RunVoidEntry<test_terminal_input>, true}},
     {"system_tests", {"terminal", &RunVoidEntry<test_terminal>, true}},
+    {"data_structure_tests", {"slot_pool", &RunVoidEntry<test_slot_pool>, false}},
 };
 }  // namespace
 
