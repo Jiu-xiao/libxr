@@ -844,7 +844,7 @@ ErrorCode HPMSPI::RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx, uint
   }
   if (ans == ErrorCode::OK && switch_buffer_on_success)
   {
-    SwitchBuffer();
+    AdvanceBuffer();
   }
   return FinishOperation(op, in_isr, ans);
 }
@@ -1142,7 +1142,7 @@ ErrorCode HPMSPI::CompleteDmaTransfer(bool in_isr, ErrorCode ans, bool notify_bl
   }
   if (ans == ErrorCode::OK && switch_buffer_on_success)
   {
-    SwitchBuffer();
+    AdvanceBuffer();
   }
 
   if (ans != ErrorCode::OK)
@@ -1466,7 +1466,7 @@ ErrorCode HPMSPI::ReadAndWrite(RawData read_data, ConstRawData write_data,
 
   if (ans == ErrorCode::OK)
   {
-    SwitchBuffer();
+    AdvanceBuffer();
   }
   return EndTransaction(op, in_isr, ans);
 }
@@ -1535,7 +1535,7 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
         command, tx_bytes, static_cast<uint32_t>(write_data.size_), nullptr, 0U);
     if (ans == ErrorCode::OK)
     {
-      SwitchBuffer();
+      AdvanceBuffer();
     }
     return EndTransaction(op, in_isr, ans);
   }
@@ -1557,7 +1557,7 @@ ErrorCode HPMSPI::CommandWriteRead(uint8_t command, ConstRawData write_data,
   if (ans == ErrorCode::OK)
   {
     Memory::FastMove(read_data.addr_, rx_bytes, read_data.size_);
-    SwitchBuffer();
+    AdvanceBuffer();
   }
   return EndTransaction(op, in_isr, ans);
 }
@@ -1615,7 +1615,7 @@ ErrorCode HPMSPI::Transfer(size_t size, OperationRW& op, bool in_isr)
                  static_cast<uint32_t>(size));
   if (ans == ErrorCode::OK)
   {
-    SwitchBuffer();
+    AdvanceBuffer();
   }
   return EndTransaction(op, in_isr, ans);
 }
@@ -1674,7 +1674,7 @@ ErrorCode HPMSPI::MemRead(uint16_t reg, RawData read_data, OperationRW& op, bool
 
   if (ans == ErrorCode::OK)
   {
-    SwitchBuffer();
+    AdvanceBuffer();
   }
   return EndTransaction(op, in_isr, ans);
 }
@@ -1726,7 +1726,7 @@ ErrorCode HPMSPI::MemWrite(uint16_t reg, ConstRawData write_data, OperationRW& o
   ErrorCode ans = DoWriteOnly(tx_bytes, static_cast<uint32_t>(total));
   if (ans == ErrorCode::OK)
   {
-    SwitchBuffer();
+    AdvanceBuffer();
   }
   return EndTransaction(op, in_isr, ans);
 }

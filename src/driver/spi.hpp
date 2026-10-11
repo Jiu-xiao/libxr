@@ -349,6 +349,21 @@ class SPI
   }
 
   /**
+   * @brief SPI 成功传输后推进双缓冲 / Advance SPI double buffers after a successful
+   * transfer.
+   */
+  void AdvanceBuffer()
+  {
+    if (IsDoubleBuffer())
+    {
+      double_buffer_rx_.EnablePending();
+      double_buffer_tx_.EnablePending();
+      double_buffer_rx_.Switch();
+      double_buffer_tx_.Switch();
+    }
+  }
+
+  /**
    * @brief 设置缓冲区的有效数据长度 / Sets the length of valid data in the buffer.
    */
   void SetActiveLength(size_t len) { double_buffer_tx_.SetActiveLength(len); }
