@@ -38,12 +38,18 @@
 
 #if defined(HPMSOC_HAS_HPMSDK_SPI) && __has_include("hpm_spi_drv.h")
 #include "hpm_spi_drv.h"
+/** Indicates that the HPM SDK SPI driver is available. */
 #define LIBXR_HPM_SPI_SUPPORTED 1
+/** HPM SDK SPI peripheral type, or void when SPI is unavailable. */
 using LibXRHpmSpiType = SPI_Type;
+/** HPM SDK SPI status type, or int when SPI is unavailable. */
 using LibXRHpmSpiStatusType = hpm_stat_t;
 #else
+/** Indicates that the HPM SDK SPI driver is unavailable. */
 #define LIBXR_HPM_SPI_SUPPORTED 0
+/** HPM SDK SPI peripheral type, or void when SPI is unavailable. */
 using LibXRHpmSpiType = void;
+/** HPM SDK SPI status type, or int when SPI is unavailable. */
 using LibXRHpmSpiStatusType = int;
 #endif
 
@@ -51,8 +57,10 @@ using LibXRHpmSpiStatusType = int;
     defined(SDK_VERSION_NUMBER) && (SDK_VERSION_NUMBER >= 0x010B00U) && \
     __has_include("hpm_spi.h") && __has_include("hpm_dma_mgr.h")
 #include "hpm_spi.h"
+/** Indicates that the HPM SDK SPI DMA manager is available. */
 #define LIBXR_HPM_SPI_HAS_DMA_MGR 1
 #else
+/** Indicates that the HPM SDK SPI DMA manager is unavailable. */
 #define LIBXR_HPM_SPI_HAS_DMA_MGR 0
 #endif
 
@@ -731,8 +739,8 @@ class HPMSPI final : public SPI
   /**
    * @brief 启动一次 data-phase DMA 传输 / Start one data-phase DMA transfer.
    */
-  ErrorCode StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size,
-                             size_t rx_capacity, DmaTransferKind kind, RawData user_read,
+  ErrorCode StartDmaTransfer(uint8_t* rx, uint8_t* tx, uint32_t size, size_t rx_capacity,
+                             DmaTransferKind kind, RawData user_read,
                              bool copy_rx_to_user, bool switch_buffer_on_success,
                              OperationRW& op, bool in_isr);
 
@@ -762,17 +770,18 @@ class HPMSPI final : public SPI
   ErrorCode WaitForDmaBlockResult(uint32_t timeout);
 
   /**
-   * @brief 查询 DMA 接收缓存契约是否安全 / Check whether the DMA RX cache contract is safe.
+   * @brief 查询 DMA 接收缓存契约是否安全 / Check whether the DMA RX cache contract is
+   * safe.
    */
   static bool DmaRxBufferCacheSafe(const void* addr, size_t capacity);
 
   /**
-   * @brief 使用同步路径执行一次流式传输 / Run one stream transfer through the blocking path.
+   * @brief 使用同步路径执行一次流式传输 / Run one stream transfer through the blocking
+   * path.
    */
   ErrorCode RunBlockingStreamTransfer(uint8_t* rx, const uint8_t* tx, uint32_t size,
                                       DmaTransferKind kind, RawData user_read,
-                                      bool copy_rx_to_user,
-                                      bool switch_buffer_on_success,
+                                      bool copy_rx_to_user, bool switch_buffer_on_success,
                                       OperationRW& op, bool in_isr);
 
   /**
@@ -804,8 +813,7 @@ class HPMSPI final : public SPI
   /**
    * @brief DMA error/abort callback / DMA 错误或中止回调。
    */
-  static void OnDmaFailureCallback(DMA_Type* base, uint32_t channel,
-                                   void* cb_data_ptr);
+  static void OnDmaFailureCallback(DMA_Type* base, uint32_t channel, void* cb_data_ptr);
 #endif
 
   LibXRHpmSpiType* spi_;           ///< SPI 外设实例 / SPI peripheral instance.
@@ -814,7 +822,7 @@ class HPMSPI final : public SPI
   size_t rx_buffer_capacity_ = 0;  ///< 原始 RX 缓冲区容量 / Raw RX buffer capacity.
   size_t tx_buffer_capacity_ = 0;  ///< 原始 TX 缓冲区容量 / Raw TX buffer capacity.
   std::atomic<uint32_t> transaction_busy_{
-      0U};  ///< 实例事务占用标志 / Instance transaction ownership flag.
+      0U};                   ///< 实例事务占用标志 / Instance transaction ownership flag.
   bool configured_ = false;  ///< 是否已有成功配置 / Whether a config was applied.
   bool dma_enabled_ =
       false;  ///< 是否启用 DMA 流式传输 / Whether DMA stream path is enabled.
