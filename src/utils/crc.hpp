@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -8,6 +10,39 @@
 
 namespace LibXR
 {
+namespace Detail
+{
+/**
+ * @brief 在编译期生成反射形式 CRC 的 256 项查找表 /
+ *        Generates a 256-entry reflected CRC lookup table at compile time
+ * @tparam T 校验值类型（`uint8_t`、`uint16_t`、`uint32_t` 或 `uint64_t`） /
+ *         Checksum type (`uint8_t`, `uint16_t`, `uint32_t` or `uint64_t`)
+ * @tparam POLY 反射形式的多项式 / Reflected polynomial
+ * @return 查找表 / The lookup table
+ *
+ * 查找表由 `constexpr` 求值得到，存放在只读数据段，没有运行期初始化，
+ * 因此多线程或中断中首次调用 CRC 不存在竞争。
+ * The table is produced by `constexpr` evaluation and lives in read-only data. There
+ * is no runtime initialization, so the first CRC call from several threads or
+ * interrupts cannot race.
+ */
+template <typename T, T POLY>
+constexpr std::array<T, 256> GenerateReflectedCrcTable()
+{
+  std::array<T, 256> table{};
+  for (size_t i = 0; i < table.size(); ++i)
+  {
+    T crc = static_cast<T>(i);
+    for (int j = 0; j < 8; ++j)
+    {
+      crc = (crc & 1U) ? static_cast<T>((crc >> 1U) ^ POLY) : static_cast<T>(crc >> 1U);
+    }
+    table[i] = crc;
+  }
+  return table;
+}
+}  // namespace Detail
+
 /**
  * @class CRC8
  * @brief 8 位循环冗余校验（CRC-8）计算类 / CRC-8 checksum computation class
@@ -22,43 +57,12 @@ class CRC8
   static const uint8_t INIT = 0xFF;  ///< CRC8 初始值 / CRC8 initial value
 
  public:
-  static inline uint8_t tab_[256];  ///< CRC8 查找表 / CRC8 lookup table
-  static inline bool inited_ =
-      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+  /// CRC8 查找表，编译期生成并存放在只读数据段 /
+  /// CRC8 lookup table, generated at compile time and kept in read-only data
+  static constexpr std::array<uint8_t, 256> tab_ =
+      Detail::GenerateReflectedCrcTable<uint8_t, 0x8C>();
 
   CRC8() {}
-
-  /**
-   * @brief 生成 CRC8 查找表 / Generates the CRC8 lookup table
-   */
-  static void GenerateTable()
-  {
-    uint8_t crc = 0;
-
-    for (int i = 0; i < 256; i++)
-    {
-      tab_[i] = i;
-    }
-
-    for (int i = 0; i < 256; i++)
-    {
-      for (int j = 7; j >= 0; j--)
-      {
-        crc = tab_[i] & 0x01;
-
-        if (crc)
-        {
-          tab_[i] = tab_[i] >> 1;
-          tab_[i] ^= 0x8c;
-        }
-        else
-        {
-          tab_[i] = tab_[i] >> 1;
-        }
-      }
-    }
-    inited_ = true;
-  }
 
   /**
    * @brief 计算数据的 CRC8 校验码 / Computes the CRC8 checksum for the given data
@@ -78,10 +82,6 @@ class CRC8
   static bool Verify(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
 
     if (len < 2)
     {
@@ -106,35 +106,12 @@ class CRC16
   static const uint16_t INIT = 0xFFFF;  ///< CRC16 初始值 / CRC16 initial value
 
  public:
-  static inline uint16_t tab_[256];  ///< CRC16 查找表 / CRC16 lookup table
-  static inline bool inited_ =
-      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
-  CRC16() {}
+  /// CRC16 查找表，编译期生成并存放在只读数据段 /
+  /// CRC16 lookup table, generated at compile time and kept in read-only data
+  static constexpr std::array<uint16_t, 256> tab_ =
+      Detail::GenerateReflectedCrcTable<uint16_t, 0x8408>();
 
-  /**
-   * @brief 生成 CRC16 查找表 / Generates the CRC16 lookup table
-   */
-  static void GenerateTable()
-  {
-    uint16_t crc = 0;
-    for (int i = 0; i < 256; ++i)
-    {
-      crc = i;
-      for (int j = 0; j < 8; ++j)
-      {
-        if (crc & 1)
-        {
-          crc = (crc >> 1) ^ 0x8408;
-        }
-        else
-        {
-          crc >>= 1;
-        }
-      }
-      tab_[i] = crc;
-    }
-    inited_ = true;
-  }
+  CRC16() {}
 
   /**
    * @brief 计算数据的 CRC16 校验码 / Computes the CRC16 checksum for the given data
@@ -154,10 +131,6 @@ class CRC16
   static bool Verify(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
 
     if (len < 2)
     {
@@ -186,36 +159,12 @@ class CRC32
   static const uint32_t INIT = 0xFFFFFFFF;  ///< CRC32 初始值 / CRC32 initial value
 
  public:
-  static inline uint32_t tab_[256];  ///< CRC32 查找表 / CRC32 lookup table
-  static inline bool inited_ =
-      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+  /// CRC32 查找表，编译期生成并存放在只读数据段 /
+  /// CRC32 lookup table, generated at compile time and kept in read-only data
+  static constexpr std::array<uint32_t, 256> tab_ =
+      Detail::GenerateReflectedCrcTable<uint32_t, 0xEDB88320U>();
 
   CRC32() {}
-
-  /**
-   * @brief 生成 CRC32 查找表 / Generates the CRC32 lookup table
-   */
-  static void GenerateTable()
-  {
-    uint32_t crc = 0;
-    for (int i = 0; i < 256; ++i)
-    {
-      crc = i;
-      for (int j = 0; j < 8; ++j)
-      {
-        if (crc & 1)
-        {
-          crc = (crc >> 1) ^ 0xEDB88320;
-        }
-        else
-        {
-          crc >>= 1;
-        }
-      }
-      tab_[i] = crc;
-    }
-    inited_ = true;
-  }
 
   /**
    * @brief 计算数据的 CRC32 校验码 / Computes the CRC32 checksum for the given data
@@ -235,10 +184,6 @@ class CRC32
   static bool Verify(const void* raw, size_t len)
   {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-    if (!inited_)
-    {
-      GenerateTable();
-    }
 
     if (len < sizeof(uint32_t))
     {
@@ -268,36 +213,12 @@ class CRC64
       0xFFFFFFFFFFFFFFFFULL;  ///< CRC64 初始值 / CRC64 initial value
 
  public:
-  static inline uint64_t tab_[256];  ///< CRC64 查找表 / CRC64 lookup table
-  static inline bool inited_ =
-      false;  ///< 查找表是否已初始化 / Whether the lookup table is initialized
+  /// CRC64 查找表，编译期生成并存放在只读数据段 /
+  /// CRC64 lookup table, generated at compile time and kept in read-only data
+  static constexpr std::array<uint64_t, 256> tab_ =
+      Detail::GenerateReflectedCrcTable<uint64_t, 0xC96C5795D7870F42ULL>();
 
   CRC64() {}
-
-  /**
-   * @brief 生成 CRC64 查找表 / Generates the CRC64 lookup table
-   */
-  static void GenerateTable()
-  {
-    uint64_t crc = 0;
-    for (int i = 0; i < 256; ++i)
-    {
-      crc = static_cast<uint64_t>(i);
-      for (int j = 0; j < 8; ++j)
-      {
-        if (crc & 1ULL)
-        {
-          crc = (crc >> 1U) ^ 0xC96C5795D7870F42ULL;
-        }
-        else
-        {
-          crc >>= 1U;
-        }
-      }
-      tab_[i] = crc;
-    }
-    inited_ = true;
-  }
 
   /**
    * @brief 计算数据的 CRC64 校验码 / Computes the CRC64 checksum for the given data

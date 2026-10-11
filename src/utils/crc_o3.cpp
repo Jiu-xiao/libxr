@@ -3,11 +3,6 @@
 uint8_t LibXR::CRC8::Calculate(const void* raw, size_t len)
 {
   const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-  if (!inited_)
-  {
-    GenerateTable();
-  }
-
   uint8_t crc = INIT;
   while (len-- > 0)
   {
@@ -19,11 +14,6 @@ uint8_t LibXR::CRC8::Calculate(const void* raw, size_t len)
 uint16_t LibXR::CRC16::Calculate(const void* raw, size_t len)
 {
   const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-  if (!inited_)
-  {
-    GenerateTable();
-  }
-
   uint16_t crc = INIT;
   while (len--)
   {
@@ -35,11 +25,6 @@ uint16_t LibXR::CRC16::Calculate(const void* raw, size_t len)
 uint32_t LibXR::CRC32::Calculate(const void* raw, size_t len)
 {
   const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-  if (!inited_)
-  {
-    GenerateTable();
-  }
-
   uint32_t crc = INIT;
   while (len--)
   {
@@ -51,11 +36,6 @@ uint32_t LibXR::CRC32::Calculate(const void* raw, size_t len)
 uint64_t LibXR::CRC64::Calculate(const void* raw, size_t len)
 {
   const uint8_t* buf = reinterpret_cast<const uint8_t*>(raw);
-  if (!inited_)
-  {
-    GenerateTable();
-  }
-
   uint64_t crc = INIT;
   while (len--)
   {

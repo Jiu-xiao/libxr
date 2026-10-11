@@ -27,6 +27,7 @@ void test_linux_database_sequential();
 void test_def();
 void test_color();
 void test_crc();
+void test_crc_first_call_race();
 void test_float_encoder();
 void test_event();
 void test_flag();
@@ -223,6 +224,8 @@ constexpr GroupedTestCase kMainTestCases[] = {
      {"serialized_service", &RunVoidEntry<test_serialized_service>, false}},
 
     {"utility_tests", {"crc", &RunVoidEntry<test_crc>, false}},
+    {"utility_tests",
+     {"crc_first_call_race", &RunVoidEntry<test_crc_first_call_race>, true, false}},
     {"utility_tests", {"encoder", &RunVoidEntry<test_float_encoder>, false}},
     {"utility_tests", {"cycle_value", &RunVoidEntry<test_cycle_value>, false}},
     {"utility_tests", {"print", &RunVoidEntry<test_print>, false}},

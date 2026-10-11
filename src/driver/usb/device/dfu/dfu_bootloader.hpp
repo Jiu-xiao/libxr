@@ -523,10 +523,6 @@ class DfuBootloaderBackend
   // Compute the fixed CRC32 used by the seal record over the payload area only.
   bool ComputeImageCrc32(size_t image_size, uint32_t& crc32_out)
   {
-    if (!LibXR::CRC32::inited_)
-    {
-      LibXR::CRC32::GenerateTable();
-    }
     uint32_t crc = 0xFFFFFFFFu;
     size_t offset = 0u;
     while (offset < image_size)
