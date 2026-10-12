@@ -1,7 +1,5 @@
 #pragma once
 
-#ifndef LIBXR_NO_EIGEN
-
 #include <Eigen/Core>
 #include <Eigen/Dense>
 
@@ -762,5 +760,3 @@ class StartPoint : public Object<Scalar>
 }  // namespace Kinematic
 
 }  // namespace LibXR
-
-#endif

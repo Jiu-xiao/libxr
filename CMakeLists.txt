@@ -262,15 +262,11 @@ if(_xr_system MATCHES "webots")
   )
 endif()
 
-if(LIBXR_NO_EIGEN)
-  target_compile_definitions(${PROJECT_NAME} PUBLIC LIBXR_NO_EIGEN)
-else()
-  add_subdirectory(lib/Eigen)
+add_subdirectory(lib/Eigen)
 
-  target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/Eigen)
 
-  target_compile_definitions(${PROJECT_NAME} PUBLIC EIGEN_NO_IO)
-endif()
+target_compile_definitions(${PROJECT_NAME} PUBLIC EIGEN_NO_IO)
 
 # XRobot integration. A BSP enables it by setting XROBOT_MODULES_DIR to <BSP root>/Modules.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/XRobot.cmake)
