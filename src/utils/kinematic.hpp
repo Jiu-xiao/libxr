@@ -287,6 +287,8 @@ class EndPoint : public Object<Scalar>
                                      ///< velocity (negative value means no limit).
 
  public:
+  using Object<Scalar>::CalcBackward;
+
   /**
    * @brief 构造 `EndPoint` 末端点对象。
    *        Constructs an `EndPoint` object.
