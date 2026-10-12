@@ -1,7 +1,5 @@
 #pragma once
 
-#ifndef LIBXR_NO_EIGEN
-
 #include <Eigen/Core>
 #include <Eigen/Dense>
 
@@ -289,6 +287,8 @@ class EndPoint : public Object<Scalar>
                                      ///< velocity (negative value means no limit).
 
  public:
+  using Object<Scalar>::CalcBackward;
+
   /**
    * @brief 构造 `EndPoint` 末端点对象。
    *        Constructs an `EndPoint` object.
@@ -762,5 +762,3 @@ class StartPoint : public Object<Scalar>
 }  // namespace Kinematic
 
 }  // namespace LibXR
-
-#endif
