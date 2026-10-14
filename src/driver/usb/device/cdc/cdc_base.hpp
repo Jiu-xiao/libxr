@@ -195,17 +195,14 @@ class CDCBase : public DeviceClass
    * 通过中断端点向主机报告当前串行端口状态
    * Reports current serial port state to host via interrupt endpoint
    */
-  ErrorCode SendSerialState(bool in_isr = false)
+  ErrorCode SendSerialState(bool in_isr)
   {
     serial_state_pending_.store(1U, std::memory_order_release);
     RequestClassService(in_isr);
     return ErrorCode::OK;
   }
 
-  void OnService(bool in_isr) override
-  {
-    if (inited_ && ep_comm_in_) ep_comm_in_->RequestTx(in_isr);
-  }
+  void OnService(bool in_isr) override { TrySendSerialState(in_isr); }
 
   /**
    * @brief 设置控制线路状态变更回调
@@ -240,7 +237,7 @@ class CDCBase : public DeviceClass
    * @param in_isr        是否在中断上下文 / Whether in ISR context
    */
   virtual void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
-                             bool) override
+                             bool in_isr) override
   {
     control_line_state_.store(0U, std::memory_order_release);
     // 获取并配置数据IN端点
@@ -258,12 +255,13 @@ class CDCBase : public DeviceClass
 
     // 配置端点参数。
     // Configure endpoint parameters.
-    ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, 0});
-    ep_data_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, 0});
-    ep_comm_in_->SetOnTxFill(serial_state_fill_cb_);
-    ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16});
+    // A failed Configure leaves the endpoint in ERROR; the composition then rejects
+    // the configuration.
+    (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK}, in_isr);
+    (void)ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK},
+                                  in_isr);
+    (void)ep_comm_in_->Configure(
+        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16}, in_isr);
 
     // === 填充CDC描述符块 ===
     static constexpr uint8_t COMM_INTERFACE = 0;  // 通信接口号
@@ -362,13 +360,11 @@ class CDCBase : public DeviceClass
 
     // 设置端点传输完成回调。
     // Install endpoint transfer-complete callbacks.
-    ep_data_out_->SetOnTransferCompleteCallback(on_data_out_complete_cb_);
-    ep_data_in_->SetOnTransferCompleteCallback(on_data_in_complete_cb_);
+    ep_data_out_->SetOnComplete(on_data_out_complete_cb_);
+    ep_data_in_->SetOnComplete(on_data_in_complete_cb_);
+    ep_comm_in_->SetOnComplete(on_comm_complete_cb_);
 
     inited_ = true;
-
-    // 启动OUT端点传输
-    ep_data_out_->Transfer(ep_data_out_->MaxPacketSize());
   }
 
   /**
@@ -378,16 +374,13 @@ class CDCBase : public DeviceClass
    * 释放所有占用的资源
    * Releases all allocated resources
    */
-  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
+  virtual void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
     inited_ = false;
     control_line_state_.store(0U, std::memory_order_release);
-    ep_data_in_->Close();
-    ep_data_out_->Close();
-    ep_comm_in_->Close();
-    ep_data_in_->SetActiveLength(0);
-    ep_data_out_->SetActiveLength(0);
-    ep_comm_in_->SetActiveLength(0);
+    ep_data_in_->Close(in_isr);
+    ep_data_out_->Close(in_isr);
+    ep_comm_in_->Close(in_isr);
     endpoint_pool.Release(ep_data_in_);
     endpoint_pool.Release(ep_data_out_);
     endpoint_pool.Release(ep_comm_in_);
@@ -400,26 +393,31 @@ class CDCBase : public DeviceClass
    * @brief 数据OUT端点传输完成静态回调
    *        Static callback for data OUT endpoint transfer completion
    */
-  static void OnDataOutCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
+  static void OnDataOutCompleteStatic(bool in_isr, CDCBase* self,
+                                      const Endpoint::Completion& completion)
   {
     if (!self->inited_)
     {
+      // A lease handed over while unbinding is returned at once.
+      if (completion.slot.Valid() && self->ep_data_out_)
+        self->ep_data_out_->ReleaseSlot(completion.slot, in_isr);
       return;
     }
-    self->OnDataOutComplete(in_isr, data);
+    self->OnDataOutComplete(in_isr, completion);
   }
 
   /**
    * @brief 数据IN端点传输完成静态回调
    *        Static callback for data IN endpoint transfer completion
    */
-  static void OnDataInCompleteStatic(bool in_isr, CDCBase* self, ConstRawData& data)
+  static void OnDataInCompleteStatic(bool in_isr, CDCBase* self,
+                                     const Endpoint::Completion& completion)
   {
     if (!self->inited_)
     {
       return;
     }
-    self->OnDataInComplete(in_isr, data);
+    self->OnDataInComplete(in_isr, completion);
   }
 
   /**
@@ -429,7 +427,7 @@ class CDCBase : public DeviceClass
    * 接收数据并放入接收缓冲区，然后重新启动传输
    * Receives data into receive buffer and restarts transfer
    */
-  virtual void OnDataOutComplete(bool in_isr, ConstRawData& data) = 0;
+  virtual void OnDataOutComplete(bool in_isr, const Endpoint::Completion& completion) = 0;
 
   /**
    * @brief 数据IN端点传输完成处理
@@ -438,7 +436,7 @@ class CDCBase : public DeviceClass
    * 完成发送操作并处理发送队列中的下一个数据包
    * Completes transmission and processes next packet in send queue
    */
-  virtual void OnDataInComplete(bool in_isr, ConstRawData& data) = 0;
+  virtual void OnDataInComplete(bool in_isr, const Endpoint::Completion& completion) = 0;
 
   /**
    * @brief 获取接口数量
@@ -498,9 +496,7 @@ class CDCBase : public DeviceClass
         {
           return ErrorCode::ARG_ERR;
         }
-        result.read_data = RawData{reinterpret_cast<uint8_t*>(&pending_line_coding_),
-                                   sizeof(pending_line_coding_)};
-        return ErrorCode::OK;
+        return ErrorCode::OK;  // The core receives the data stage.
 
       case ClassRequest::GET_LINE_CODING:
         // 返回当前线路编码设置。
@@ -518,7 +514,6 @@ class CDCBase : public DeviceClass
         // 设置 DTR / RTS 状态。
         // Update the DTR / RTS control-line state.
         control_line_state_.store(wValue, std::memory_order_release);
-        result.write_zlp = true;
         SendSerialState(in_isr);
         if (has_control_line_state_cb_)
         {
@@ -529,7 +524,6 @@ class CDCBase : public DeviceClass
       case ClassRequest::SEND_BREAK:
         // BREAK 信号通常忽略。
         // BREAK is typically ignored on this path.
-        result.write_zlp = true;
         return ErrorCode::OK;
 
       default:
@@ -547,7 +541,8 @@ class CDCBase : public DeviceClass
       return ErrorCode::NOT_SUPPORT;
     if (data.size_ != sizeof(CDCLineCoding)) return ErrorCode::ARG_ERR;
     UART::Configuration cfg{};
-    const CDCLineCoding next = pending_line_coding_;
+    CDCLineCoding next{};
+    std::memcpy(&next, data.addr_, sizeof(next));
     if (next.dwDTERate == 0U || (next.bCharFormat != 0U && next.bCharFormat != 2U) ||
         next.bParityType > 2U ||
         (next.bDataBits != 5U && next.bDataBits != 6U && next.bDataBits != 7U &&
@@ -679,11 +674,16 @@ class CDCBase : public DeviceClass
 
   // 端点回调。
   // Endpoint callbacks.
-  LibXR::Callback<LibXR::ConstRawData&> on_data_out_complete_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
+  Callback<const Endpoint::Completion&> on_data_out_complete_cb_ =
+      Callback<const Endpoint::Completion&>::Create(OnDataOutCompleteStatic, this);
 
-  LibXR::Callback<LibXR::ConstRawData&> on_data_in_complete_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
+  Callback<const Endpoint::Completion&> on_data_in_complete_cb_ =
+      Callback<const Endpoint::Completion&>::Create(OnDataInCompleteStatic, this);
+
+  Callback<const Endpoint::Completion&> on_comm_complete_cb_ =
+      Callback<const Endpoint::Completion&>::Create(
+          [](bool context, CDCBase* self, const Endpoint::Completion&)
+          { self->TrySendSerialState(context); }, this);
 
   // 用户回调。
   // User callbacks.
@@ -706,10 +706,17 @@ class CDCBase : public DeviceClass
   // CDC 参数。
   // CDC parameters.
   std::atomic<uint32_t> serial_state_pending_{0};
-  void FillSerialState(bool, Endpoint::TxFill& fill)
+  // Owner context. Without a free slot the request stays pending; the next completion
+  // of the notification endpoint retries it.
+  void TrySendSerialState(bool in_isr)
   {
-    if (serial_state_pending_.exchange(0U, std::memory_order_acq_rel) == 0U) return;
-    REQUIRE(fill.Buffer().size_ >= sizeof(SerialStateNotification));
+    if (!inited_ || ep_comm_in_ == nullptr ||
+        serial_state_pending_.load(std::memory_order_acquire) == 0U)
+      return;
+    Endpoint::Slot slot;
+    if (ep_comm_in_->AcquireSlot(slot, in_isr) != ErrorCode::OK) return;
+    serial_state_pending_.store(0U, std::memory_order_release);
+    REQUIRE(slot.data.size_ >= sizeof(SerialStateNotification));
     SerialStateNotification message{};
     message.bmRequestType = 0xA1;
     message.bNotification = static_cast<uint8_t>(CDCNotification::SERIAL_STATE);
@@ -717,13 +724,9 @@ class CDCBase : public DeviceClass
     message.wIndex = itf_comm_in_num_;
     message.wLength = 2;
     message.serialState = IsDtrSet() ? 0x03 : 0;
-    Memory::FastCopy(fill.Buffer().addr_, &message, sizeof(message));
-    fill.SetSize(sizeof(message));
+    Memory::FastCopy(slot.data.addr_, &message, sizeof(message));
+    (void)ep_comm_in_->Submit(slot, sizeof(message), false, in_isr);
   }
-  Callback<Endpoint::TxFill&> serial_state_fill_cb_ = Callback<Endpoint::TxFill&>::Create(
-      [](bool context, CDCBase* self, Endpoint::TxFill& fill)
-      { self->FillSerialState(context, fill); }, this);
-  CDCLineCoding pending_line_coding_{};
   CDCLineCoding line_coding_ = {115200, 0, 0, 8};  ///< 当前线路编码 / Current line coding
   // Public DTR/RTS queries cross the controller-owner boundary. Use the existing
   // word-sized atomic ABI, including on Cortex-M0 and QingKe targets.

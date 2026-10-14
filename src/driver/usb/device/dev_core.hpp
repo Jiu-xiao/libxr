@@ -65,15 +65,16 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   Speed GetSpeed() const { return speed_; }
 
  private:
-  static constexpr uint32_t INIT_EVENT = 1U;
-  static constexpr uint32_t DEINIT_EVENT = 2U;
-  static constexpr uint32_t RESET_EVENT = 4U;
-  static constexpr uint32_t DISCONNECT_EVENT = 8U;
-  static constexpr uint32_t SETUP_EVENT = 16U;
-  static constexpr uint32_t POWER_EVENT = 32U;
-  static constexpr uint32_t TIME_EVENT = 64U;
-  static constexpr uint32_t LIFECYCLE_EVENTS =
-      INIT_EVENT | DEINIT_EVENT | RESET_EVENT | DISCONNECT_EVENT;
+  static constexpr uint32_t INIT_EVENT = EndpointPool::INIT_EVENT;
+  static constexpr uint32_t DEINIT_EVENT = EndpointPool::DEINIT_EVENT;
+  static constexpr uint32_t RESET_EVENT = EndpointPool::RESET_EVENT;
+  static constexpr uint32_t DISCONNECT_EVENT = EndpointPool::DISCONNECT_EVENT;
+  static constexpr uint32_t SETUP_EVENT = EndpointPool::SETUP_EVENT;
+  static constexpr uint32_t POWER_EVENT = EndpointPool::POWER_EVENT;
+  static constexpr uint32_t TIME_EVENT = EndpointPool::TIME_EVENT;
+  static constexpr uint32_t CLASS_EVENT = EndpointPool::CLASS_EVENT;
+  static constexpr uint32_t STOP_DONE_EVENT = EndpointPool::STOP_DONE_EVENT;
+  static constexpr uint32_t LIFECYCLE_EVENTS = EndpointPool::LIFECYCLE_EVENTS;
 
   void RequestLifecycle(bool in_isr, uint32_t event, bool enabled)
   {
@@ -108,20 +109,30 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
     STATUS_OUT,
     STALLED
   };
+  /// A step that resumes once every endpoint stop is confirmed.
+  enum class Continuation : uint8_t
+  {
+    NONE,
+    SETUP,   ///< Dispatch setup_ after the old control transfer stopped.
+    CONFIG,  ///< Bind pending_config_ and send the status stage.
+    STATUS   ///< Send the status stage of SET_INTERFACE.
+  };
   void ProcessEvents(bool in_isr, uint32_t events);
+  void Continue(bool in_isr);
   void Initialize(bool in_isr);
   void Deinitialize(bool in_isr);
   void HandleSetup(bool in_isr, const SetupPacket& setup);
+  void DispatchSetup(bool in_isr);
   ErrorCode HandleStandardRequest(bool in_isr);
   ErrorCode ClassRequest(bool in_isr);
   ErrorCode SendDescriptor(bool in_isr);
-  void WriteControl(ConstRawData data);
-  void SendNextIn();
-  void ReceiveNextOut();
-  void StatusIn();
-  void ArmStatusOut();
-  void InComplete(bool in_isr, ConstRawData& data);
-  void OutComplete(bool in_isr, ConstRawData& data);
+  void WriteControl(bool in_isr, ConstRawData data);
+  void SendNextIn(bool in_isr);
+  void ReceiveNextOut(bool in_isr);
+  void StatusIn(bool in_isr);
+  void ArmStatusOut(bool in_isr);
+  void InComplete(bool in_isr, const Endpoint::Completion& completion);
+  void OutComplete(bool in_isr, const Endpoint::Completion& completion);
   void Finish(bool in_isr);
   void Abort(bool in_isr);
   void Stall(bool in_isr);
@@ -145,7 +156,6 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   DeviceClass* control_class_ = nullptr;
   Phase phase_ = Phase::IDLE;
   RawData control_out_;
-  RawData legacy_out_{nullptr, 0};
   ConstRawData control_in_{nullptr, 0};
   size_t transferred_ = 0;
   size_t in_segment_size_ = 0;
@@ -154,14 +164,17 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   bool status_out_seen_ = false;
   bool replacing_setup_ = false;
   uint8_t pending_address_ = 0xff;
-  Callback<ConstRawData&> in_callback_ = Callback<ConstRawData&>::Create(
-      [](bool context, DeviceCore* self, ConstRawData& data)
-      { self->InComplete(context, data); }, this);
-  Callback<ConstRawData&> out_callback_ = Callback<ConstRawData&>::Create(
-      [](bool context, DeviceCore* self, ConstRawData& data)
-      { self->OutComplete(context, data); }, this);
-  Callback<ErrorCode> error_callback_ = Callback<ErrorCode>::Create(
-      [](bool context, DeviceCore* self, ErrorCode) { self->Stall(context); }, this);
+  uint32_t deferred_events_ = 0;  ///< Events held back while an endpoint stops.
+  Continuation continuation_ = Continuation::NONE;
+  uint16_t pending_config_ = 0;
+  Callback<const Endpoint::Completion&> in_callback_ =
+      Callback<const Endpoint::Completion&>::Create(
+          [](bool context, DeviceCore* self, const Endpoint::Completion& completion)
+          { self->InComplete(context, completion); }, this);
+  Callback<const Endpoint::Completion&> out_callback_ =
+      Callback<const Endpoint::Completion&>::Create(
+          [](bool context, DeviceCore* self, const Endpoint::Completion& completion)
+          { self->OutComplete(context, completion); }, this);
   Endpoint* in0_ = nullptr;
   Endpoint* out0_ = nullptr;
 };

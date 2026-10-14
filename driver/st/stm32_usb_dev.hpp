@@ -58,6 +58,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
           __DMB();
           __set_PRIMASK(static_cast<uint32_t>(saved));
         });
+    RequireInterruptWrap();
   }
 
   void Init(bool in_isr) override { STM32USBDeviceCore::Init(in_isr); }
@@ -66,6 +67,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
 
   void Start(bool) override
   {
+    USB::EndpointPool::HardwareScope hardware(this);
     map_[id_] = this;
     if (WantsBusTime())
     {
@@ -79,6 +81,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
   }
   void Stop(bool) override
   {
+    USB::EndpointPool::HardwareScope hardware(this);
     HAL_PCD_Stop(hpcd_);
     if (map_[id_] == this)
     {
@@ -101,21 +104,13 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
     return id < STM32_USB_DEV_ID_NUM ? map_[id] : nullptr;
   }
 
-  static void IRQHandler(PCD_HandleTypeDef* hpcd)
-  {
-    auto* device = FindDevice(hpcd);
-    if (device)
-    {
-      USB::EndpointPool::InterruptScope interrupt_scope(*device);
-      HAL_PCD_IRQHandler(hpcd);
-    }
-    else
-      HAL_PCD_IRQHandler(hpcd);
-  }
-
   PCD_HandleTypeDef* hpcd_;
   stm32_usb_dev_id_t id_;
   static inline STM32USBDevice* map_[STM32_USB_DEV_ID_NUM] = {};
+
+ private:
+  /// The link must wrap HAL_PCD_IRQHandler (LibXR adds -Wl,--wrap=HAL_PCD_IRQHandler).
+  static void RequireInterruptWrap();
 };
 
 #if defined(USB_OTG_FS)

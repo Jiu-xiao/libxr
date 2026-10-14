@@ -324,45 +324,47 @@ const DeviceComposition::ConfigItems& DeviceComposition::CurrentConfigItems() co
 
 void DeviceComposition::Init(bool in_isr)
 {
-  endpoint_pool_.SetDataEnabled(false);
-  UNUSED(in_isr);
+  endpoint_pool_.SetDataEnabled(false, in_isr);
   configured_ = false;
   current_cfg_ = 0;
 }
 
 void DeviceComposition::Deinit(bool in_isr)
 {
-  endpoint_pool_.SetDataEnabled(false);
+  endpoint_pool_.SetDataEnabled(false, in_isr);
   UnbindEndpoints(in_isr);
   configured_ = false;
   current_cfg_ = 0;
 }
 
-LibXR::ErrorCode DeviceComposition::SwitchConfig(size_t index, bool in_isr)
+LibXR::ErrorCode DeviceComposition::BeginSwitchConfig(size_t index, bool in_isr)
 {
   if (index > config_num_) return ErrorCode::NOT_FOUND;
   if (index != 0 &&
       (!descriptors_prepared_ ||
        GetConfigDescriptor(index - 1U, endpoint_pool_.GetSpeed()).size_ == 0U))
     return ErrorCode::NOT_SUPPORT;
-  endpoint_pool_.SetDataEnabled(false);
+  endpoint_pool_.SetDataEnabled(false, in_isr);
   if (configured_) Notify(in_isr, DeviceEvent::DECONFIGURED);
   UnbindEndpoints(in_isr);
   configured_ = false;
-  if (index == 0)
-  {
-    current_cfg_ = 0;
-    return ErrorCode::OK;
-  }
+  current_cfg_ = 0;
+  return ErrorCode::OK;
+}
+
+LibXR::ErrorCode DeviceComposition::FinishSwitchConfig(size_t index, bool in_isr)
+{
+  if (index == 0) return ErrorCode::OK;
   current_cfg_ = static_cast<uint8_t>(index - 1U);
   BindEndpoints(in_isr);
   if (!endpoint_pool_.ConfigurationValid())
   {
     UnbindEndpoints(in_isr);
+    current_cfg_ = 0;
     return ErrorCode::INIT_ERR;
   }
   configured_ = true;
-  endpoint_pool_.SetDataEnabled(true);
+  endpoint_pool_.SetDataEnabled(true, in_isr);
   Notify(in_isr, DeviceEvent::CONFIGURED);
   return ErrorCode::OK;
 }

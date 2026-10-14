@@ -125,8 +125,10 @@ class EndpointPool
     hardware_leave_ = leave;
   }
 
-  // Short hardware/control-mailbox critical region; never class callbacks or
-  // blocking work. Backends mask local IRQs and, on SMP, serialize register access.
+  // Short hardware/control-mailbox critical region; never class callbacks or blocking
+  // work. Backends mask local IRQs in every context (the owner may run inside an
+  // unrelated ISR that the controller IRQ can preempt) and, on SMP, also serialize
+  // register access.
   class HardwareScope
   {
    public:
@@ -150,19 +152,17 @@ class EndpointPool
     uintptr_t token_ = 0;
   };
 
-  // Capture the complete raw IRQ batch and clear W1C sources before callbacks can
-  // rearm the same hardware. Exiting this scope releases the hardware guard BEFORE
-  // entering ordinary controller/class work; it does not add a worker thread.
+  // Marks one controller IRQ batch. Callbacks inside it only record facts; the owner
+  // is requested once the outermost batch ends. It does not mask interrupts.
   class InterruptScope
   {
    public:
-    explicit InterruptScope(EndpointPool& pool) : pool_(pool), hardware_(&pool)
+    explicit InterruptScope(EndpointPool& pool) : pool_(pool)
     {
       pool_.interrupt_depth_.fetch_add(1U, std::memory_order_acq_rel);
     }
     ~InterruptScope()
     {
-      hardware_.Release();
       if (pool_.interrupt_depth_.fetch_sub(1U, std::memory_order_acq_rel) == 1U)
         pool_.RequestService(true);
     }
@@ -171,8 +171,21 @@ class EndpointPool
 
    private:
     EndpointPool& pool_;
-    HardwareScope hardware_;
   };
+
+  /// Owner event bits. The device core owns the low byte; the pool owns the rest.
+  static constexpr uint32_t INIT_EVENT = 1U;
+  static constexpr uint32_t DEINIT_EVENT = 2U;
+  static constexpr uint32_t RESET_EVENT = 4U;
+  static constexpr uint32_t DISCONNECT_EVENT = 8U;
+  static constexpr uint32_t SETUP_EVENT = 16U;
+  static constexpr uint32_t POWER_EVENT = 32U;
+  static constexpr uint32_t TIME_EVENT = 64U;
+  static constexpr uint32_t CLASS_EVENT = 128U;
+  static constexpr uint32_t ENDPOINT_EVENT = 256U;
+  static constexpr uint32_t STOP_DONE_EVENT = 512U;
+  static constexpr uint32_t LIFECYCLE_EVENTS =
+      INIT_EVENT | DEINIT_EVENT | RESET_EVENT | DISCONNECT_EVENT;
 
   /// Invoke synchronously if free; otherwise retain work for the current owner.
   void RequestService(bool in_isr);
@@ -188,9 +201,23 @@ class EndpointPool
   {
     return (control_pending_.load(std::memory_order_acquire) & mask) != 0U;
   }
-  bool CurrentContextIsISR() const { return current_in_isr_; }
+  /// An endpoint has work: a submit, a completion or a stop confirmation.
+  void PostEndpointEvent(bool in_isr) { PostControl(ENDPOINT_EVENT, in_isr); }
+  /// Owner: make every endpoint recheck its queue after a start gate opened.
+  void KickEndpoints(bool in_isr);
+  /// Owner: whether an endpoint may start hardware now.
+  bool CanStart(bool ep0) const
+  {
+    return !planning_ && !suspended_ && !HasPendingControl(LIFECYCLE_EVENTS) &&
+           (ep0 || data_enabled_);
+  }
+  /// Owner: count of endpoints whose hardware stop is not yet confirmed.
+  bool AnyStopping() const { return stopping_count_ != 0U; }
+  void AddStopping() { ++stopping_count_; }
+  void StopFinished(bool in_isr);
+
   bool DataEnabled() const { return data_enabled_; }
-  void SetDataEnabled(bool enabled) { data_enabled_ = enabled; }
+  void SetDataEnabled(bool enabled, bool in_isr);
   bool IsPlanning() const { return planning_; }
   void SetPlanning(bool planning) { planning_ = planning; }
   Speed GetSpeed() const { return speed_; }
@@ -218,6 +245,8 @@ class EndpointPool
    * @param dir 端点方向（IN/OUT）/ Endpoint direction
    * @return size_t 下标（OUT=0, IN=1）/ Index (OUT=0, IN=1)
    */
+  static void ServiceEndpoint(Endpoint* ep, bool in_isr);
+
   static size_t DirIndex(Endpoint::Direction dir)
   {
     return (dir == Endpoint::Direction::IN) ? 1U : 0U;
@@ -233,7 +262,7 @@ class EndpointPool
   SerializedService service_;
   std::atomic<uint32_t> control_pending_{0};
   Callback<uint32_t> control_handler_;
-  bool current_in_isr_ = false;
+  uint32_t stopping_count_ = 0;  ///< Controller-owner state.
   bool data_enabled_ = true;
   bool planning_ = false;
   Speed speed_ = Speed::FULL;

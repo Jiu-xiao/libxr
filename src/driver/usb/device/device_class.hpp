@@ -1,11 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "device_events.hpp"
 #include "libxr_type.hpp"
 #include "usb/core/desc_cfg.hpp"
+#include "usb/core/ep_pool.hpp"
 
 namespace LibXR::USB
 {
@@ -72,9 +74,12 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
  protected:
-  void RequestClassService(bool in_isr = false)
+  /// 请 owner 调用本类的 OnService；可在任何上下文调用 / Ask the owner to run OnService;
+  /// any context
+  void RequestClassService(bool in_isr)
   {
-    if (service_pool_) service_pool_->PostControl(128U, in_isr);
+    service_pending_.store(1U, std::memory_order_release);
+    if (service_pool_) service_pool_->PostControl(EndpointPool::CLASS_EVENT, in_isr);
   }
 
   /**
@@ -93,25 +98,13 @@ class DeviceClass : public ConfigDescriptorItem
    */
   struct ControlTransferResult
   {
-    RawData read_data{nullptr, 0};  ///< OUT 数据阶段接收缓冲区（Host->Device）/ OUT data
-                                    ///< stage buffer (Host->Device)
-    ConstRawData write_data{nullptr, 0};  ///< IN 数据阶段发送数据（Device->Host）/ IN
-                                          ///< data stage payload (Device->Host)
-    bool read_zlp = false;  ///< 期望 STATUS OUT（arm OUT 等待 ZLP）/ Expect STATUS OUT
-                            ///< (arm OUT for ZLP)
-    bool write_zlp = false;  ///< 发送 STATUS IN（发送 ZLP）/ Send STATUS IN (send ZLP)
-
-    RawData& OutData() { return read_data; }
-    const RawData& OutData() const { return read_data; }
+    /// IN 数据阶段发送的数据（Device->Host）；OUT 数据阶段由核心收进自己的缓冲区，
+    /// 完整后经 OnControlData 交给类 / IN data stage payload (Device->Host). OUT data is
+    /// received into the core's own buffer and handed over by OnControlData.
+    ConstRawData write_data{nullptr, 0};
 
     ConstRawData& InData() { return write_data; }
     const ConstRawData& InData() const { return write_data; }
-
-    bool& ExpectStatusOutZLP() { return read_zlp; }
-    bool ExpectStatusOutZLP() const { return read_zlp; }
-
-    bool& SendStatusInZLP() { return write_zlp; }
-    bool SendStatusInZLP() const { return write_zlp; }
   };
 
   /**
@@ -253,6 +246,7 @@ class DeviceClass : public ConfigDescriptorItem
   void SetInterfaceStringBaseIndex(uint8_t string_index);
 
   EndpointPool* service_pool_ = nullptr;  // Immutable after composition construction.
+  std::atomic<uint32_t> service_pending_{0};
   friend class DeviceComposition;
   template <typename Capabilities>
   friend class DeviceCore;

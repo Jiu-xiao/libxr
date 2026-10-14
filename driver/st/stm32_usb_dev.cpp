@@ -17,6 +17,31 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd)
   return STM32_USB_DEV_ID_NUM;
 }
 
+extern "C" void __real_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd);
+
+// The link wraps HAL_PCD_IRQHandler, so the BSP's unmodified *_it.c enters here. HAL
+// callbacks inside the batch only record facts; the owner runs once the batch ends.
+extern "C" void __wrap_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd)
+{
+  STM32USBDevice* device = STM32USBDevice::FindDevice(hpcd);
+  if (device == nullptr)
+  {
+    __real_HAL_PCD_IRQHandler(hpcd);
+    return;
+  }
+  USB::EndpointPool::InterruptScope batch(*device);
+  STM32Endpoint::BeforeInterrupt(hpcd);
+  __real_HAL_PCD_IRQHandler(hpcd);
+  STM32Endpoint::AfterInterrupt(hpcd);
+}
+
+void STM32USBDevice::RequireInterruptWrap()
+{
+  // Read through a volatile pointer so the comparison is made on the linked addresses.
+  void (*volatile handler)(PCD_HandleTypeDef*) = &HAL_PCD_IRQHandler;
+  REQUIRE(handler == &__wrap_HAL_PCD_IRQHandler);
+}
+
 extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef* hpcd)
 {
   auto* usb = STM32USBDevice::FindDevice(hpcd);
@@ -99,6 +124,9 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
   ASSERT(RX_EP_CFGS.size() > 0 && RX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_FS_MAX_SIZE);
   ASSERT(TX_EP_CFGS.size() > 0 && TX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_FS_MAX_SIZE);
   ASSERT(64 * RX_EP_CFGS.size() <= rx_fifo_size);
+  // Holds one received packet of an abandoned OUT request.
+  const size_t scratch = LibXR::min<size_t>(rx_fifo_size, 1024U);
+  STM32Endpoint::SetScratch(id_, {new uint8_t[scratch], scratch});
 
   auto rx_cfgs_itr = RX_EP_CFGS.begin();
   auto tx_cfgs_itr = TX_EP_CFGS.begin();
@@ -180,6 +208,9 @@ STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
   ASSERT(RX_EP_CFGS.size() > 0 && RX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_HS_MAX_SIZE);
   ASSERT(TX_EP_CFGS.size() > 0 && TX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_HS_MAX_SIZE);
   ASSERT(64 * RX_EP_CFGS.size() <= rx_fifo_size);
+  // Holds one received packet of an abandoned OUT request.
+  const size_t scratch = LibXR::min<size_t>(rx_fifo_size, 1024U);
+  STM32Endpoint::SetScratch(id_, {new uint8_t[scratch], scratch});
 
   auto rx_cfgs_itr = RX_EP_CFGS.begin();
   auto tx_cfgs_itr = TX_EP_CFGS.begin();
@@ -254,6 +285,13 @@ STM32USBDeviceDevFs::STM32USBDeviceDevFs(
                      bcd, LANG_LIST, CONFIGS, uid)
 {
   ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= hpcd->Init.dev_endpoints);
+
+  // Holds the packets one IRQ pass copies for an abandoned OUT request (double
+  // buffering can deliver two).
+  size_t largest = 0;
+  for (const auto& cfg : EP_CFGS)
+    largest = LibXR::max(largest, LibXR::max(cfg.hw_buffer_size1, cfg.hw_buffer_size2));
+  STM32Endpoint::SetScratch(id_, {new uint8_t[2U * largest], 2U * largest});
 
   auto cfgs_itr = EP_CFGS.begin();
 

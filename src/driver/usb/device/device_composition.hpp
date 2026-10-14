@@ -65,8 +65,13 @@ class DeviceComposition
   /**
    * @brief 切换到指定 configuration value
    *        Switch to the given configuration value.
+   *
+   * 第一步校验并解绑当前配置；端点停止确认之后第二步绑定新配置。
+   * The first step validates and unbinds the current configuration; after the endpoint
+   * stops are confirmed, the second step binds the new one.
    */
-  ErrorCode SwitchConfig(size_t index, bool in_isr);
+  ErrorCode BeginSwitchConfig(size_t index, bool in_isr);
+  ErrorCode FinishSwitchConfig(size_t index, bool in_isr);
 
   /**
    * @brief 生成当前 configuration 描述符缓存

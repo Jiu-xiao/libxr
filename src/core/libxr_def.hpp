@@ -148,7 +148,8 @@ enum class ErrorCode : int8_t
   FULL = -14,         ///< 已满 / Full
   BUSY = -15,         ///< 忙碌 / Busy
   PTR_NULL = -16,     ///< 空指针 / Null pointer
-  OUT_OF_RANGE = -17  ///< 超出范围 / Out of range
+  OUT_OF_RANGE = -17,  ///< 超出范围 / Out of range
+  ABORTED = -18        ///< 已取消 / Aborted
 };
 
 /**

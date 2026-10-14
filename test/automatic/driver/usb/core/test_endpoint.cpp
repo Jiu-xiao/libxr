@@ -1,25 +1,19 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <functional>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <vector>
 
 #include "cdc_uart.hpp"
-#include "daplink_v1.hpp"
-#include "daplink_v2.hpp"
-#include "debug/swd.hpp"
-#include "dfu_bootloader.hpp"
+#include "dev_core.hpp"
 #include "ep_pool.hpp"
-#include "hid_mouse.hpp"
 #include "test_assert.hpp"
-#include "uac_mic.hpp"
 
 using namespace LibXR;
 using namespace LibXR::USB;
@@ -36,86 +30,178 @@ using Direction = Endpoint::Direction;
 using Number = Endpoint::EPNumber;
 using Type = Endpoint::Type;
 using State = Endpoint::State;
+using Completion = Endpoint::Completion;
+using Slot = Endpoint::Slot;
 
+template <size_t N>
+struct alignas(64) Block
+{
+  std::array<uint8_t, N> bytes{};
+  RawData Raw() { return {bytes.data(), bytes.size()}; }
+};
+
+/// Backend double: records every start and lets the test play the hardware.
 class MockEndpoint : public Endpoint
 {
  public:
   struct Start
   {
-    void* address;
+    uint32_t tag;
+    uint8_t* address;
+    size_t capacity;
     size_t length;
     std::vector<uint8_t> data;
   };
-  MockEndpoint(Number number, Direction dir, RawData storage, size_t segment = 64)
-      : Endpoint(number, dir, storage), segment_limit(segment)
+
+  MockEndpoint(Number number, Direction dir, RawData storage)
+      : Endpoint(number, dir, storage)
   {
   }
+
   std::vector<Start> starts;
   std::vector<std::vector<uint8_t>> sent;
-  std::atomic<size_t> wire_bytes{0};
-  size_t segment_limit;
-  std::function<void()> at_start;
   bool active = false;
+  bool pending_stop = false;  // StopHardware answers PENDING.
+  bool stop_requested = false;
+  size_t reap_actual = 0;
+  bool reap_retired = false;
+  unsigned closes = 0, stalls = 0, clear_stalls = 0;
+  size_t limit = UINT16_MAX;
+  ErrorCode configure_result = ErrorCode::OK;
+  std::mutex lock;  // Only the threaded stress test plays hardware from another thread.
 
+  const Start& Last() const { return starts.back(); }
+
+  /// IN: the host takes the whole request.
   void Complete(bool in_isr = true)
+  {
+    uint32_t tag;
+    size_t length;
+    {
+      std::lock_guard<std::mutex> guard(lock);
+      TEST_ASSERT(active);
+      active = false;
+      const Start& start = starts.back();
+      if (start.length != 0U)
+        TEST_ASSERT(std::equal(start.data.begin(), start.data.end(), start.address));
+      sent.push_back(start.data);
+      tag = start.tag;
+      length = start.length;
+    }
+    OnHardwareComplete(in_isr, tag, length);
+  }
+  /// IN: the host took fewer bytes than requested.
+  void CompleteWith(size_t actual, ErrorCode result = ErrorCode::OK)
   {
     TEST_ASSERT(active);
     active = false;
-    const auto& started = starts.back();
-    const auto* data = static_cast<const uint8_t*>(started.address);
-    if (started.length)
-      TEST_ASSERT(std::equal(started.data.begin(), started.data.end(), data));
-    sent.push_back(started.data);
-    wire_bytes.fetch_add(started.data.size(), std::memory_order_release);
-    OnTransferCompleteCallback(in_isr, started.length);
+    OnHardwareComplete(true, starts.back().tag, actual, result);
   }
-  void Receive(const std::vector<uint8_t>& bytes)
+  /// OUT: the host sends bytes into the armed slot.
+  void HostSends(const std::vector<uint8_t>& bytes)
   {
-    TEST_ASSERT(active && bytes.size() <= SegmentSize());
+    TEST_ASSERT(active && bytes.size() <= starts.back().capacity);
     active = false;
-    if (!bytes.empty()) std::memcpy(TransferBuffer().addr_, bytes.data(), bytes.size());
-    OnTransferCompleteCallback(true, bytes.size());
+    if (!bytes.empty()) std::memcpy(starts.back().address, bytes.data(), bytes.size());
+    OnHardwareComplete(true, starts.back().tag, bytes.size());
   }
+  void ConfirmStop()
+  {
+    TEST_ASSERT(stop_requested);
+    stop_requested = false;
+    active = false;
+    OnHardwareStopped(true);
+  }
+  void Late(uint32_t tag, size_t actual) { OnHardwareComplete(true, tag, actual); }
 
  protected:
-  void ConfigureHardware(const Config& cfg) override
+  ErrorCode ConfigureHardware(const Config&, Granted&) override
   {
-    GetConfig().max_packet_size =
-        cfg.max_packet_size == UINT16_MAX ? 64 : cfg.max_packet_size;
-    SetState(State::IDLE);
+    return configure_result;
   }
-  void CloseHardware() override { active = false; }
-  ErrorCode StallHardware() override
+  void CloseHardware(bool) override
   {
-    active = false;
-    return ErrorCode::OK;
+    TEST_ASSERT(!active);
+    ++closes;
   }
-  ErrorCode ClearStallHardware() override { return ErrorCode::OK; }
-  size_t MaxHardwareTransferSize() const override { return segment_limit; }
-  ErrorCode StartHardware(RawData buffer, size_t size) override
+  ErrorCode StartHardware(const HwRequest& request, bool) override
   {
-    TEST_ASSERT(!active && GetState() == State::BUSY && size <= buffer.size_);
-    Start record{buffer.addr_, size, {}};
-    if (GetDirection() == Direction::IN && size)
-      record.data.assign(static_cast<uint8_t*>(buffer.addr_),
-                         static_cast<uint8_t*>(buffer.addr_) + size);
-    starts.push_back(record);
+    std::lock_guard<std::mutex> guard(lock);
+    TEST_ASSERT(!active && !stop_requested);
+    TEST_ASSERT(request.length <= request.slot.size_ || request.slot.size_ == 0U);
+    Start start{request.tag, static_cast<uint8_t*>(request.slot.addr_), request.slot.size_,
+                request.length, {}};
+    if (GetConfig().direction == Direction::IN && request.length)
+      start.data.assign(start.address, start.address + request.length);
+    starts.push_back(std::move(start));
     active = true;
-    if (at_start) at_start();
     return ErrorCode::OK;
+  }
+  StopResult StopHardware(bool) override
+  {
+    // A SETUP may already have cancelled an EP0 transfer in hardware.
+    std::lock_guard<std::mutex> guard(lock);
+    if (!pending_stop)
+    {
+      active = false;
+      return StopResult::DONE;
+    }
+    stop_requested = true;
+    return StopResult::PENDING;
+  }
+  size_t ReapProgress(const HwRequest&, bool& retired) override
+  {
+    retired = reap_retired;
+    return reap_actual;
+  }
+  ErrorCode StallHardware(bool) override
+  {
+    ++stalls;
+    return ErrorCode::OK;
+  }
+  ErrorCode ClearStallHardware(bool) override
+  {
+    ++clear_stalls;
+    return ErrorCode::OK;
+  }
+  size_t MaxPacketSizeLimit(Type) const override { return limit; }
+};
+
+/// Records completions delivered to one endpoint binding.
+struct Recorder
+{
+  std::vector<Completion> list;
+  Callback<const Completion&> Bind()
+  {
+    return Callback<const Completion&>::Create(
+        [](bool, Recorder* self, const Completion& completion)
+        { self->list.push_back(completion); }, this);
   }
 };
 
+std::vector<uint8_t> Bytes(size_t size, uint8_t seed)
+{
+  std::vector<uint8_t> data(size);
+  for (size_t i = 0; i != size; ++i) data[i] = static_cast<uint8_t>(seed + i);
+  return data;
+}
+
+std::vector<uint8_t> Wire(const MockEndpoint& ep)
+{
+  std::vector<uint8_t> data;
+  for (const auto& packet : ep.sent) data.insert(data.end(), packet.begin(), packet.end());
+  return data;
+}
+
 struct Fixture
 {
-  std::array<uint8_t, 128> in_storage{};
-  std::array<uint8_t, 64> out_storage{};
-  std::array<uint8_t, 32> comm_storage{};
+  Block<128> in_storage;
+  Block<128> out_storage;
+  Block<64> comm_storage;
   EndpointPool pool{4};
-  MockEndpoint in{Number::EP1, Direction::IN, {in_storage.data(), in_storage.size()}};
-  MockEndpoint out{Number::EP2, Direction::OUT, {out_storage.data(), out_storage.size()}};
-  MockEndpoint comm{
-      Number::EP3, Direction::IN, {comm_storage.data(), comm_storage.size()}};
+  MockEndpoint in{Number::EP1, Direction::IN, in_storage.Raw()};
+  MockEndpoint out{Number::EP2, Direction::OUT, out_storage.Raw()};
+  MockEndpoint comm{Number::EP3, Direction::IN, comm_storage.Raw()};
   Fixture()
   {
     TEST_ASSERT(pool.Put(&in) == ErrorCode::OK);
@@ -123,6 +209,655 @@ struct Fixture
     TEST_ASSERT(pool.Put(&comm) == ErrorCode::OK);
   }
 };
+
+void Fill(const Slot& slot, uint8_t seed, size_t length)
+{
+  for (size_t i = 0; i < length; ++i)
+    static_cast<uint8_t*>(slot.data.addr_)[i] = static_cast<uint8_t>(seed + i);
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint
+// ---------------------------------------------------------------------------
+
+void TestGeometry()
+{
+  Fixture f;
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.GetGranted().max_packet_size == 64 &&
+              f.in.GetGranted().slot_count == 2 && f.in.GetGranted().slot_capacity == 64);
+  f.in.Close(false);
+  TEST_ASSERT(f.in.GetState() == State::DISABLED && f.in.closes == 1);
+  TEST_ASSERT(f.comm.Configure({Direction::IN, Type::INTERRUPT, 64}, false) ==
+              ErrorCode::OK);
+  TEST_ASSERT(f.comm.GetGranted().slot_count == 1 && f.comm.GetGranted().slot_capacity == 64);
+  f.comm.Close(false);
+  // Bulk FS packets are 8/16/32/64 only.
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 48}, false) == ErrorCode::ARG_ERR);
+  TEST_ASSERT(f.in.GetState() == State::ERROR);
+  f.in.Close(false);
+  // A slot that cannot hold one packet is NO_BUFF, not fatal.
+  f.pool.SetSpeed(Speed::HIGH);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::NO_BUFF);
+  f.in.Close(false);
+  f.pool.SetSpeed(Speed::FULL);
+  // Direction must match the registered direction.
+  TEST_ASSERT(f.in.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::ARG_ERR);
+  f.in.Close(false);
+  // The backend FIFO limit lowers the default packet size.
+  f.in.limit = 32;
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.MaxPacketSize() == 32 && f.in.GetGranted().slot_capacity == 64);
+  f.in.Close(false);
+  f.in.limit = UINT16_MAX;
+
+  Block<1024> big;
+  EndpointPool pool{2};
+  MockEndpoint ep{Number::EP1, Direction::IN, big.Raw()};
+  TEST_ASSERT(pool.Put(&ep) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.GetGranted().slot_count == 2 && ep.GetGranted().slot_capacity == 512);
+  Slot a, b;
+  TEST_ASSERT(ep.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.AcquireSlot(b, false) == ErrorCode::OK);
+  TEST_ASSERT(static_cast<uint8_t*>(b.data.addr_) - static_cast<uint8_t*>(a.data.addr_) ==
+              512);
+}
+
+void TestInBorrowOrder()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot a, b, c;
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(c, false) == ErrorCode::BUSY);
+  TEST_ASSERT(a.index != b.index && a.data.size_ == 64);
+  Fill(a, 1, 10);
+  Fill(b, 100, 20);
+  TEST_ASSERT(f.in.Submit(b, 65, false, false) == ErrorCode::SIZE_ERR);
+  // Submission order decides the start order, not the slot index.
+  TEST_ASSERT(f.in.Submit(b, 20, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(b, 20, false, false) == ErrorCode::STATE_ERR);
+  TEST_ASSERT(f.in.Submit(a, 10, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.starts.size() == 1 && f.in.Last().length == 20);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 20 && !rec.list[0].slot.Valid());
+  TEST_ASSERT(f.in.starts.size() == 2 && f.in.Last().length == 10);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[1].actual == 10);
+  auto expected = Bytes(20, 100);
+  auto tail = Bytes(10, 1);
+  expected.insert(expected.end(), tail.begin(), tail.end());
+  TEST_ASSERT(Wire(f.in) == expected);
+  // Released slots are free again.
+  TEST_ASSERT(f.in.AcquireSlot(c, false) == ErrorCode::OK);
+  f.in.ReleaseSlot(c, false);
+  // OUT-only calls on an IN endpoint.
+  TEST_ASSERT(f.in.Receive(64, false) == ErrorCode::STATE_ERR);
+}
+
+void TestZeroLengthTailAndShort()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot slot;
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+  Fill(slot, 3, 64);
+  TEST_ASSERT(f.in.Submit(slot, 64, true, false) == ErrorCode::OK);
+  f.in.Complete();
+  // One request: the data packet, then its ZLP, then one completion.
+  TEST_ASSERT(rec.list.empty() && f.in.starts.size() == 2 && f.in.Last().length == 0);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 64);
+  // A short request needs no tail.
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(slot, 63, true, false) == ErrorCode::OK);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 2 && f.in.starts.size() == 3);
+  // The host taking fewer bytes than offered is a failed IN request.
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(slot, 40, false, false) == ErrorCode::OK);
+  f.in.CompleteWith(30);
+  TEST_ASSERT(rec.list.size() == 3 && rec.list[2].result == ErrorCode::FAILED);
+  // Slotless zero-length request.
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(slot, 1, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.SubmitZeroLength(false) == ErrorCode::BUSY);
+  f.in.Complete();
+  TEST_ASSERT(f.in.SubmitZeroLength(false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.SubmitZeroLength(false) == ErrorCode::BUSY);
+  TEST_ASSERT(f.in.Last().length == 0);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 5 && rec.list[4].result == ErrorCode::OK &&
+              rec.list[4].actual == 0);
+}
+
+void TestOutLease()
+{
+  Fixture f;
+  Recorder rec;
+  f.out.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Receive(63, false) == ErrorCode::SIZE_ERR);
+  TEST_ASSERT(f.out.Receive(0, false) == ErrorCode::SIZE_ERR);
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::BUSY);
+  TEST_ASSERT(f.out.starts.size() == 1);
+  const auto packet = Bytes(10, 50);
+  f.out.HostSends(packet);
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 10 && rec.list[0].slot.Valid());
+  const Slot lease = rec.list[0].slot;
+  TEST_ASSERT(lease.data.size_ == 10 &&
+              std::equal(packet.begin(), packet.end(),
+                         static_cast<const uint8_t*>(lease.data.addr_)));
+  // The second slot was armed in parallel; the lease is not touched by hardware.
+  TEST_ASSERT(f.out.starts.size() == 2 && f.out.Last().address != lease.data.addr_);
+  f.out.HostSends(Bytes(64, 1));
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[1].actual == 64);
+  // Nothing armed while both leases are held: backpressure.
+  TEST_ASSERT(!f.out.active);
+  TEST_ASSERT(f.out.ReturnSlot(lease, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.active && f.out.Last().address == lease.data.addr_ &&
+              f.out.Last().length == 64);
+  TEST_ASSERT(f.out.ReturnSlot(lease, false) == ErrorCode::STATE_ERR);
+  f.out.ReleaseSlot(rec.list[1].slot, false);
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+  Slot none;
+  TEST_ASSERT(f.out.AcquireSlot(none, false) == ErrorCode::STATE_ERR);
+}
+
+void TestCloseMakesLentSlotsStale()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot held, spare;
+  TEST_ASSERT(f.in.AcquireSlot(held, false) == ErrorCode::OK);
+  f.in.Close(false);
+  TEST_ASSERT(f.in.AcquireSlot(spare, false) == ErrorCode::STATE_ERR);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  // The new binding only gets the free slot.
+  TEST_ASSERT(f.in.AcquireSlot(spare, false) == ErrorCode::OK);
+  TEST_ASSERT(spare.index != held.index);
+  Slot none;
+  TEST_ASSERT(f.in.AcquireSlot(none, false) == ErrorCode::BUSY);
+  // The old holder's submit is refused synchronously and frees the slot.
+  TEST_ASSERT(f.in.Submit(held, 4, false, false) == ErrorCode::ABORTED);
+  TEST_ASSERT(rec.list.empty() && f.in.starts.empty());
+  TEST_ASSERT(f.in.AcquireSlot(none, false) == ErrorCode::OK && none.index == held.index);
+  // A stale OUT lease returns ABORTED too.
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  Recorder out_rec;
+  f.out.SetOnComplete(out_rec.Bind());
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+  f.out.HostSends(Bytes(5, 0));
+  const Slot lease = out_rec.list.at(0).slot;
+  f.out.Close(false);
+  TEST_ASSERT(f.out.ReturnSlot(lease, false) == ErrorCode::ABORTED);
+  TEST_ASSERT(f.out.ReturnSlot(lease, false) == ErrorCode::STATE_ERR);
+}
+
+void TestCloseWithPendingStop()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  f.in.pending_stop = true;
+  f.in.reap_actual = 0;
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot a, b;
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(a, 8, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(b, 9, false, false) == ErrorCode::OK);
+  f.in.Close(false);
+  // The queued request ends only after the in-flight one: completions keep the order.
+  TEST_ASSERT(f.in.IsStopping() && f.pool.AnyStopping() && rec.list.empty());
+  TEST_ASSERT(f.in.closes == 0);
+  f.in.ConfirmStop();
+  TEST_ASSERT(!f.in.IsStopping() && !f.pool.AnyStopping());
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[0].result == ErrorCode::ABORTED &&
+              rec.list[1].result == ErrorCode::ABORTED && f.in.closes == 1);
+  // The slots are free for the next binding.
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  f.in.ReleaseSlot(a, false);
+  f.in.ReleaseSlot(b, false);
+
+  // A hardware completion that arrives before the stop confirmation wins.
+  rec.list.clear();
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(a, 8, false, false) == ErrorCode::OK);
+  f.in.Close(false);
+  TEST_ASSERT(f.in.IsStopping());
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK);
+  f.in.stop_requested = true;
+  f.in.ConfirmStop();
+  TEST_ASSERT(rec.list.size() == 1 && !f.pool.AnyStopping() && f.in.closes == 2);
+
+  // A retired IN request reaped after the stop is reported OK with its bytes.
+  rec.list.clear();
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(a, 8, false, false) == ErrorCode::OK);
+  f.in.reap_retired = true;
+  f.in.reap_actual = 8;
+  f.in.Close(false);
+  f.in.ConfirmStop();
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 8);
+
+  // OUT data that the stop overtakes is not handed to anybody.
+  Recorder out_rec;
+  f.out.SetOnComplete(out_rec.Bind());
+  f.out.pending_stop = true;
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+  f.out.Close(false);
+  f.out.HostSends(Bytes(7, 1));
+  TEST_ASSERT(out_rec.list.size() == 1 && out_rec.list[0].result == ErrorCode::ABORTED &&
+              out_rec.list[0].actual == 7 && !out_rec.list[0].slot.Valid());
+  f.out.stop_requested = true;
+  f.out.ConfirmStop();
+}
+
+void TestLateCompletionDropped()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot slot;
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(slot, 8, false, false) == ErrorCode::OK);
+  const uint32_t old_tag = f.in.Last().tag;
+  f.in.Flush(false);
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::ABORTED);
+  // The old request's completion after its stop must not end the next request.
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(slot, 5, false, false) == ErrorCode::OK);
+  f.in.Late(old_tag, 8);
+  TEST_ASSERT(rec.list.size() == 1 && f.in.active);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[1].result == ErrorCode::OK &&
+              rec.list[1].actual == 5);
+}
+
+void TestCopyWrite()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  const auto data = Bytes(300, 9);
+  TEST_ASSERT(f.in.Write({data.data(), data.size()}, true, false) == ErrorCode::OK);
+  Slot slot;
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::BUSY);
+  TEST_ASSERT(f.in.Write({data.data(), 1}, false, false) == ErrorCode::BUSY);
+  while (f.in.active) f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 300);
+  TEST_ASSERT(Wire(f.in) == data);
+  // A packet-multiple write with zlp ends with a ZLP.
+  f.in.sent.clear();
+  const size_t before = f.in.starts.size();
+  TEST_ASSERT(f.in.Write({data.data(), 128}, true, false) == ErrorCode::OK);
+  while (f.in.active) f.in.Complete();
+  TEST_ASSERT(f.in.starts.size() == before + 3 && f.in.Last().length == 0);
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[1].actual == 128);
+  // An empty write is one zero-length packet.
+  TEST_ASSERT(f.in.Write({nullptr, 0}, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Last().length == 0);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 3 && rec.list[2].actual == 0);
+  // Close during a copy write ends it once.
+  TEST_ASSERT(f.in.Write({data.data(), data.size()}, false, false) == ErrorCode::OK);
+  f.in.Complete();
+  f.in.Close(false);
+  TEST_ASSERT(rec.list.size() == 4 && rec.list[3].result == ErrorCode::ABORTED &&
+              rec.list[3].actual == 64);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
+}
+
+void TestCopyRead()
+{
+  Fixture f;
+  Recorder rec;
+  f.out.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  std::array<uint8_t, 100> buffer{};
+  TEST_ASSERT(f.out.Read({buffer.data(), buffer.size()}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::BUSY);
+  const auto first = Bytes(64, 1), second = Bytes(36, 65);
+  f.out.HostSends(first);
+  TEST_ASSERT(rec.list.empty() && f.out.active);
+  f.out.HostSends(second);
+  TEST_ASSERT(rec.list.size() == 1 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 100);
+  TEST_ASSERT(std::equal(first.begin(), first.end(), buffer.begin()) &&
+              std::equal(second.begin(), second.end(), buffer.begin() + 64));
+  // A packet larger than the remaining space: SIZE_ERR, the fitting part is kept.
+  std::array<uint8_t, 50> small{};
+  TEST_ASSERT(f.out.Read({small.data(), small.size()}, false) == ErrorCode::OK);
+  f.out.HostSends(first);
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[1].result == ErrorCode::SIZE_ERR &&
+              rec.list[1].actual == 50);
+  // A ZLP ends a read.
+  TEST_ASSERT(f.out.Read({buffer.data(), buffer.size()}, false) == ErrorCode::OK);
+  f.out.HostSends({});
+  TEST_ASSERT(rec.list.size() == 3 && rec.list[2].result == ErrorCode::OK &&
+              rec.list[2].actual == 0);
+  // Borrowing works again afterwards.
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+}
+
+void TestStall()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  f.in.pending_stop = true;
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot a, b;
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(a, 8, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Stall(false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.IsStalled() && f.in.stalls == 0);
+  f.in.ConfirmStop();
+  TEST_ASSERT(f.in.stalls == 1 && rec.list.size() == 1 &&
+              rec.list[0].result == ErrorCode::ABORTED);
+  // Requests submitted while halted wait for the clear.
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(b, 3, false, false) == ErrorCode::OK);
+  TEST_ASSERT(!f.in.active);
+  TEST_ASSERT(f.in.ClearStall(false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.clear_stalls == 1 && f.in.active && f.in.Last().length == 3);
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[1].result == ErrorCode::OK);
+}
+
+void TestStaleSlotBlocksOverlap()
+{
+  // 256 B: two slots start at 0 and 128. An isochronous 200 B packet needs one slot at
+  // 0..199, which overlaps a stale slot 1 of the old two-slot binding.
+  Block<256> storage;
+  EndpointPool pool{2};
+  MockEndpoint ep{Number::EP1, Direction::IN, storage.Raw()};
+  TEST_ASSERT(pool.Put(&ep) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot a, b;
+  TEST_ASSERT(ep.AcquireSlot(a, false) == ErrorCode::OK && a.index == 0);
+  TEST_ASSERT(ep.AcquireSlot(b, false) == ErrorCode::OK && b.index == 1);
+  ep.ReleaseSlot(a, false);
+  ep.Close(false);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::ISOCHRONOUS, 200}, false) ==
+              ErrorCode::OK);
+  TEST_ASSERT(ep.GetGranted().slot_count == 1 && ep.GetGranted().slot_capacity == 200);
+  Slot c;
+  TEST_ASSERT(ep.AcquireSlot(c, false) == ErrorCode::BUSY);
+  TEST_ASSERT(ep.Submit(b, 1, false, false) == ErrorCode::ABORTED);
+  TEST_ASSERT(ep.AcquireSlot(c, false) == ErrorCode::OK && c.index == 0);
+}
+
+// Random interleavings of holders, owner and hardware on one endpoint. The oracle is
+// the model in verify/usb_ep_model.py: every accepted request completes once, in
+// submission order within a binding; hardware only uses in-flight slots; no slot leaks.
+void TestRandomModel(Direction direction, uint32_t seed)
+{
+  Block<128> storage;
+  EndpointPool pool{2};
+  MockEndpoint ep{Number::EP1, direction, storage.Raw()};
+  TEST_ASSERT(pool.Put(&ep) == ErrorCode::OK);
+  const bool in = direction == Direction::IN;
+  struct Track
+  {
+    std::deque<uint32_t> expected;  // Accepted request ids in submission order.
+    std::vector<Slot> held;
+    std::vector<Slot> stale;
+    uint32_t next_id = 1;
+    uint32_t completed = 0;
+    std::vector<uint32_t> slot_id = std::vector<uint32_t>(2, 0);
+    bool in = true;
+  } track;
+  track.in = in;
+  struct Context
+  {
+    Track* track;
+    MockEndpoint* ep;
+  } ctx{&track, &ep};
+  ep.SetOnComplete(Callback<const Completion&>::Create(
+      [](bool, Context* ctx, const Completion& c)
+      {
+        TEST_ASSERT(!ctx->track->expected.empty());
+        ctx->track->expected.pop_front();
+        ++ctx->track->completed;
+        if (c.slot.Valid())
+        {
+          TEST_ASSERT(!ctx->track->in && c.result == ErrorCode::OK);
+          ctx->track->held.push_back(c.slot);
+        }
+      },
+      &ctx));
+  std::mt19937 rng(seed);
+  bool enabled = false;
+  auto configure = [&]
+  {
+    TEST_ASSERT(ep.Configure({direction, Type::BULK}, false) == ErrorCode::OK);
+    enabled = true;
+  };
+  configure();
+  for (unsigned step = 0; step < 200000; ++step)
+  {
+    const unsigned op = rng() % 100;
+    if (op < 25)
+    {
+      if (in)
+      {
+        Slot slot;
+        const ErrorCode r = ep.AcquireSlot(slot, false);
+        TEST_ASSERT(r == ErrorCode::OK || r == ErrorCode::BUSY ||
+                    (r == ErrorCode::STATE_ERR && !enabled));
+        if (r == ErrorCode::OK) track.held.push_back(slot);
+      }
+      else
+      {
+        const ErrorCode r = ep.Receive(64, false);
+        TEST_ASSERT(r == ErrorCode::OK || r == ErrorCode::BUSY ||
+                    (r == ErrorCode::STATE_ERR && !enabled));
+        if (r == ErrorCode::OK) track.expected.push_back(track.next_id++);
+      }
+    }
+    else if (op < 50 && !track.held.empty())
+    {
+      const size_t pick = rng() % track.held.size();
+      const Slot slot = track.held[pick];
+      track.held.erase(track.held.begin() + static_cast<long>(pick));
+      const bool give_back = rng() % 4 == 0;
+      if (give_back)
+      {
+        ep.ReleaseSlot(slot, false);
+        continue;
+      }
+      // The id is recorded before the call: the owner may complete it inside.
+      track.expected.push_back(track.next_id);
+      const ErrorCode r = in ? ep.Submit(slot, 1 + rng() % 64, rng() % 2, false)
+                             : ep.ReturnSlot(slot, false);
+      if (r == ErrorCode::OK)
+        ++track.next_id;
+      else
+      {
+        TEST_ASSERT(r == ErrorCode::ABORTED);
+        track.expected.pop_back();
+      }
+    }
+    else if (op < 75)
+    {
+      if (!ep.active) continue;
+      if (ep.stop_requested)
+      {
+        if (rng() % 2) ep.ConfirmStop();
+        continue;
+      }
+      // The hardware only ever touches an in-flight slot that no holder has.
+      for (const Slot& slot : track.held)
+        TEST_ASSERT(slot.data.addr_ != ep.Last().address || ep.Last().length == 0);
+      if (in)
+        ep.Complete();
+      else
+        ep.HostSends(Bytes(rng() % 65, static_cast<uint8_t>(step)));
+    }
+    else if (op < 80 && ep.stop_requested)
+    {
+      ep.ConfirmStop();
+    }
+    else if (op < 84)
+    {
+      ep.pending_stop = rng() % 2;
+      if (enabled)
+      {
+        ep.Close(false);
+        enabled = false;
+      }
+    }
+    else if (op < 90)
+    {
+      if (!enabled && !ep.IsStopping()) configure();
+    }
+    else if (op < 92 && enabled && !ep.IsStalled())
+    {
+      ep.pending_stop = rng() % 2;
+      TEST_ASSERT(ep.Stall(false) == ErrorCode::OK);
+    }
+    else if (op < 96 && enabled && ep.IsStalled() && !ep.IsStopping())
+    {
+      TEST_ASSERT(ep.ClearStall(false) == ErrorCode::OK);
+    }
+  }
+  // Drain: stop pending, everything returned, and nothing is lost.
+  if (ep.stop_requested) ep.ConfirmStop();
+  if (enabled && ep.IsStalled()) TEST_ASSERT(ep.ClearStall(false) == ErrorCode::OK);
+  for (unsigned i = 0; i < 16 && ep.active; ++i)
+  {
+    if (in)
+      ep.Complete();
+    else
+      ep.HostSends({});
+  }
+  for (const Slot& slot : track.held) ep.ReleaseSlot(slot, false);
+  track.held.clear();
+  if (enabled) ep.Close(false);
+  if (ep.stop_requested) ep.ConfirmStop();
+  TEST_ASSERT(track.expected.empty());
+  TEST_ASSERT(ep.Configure({direction, Type::BULK}, false) == ErrorCode::OK);
+  if (in)
+  {
+    Slot a, b;
+    TEST_ASSERT(ep.AcquireSlot(a, false) == ErrorCode::OK);
+    TEST_ASSERT(ep.AcquireSlot(b, false) == ErrorCode::OK);
+  }
+  else
+  {
+    TEST_ASSERT(ep.Receive(64, false) == ErrorCode::OK);
+    TEST_ASSERT(ep.Receive(64, false) == ErrorCode::OK);
+  }
+  TEST_ASSERT(track.completed + 0U == track.next_id - 1U);
+  std::printf("random %s seed %u: %u requests, %zu hardware starts\n", in ? "IN" : "OUT",
+              seed, track.completed, ep.starts.size());
+}
+
+// Producers in two threads borrow, fill and submit while a third thread plays the
+// controller IRQ. The owner runs in whichever context wins the service.
+void TestThreadedProducers()
+{
+  Block<256> storage;
+  EndpointPool pool{2};
+  MockEndpoint ep{Number::EP1, Direction::IN, storage.Raw()};
+  TEST_ASSERT(pool.Put(&ep) == ErrorCode::OK);
+  std::mutex guard;
+  pool.SetHardwareGuard(
+      &guard,
+      [](void* context) -> uintptr_t
+      {
+        static_cast<std::mutex*>(context)->lock();
+        return 0U;
+      },
+      [](void* context, uintptr_t) { static_cast<std::mutex*>(context)->unlock(); });
+  std::atomic<uint32_t> completed{0};
+  ep.SetOnComplete(Callback<const Completion&>::Create(
+      [](bool, std::atomic<uint32_t>* count, const Completion& c)
+      {
+        TEST_ASSERT(c.result == ErrorCode::OK);
+        count->fetch_add(1U, std::memory_order_relaxed);
+      },
+      &completed));
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  constexpr uint32_t PER_THREAD = 20000;
+  std::atomic<uint32_t> submitted{0};
+  auto producer = [&](uint8_t seed)
+  {
+    for (uint32_t i = 0; i < PER_THREAD;)
+    {
+      Slot slot;
+      if (ep.AcquireSlot(slot, false) != ErrorCode::OK)
+      {
+        std::this_thread::yield();
+        continue;
+      }
+      std::memset(slot.data.addr_, seed, 32);
+      TEST_ASSERT(ep.Submit(slot, 32, false, false) == ErrorCode::OK);
+      submitted.fetch_add(1U, std::memory_order_relaxed);
+      ++i;
+    }
+  };
+  std::atomic<bool> stop{false};
+  std::thread irq(
+      [&]
+      {
+        while (!stop.load(std::memory_order_acquire) ||
+               completed.load(std::memory_order_relaxed) <
+                   submitted.load(std::memory_order_relaxed))
+        {
+          bool active;
+          {
+            std::lock_guard<std::mutex> lock(ep.lock);
+            active = ep.active;
+          }
+          if (!active)
+          {
+            std::this_thread::yield();
+            continue;
+          }
+          EndpointPool::InterruptScope scope(pool);
+          ep.Complete(true);
+        }
+      });
+  std::thread a(producer, 0x11), b(producer, 0x22);
+  a.join();
+  b.join();
+  stop.store(true, std::memory_order_release);
+  irq.join();
+  TEST_ASSERT(completed.load() == 2U * PER_THREAD);
+}
+
+// ---------------------------------------------------------------------------
+// CDC
+// ---------------------------------------------------------------------------
+
+static constexpr auto TEST_LANGUAGE = DescriptorStrings::MakeLanguagePack(
+    DescriptorStrings::Language::EN_US, "LibXR", "USB tests", "0");
 
 class TestCDC : public CDCUart
 {
@@ -135,35 +870,28 @@ class TestCDC : public CDCUart
   using CDCUart::UnbindEndpoints;
 };
 
-std::vector<uint8_t> Bytes(size_t size, uint8_t seed)
+struct CDCFixture : Fixture
 {
-  std::vector<uint8_t> data(size);
-  for (size_t i = 0; i != size; ++i) data[i] = static_cast<uint8_t>(seed + i);
-  return data;
-}
-
-void CheckData(const MockEndpoint& ep, const std::vector<uint8_t>& expected)
-{
-  std::vector<uint8_t> data;
-  for (const auto& packet : ep.sent)
-    data.insert(data.end(), packet.begin(), packet.end());
-  if (data != expected)
-  {
-    size_t offset = 0;
-    while (offset < data.size() && offset < expected.size() &&
-           data[offset] == expected[offset])
-      ++offset;
-    std::fprintf(stderr, "wire mismatch at %zu: actual=%zu expected=%zu\n", offset,
-                 data.size(), expected.size());
-  }
-  TEST_ASSERT(data == expected);
-}
-
-void TestCDCPrewriteAndZero()
-{
-  Fixture f;
   TestCDC cdc;
-  cdc.BindEndpoints(f.pool, 0, false);
+  DeviceComposition composition;  // Connects the class to the pool's service.
+  explicit CDCFixture(size_t receive = 128)
+      : cdc(receive), composition(pool, {&TEST_LANGUAGE}, {{&cdc}})
+  {
+    // Stand-in for DeviceCore's class-service dispatch.
+    pool.SetControlHandler(Callback<uint32_t>::Create(
+        [](bool in_isr, TestCDC* cdc, uint32_t events)
+        {
+          if (events & EndpointPool::CLASS_EVENT) cdc->OnService(in_isr);
+        },
+        &cdc));
+    pool.SetDataEnabled(true, false);
+  }
+};
+
+void TestCDCWrite()
+{
+  CDCFixture f;
+  f.cdc.BindEndpoints(f.pool, 0, false);
   unsigned finished = 0;
   auto complete = Callback<ErrorCode>::Create(
       [](bool, unsigned* count, ErrorCode result)
@@ -173,193 +901,114 @@ void TestCDCPrewriteAndZero()
       },
       &finished);
   WriteOperation op(complete);
-  auto bytes = Bytes(150, 7);
-  TEST_ASSERT(cdc.Write({bytes.data(), bytes.size()}, op) == ErrorCode::OK);
-  TEST_ASSERT(f.in.starts.size() == 1 && f.in.GetActiveLength() == 64);
-  TEST_ASSERT(finished == 0);
+  const auto bytes = Bytes(150, 7);
+  TEST_ASSERT(f.cdc.Write({bytes.data(), bytes.size()}, op) == ErrorCode::OK);
+  // Both slots are filled at once; the second waits behind the first.
+  TEST_ASSERT(f.in.starts.size() == 1 && f.in.Last().length == 64 && finished == 0);
   f.in.Complete();
-  TEST_ASSERT(f.in.starts.size() == 2 && f.in.GetActiveLength() == 22);
-  TEST_ASSERT(finished == 1);
+  TEST_ASSERT(f.in.Last().length == 64);
   f.in.Complete();
+  TEST_ASSERT(f.in.Last().length == 22 && finished == 1);
   f.in.Complete();
-  TEST_ASSERT(f.in.GetState() == State::IDLE && f.in.starts.size() == 3);
-  CheckData(f.in, bytes);
+  TEST_ASSERT(!f.in.active && Wire(f.in) == bytes);
 
-  auto full = Bytes(64, 31);
-  TEST_ASSERT(cdc.Write({full.data(), full.size()}, op) == ErrorCode::OK);
+  // A full packet with nothing behind it carries its ZLP.
+  f.in.sent.clear();
+  const auto full = Bytes(64, 31);
+  TEST_ASSERT(f.cdc.Write({full.data(), full.size()}, op) == ErrorCode::OK);
   f.in.Complete();
-  TEST_ASSERT(f.in.GetState() == State::BUSY && f.in.starts.back().length == 0);
-  auto later = Bytes(17, 84);
-  TEST_ASSERT(cdc.Write({later.data(), later.size()}, op) == ErrorCode::OK);
-  TEST_ASSERT(finished == 3);  // Stable PREPARED data can finish during the ZLP.
-  TEST_ASSERT(f.in.GetActiveLength() == 17 && f.in.starts.back().length == 0);
+  TEST_ASSERT(f.in.active && f.in.Last().length == 0);
+  // Data written during the ZLP follows it.
+  const auto later = Bytes(17, 84);
+  TEST_ASSERT(f.cdc.Write({later.data(), later.size()}, op) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Last().length == 0);
   f.in.Complete();
-  TEST_ASSERT(f.in.starts.back().length == 17);
+  TEST_ASSERT(f.in.Last().length == 17);
   f.in.Complete();
-  TEST_ASSERT(f.in.GetState() == State::IDLE && finished == 3);
-}
+  TEST_ASSERT(!f.in.active && finished == 3);
 
-void TestLateWriteAndCallbackReentry()
-{
-  Fixture f;
-  TestCDC cdc;
-  cdc.BindEndpoints(f.pool, 0, false);
-  auto a = Bytes(64, 1), b = Bytes(23, 99);
-  WriteOperation plain;
-  TEST_ASSERT(cdc.Write({a.data(), a.size()}, plain) == ErrorCode::OK);
-  TEST_ASSERT(f.in.GetActiveLength() == 0);
-  TEST_ASSERT(cdc.Write({b.data(), b.size()}, plain) == ErrorCode::OK);
-  TEST_ASSERT(f.in.GetActiveLength() == b.size());
-  f.in.Complete();
-  f.in.Complete();
-  TEST_ASSERT(f.in.GetState() == State::IDLE);  // Short B suppresses A's old tail.
-  std::vector<uint8_t> expected = a;
-  expected.insert(expected.end(), b.begin(), b.end());
-  CheckData(f.in, expected);
-
+  // A write issued from its own completion callback is accepted and sent.
   struct Context
   {
     TestCDC* cdc;
-    std::vector<uint8_t>* next;
-    WriteOperation* op;
+    const std::vector<uint8_t>* next;
     unsigned called;
   };
-  Context ctx{&cdc, &b, &plain, 0};
+  Context ctx{&f.cdc, &later, 0};
   auto recursive_callback = Callback<ErrorCode>::Create(
       [](bool in_isr, Context* ctx, ErrorCode result)
       {
         TEST_ASSERT(result == ErrorCode::OK);
         ++ctx->called;
-        TEST_ASSERT(ctx->cdc->Write({ctx->next->data(), ctx->next->size()}, *ctx->op,
+        WriteOperation plain;
+        TEST_ASSERT(ctx->cdc->Write({ctx->next->data(), ctx->next->size()}, plain,
                                     in_isr) == ErrorCode::OK);
       },
       &ctx);
   WriteOperation recursive(recursive_callback);
-  TEST_ASSERT(cdc.Write({a.data(), a.size()}, recursive) == ErrorCode::OK);
-  TEST_ASSERT(ctx.called == 1 && f.in.GetActiveLength() == b.size());
-  f.in.Complete();
-  f.in.Complete();
-  TEST_ASSERT(f.in.GetState() == State::IDLE);
+  f.in.sent.clear();
+  TEST_ASSERT(f.cdc.Write({full.data(), full.size()}, recursive) == ErrorCode::OK);
+  TEST_ASSERT(ctx.called == 1);
+  while (f.in.active) f.in.Complete();
+  auto expected = full;
+  expected.insert(expected.end(), later.begin(), later.end());
+  TEST_ASSERT(Wire(f.in) == expected);
 }
 
-void TestExactCompletionDuringFill()
+void TestCDCReceiveBackpressure()
 {
-  Fixture f;
-  f.in.Configure({Direction::IN, Type::BULK, 64});
-  struct Producer
-  {
-    MockEndpoint* ep;
-    unsigned fills = 0, completions = 0;
-    bool inject = true;
-  } p{&f.in};
-  f.in.SetOnTxFill(Callback<Endpoint::TxFill&>::Create(
-      [](bool, Producer* p, Endpoint::TxFill& fill)
-      {
-        if (p->fills == 3) return;
-        std::memset(fill.Buffer().addr_, ++p->fills, 64);
-        fill.SetSize(64);
-        if (p->fills == 2 && p->inject)
-        {
-          p->inject = false;
-          p->ep->Complete();  // IRQ while the second producer callback still owns USB.
-          TEST_ASSERT(p->completions == 0);
-        }
-      },
-      &p));
-  f.in.SetOnTransferCompleteCallback(Callback<ConstRawData&>::Create(
-      [](bool, Producer* p, ConstRawData&) { ++p->completions; }, &p));
-  f.in.RequestTx();
-  TEST_ASSERT(p.fills == 3 && p.completions == 1 && f.in.starts.size() == 2);
-  f.in.Complete();
-  f.in.Complete();
-  TEST_ASSERT(p.completions == 3 && f.in.GetState() == State::IDLE);
-}
-
-void TestReceiveRetentionAndSmallReadQueue()
-{
-  Fixture f;
-  TestCDC cdc(16);
-  cdc.BindEndpoints(f.pool, 0, false);
+  CDCFixture f(16);
+  f.cdc.BindEndpoints(f.pool, 0, false);
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   const auto packet = Bytes(64, 19);
-  f.out.Receive(packet);
-  TEST_ASSERT(f.out.GetState() == State::RESULT);
-  TEST_ASSERT(f.out.starts.size() == 1);  // No rearm while unread data remains.
+  f.out.HostSends(packet);
+  // The second slot is armed; the lease stays with CDC until the reader drains it.
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 2);
   std::vector<uint8_t> received;
   ReadOperation op;
   for (unsigned i = 0; i < 4; ++i)
   {
     std::array<uint8_t, 16> data{};
-    TEST_ASSERT(cdc.Read({data.data(), data.size()}, op) == ErrorCode::OK);
+    TEST_ASSERT(f.cdc.Read({data.data(), data.size()}, op) == ErrorCode::OK);
     received.insert(received.end(), data.begin(), data.end());
   }
   TEST_ASSERT(received == packet);
-  TEST_ASSERT(f.out.GetState() == State::BUSY && f.out.starts.size() == 2);
+  // Drained lease returned and rearmed behind the armed slot.
+  f.out.HostSends(Bytes(3, 1));
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 3);
 }
 
-void TestResetWhileFilling()
+void TestCDCRebind()
 {
-  Fixture f;
-  f.in.Configure({Direction::IN, Type::BULK, 64});
-  f.pool.SetControlHandler(Callback<uint32_t>::Create(
-      [](bool, MockEndpoint* ep, uint32_t) { ep->Close(); }, &f.in));
-  struct Producer
-  {
-    Fixture* f;
-    unsigned calls = 0;
-  } p{&f};
-  f.in.SetOnTxFill(Callback<Endpoint::TxFill&>::Create(
-      [](bool, Producer* p, Endpoint::TxFill& fill)
-      {
-        ++p->calls;
-        std::memset(fill.Buffer().addr_, 0x61, 32);
-        fill.SetSize(32);
-        p->f->pool.PostControl(1U, true);
-      },
-      &p));
-  f.in.RequestTx();
-  TEST_ASSERT(p.calls == 1 && f.in.GetState() == State::DISABLED && f.in.starts.empty());
+  CDCFixture f;
+  // Written before configuration: sent after binding.
+  const auto early = Bytes(20, 5);
+  WriteOperation plain;
+  TEST_ASSERT(f.cdc.Write({early.data(), early.size()}, plain) == ErrorCode::OK);
+  TEST_ASSERT(f.in.starts.empty());
+  f.cdc.BindEndpoints(f.pool, 0, false);
+  TEST_ASSERT(f.in.active && f.in.Last().length == 20);
+  // A lease held across an unbind is freed; in-flight data is dropped.
+  f.out.HostSends(Bytes(64, 1));
+  f.cdc.UnbindEndpoints(f.pool, false);
+  TEST_ASSERT(!f.in.active && !f.out.active);
+  f.cdc.BindEndpoints(f.pool, 0, false);
+  // Both slots are armed again: one on the wire, one queued behind it.
+  TEST_ASSERT(f.out.starts.size() == 3 && f.out.active);
+  f.out.HostSends(Bytes(1, 0));
+  TEST_ASSERT(f.out.starts.size() == 4 && f.out.active);
+  TEST_ASSERT(f.in.starts.size() == 1);
 }
 
-void TestReceiveSegmentsAndZero()
-{
-  Fixture f;
-  f.out.Configure({Direction::OUT, Type::BULK, 64, 192});
-  unsigned completed = 0;
-  std::vector<uint8_t> received;
-  struct Result
-  {
-    unsigned* count;
-    std::vector<uint8_t>* bytes;
-  } result{&completed, &received};
-  f.out.SetOnTransferCompleteCallback(Callback<ConstRawData&>::Create(
-      [](bool, Result* r, ConstRawData& data)
-      {
-        ++*r->count;
-        if (data.size_)
-          r->bytes->assign(static_cast<const uint8_t*>(data.addr_),
-                           static_cast<const uint8_t*>(data.addr_) + data.size_);
-      },
-      &result));
-  TEST_ASSERT(f.out.ArmReceive(192) == ErrorCode::OK);
-  f.out.Receive(Bytes(64, 1));
-  TEST_ASSERT(completed == 0);
-  f.out.Receive(Bytes(20, 65));
-  TEST_ASSERT(completed == 1 && received.size() == 84 && f.out.HasReceiveResult());
-  const size_t starts = f.out.starts.size();
-  f.out.RequestService();
-  TEST_ASSERT(f.out.starts.size() == starts);
-  TEST_ASSERT(f.out.ArmReceive(64) == ErrorCode::OK);
-  f.out.Receive({});
-  TEST_ASSERT(completed == 2 && f.out.ReceiveResult().size_ == 0);
-}
+// ---------------------------------------------------------------------------
+// Device core and EP0
+// ---------------------------------------------------------------------------
 
 struct BasicCapabilities : FullSpeedCapabilities
 {
   static constexpr bool BOS = false;
   static constexpr bool BUS_TIME = false;
 };
-static_assert(sizeof(DeviceCore<BasicCapabilities>) <
-              sizeof(DeviceCore<FullSpeedCapabilities>));
 
 class ControlClass : public DeviceClass
 {
@@ -392,7 +1041,7 @@ class ControlClass : public DeviceClass
     if (setup.bRequest == 0x70 && (setup.bmRequestType & 0x80U))
       result.InData() = {input.data(), response_size};
     else if (setup.bRequest == 0x71 && !(setup.bmRequestType & 0x80U))
-      result.OutData() = {output.data(), output.size()};
+      return ErrorCode::OK;
     else if (setup.bRequest != 0x72 || setup.wLength != 0U)
       return ErrorCode::NOT_SUPPORT;
     return ErrorCode::OK;
@@ -403,18 +1052,13 @@ class ControlClass : public DeviceClass
     {
       ++data_count;
       last_actual = data.size_;
-      TEST_ASSERT(std::equal(static_cast<const uint8_t*>(data.addr_),
-                             static_cast<const uint8_t*>(data.addr_) + data.size_,
-                             output.begin()));
+      std::memcpy(output.data(), data.addr_, data.size_);
     }
     return reject_data ? ErrorCode::ARG_ERR : ErrorCode::OK;
   }
   void OnControlComplete(bool, const SetupPacket&) override { ++complete_count; }
   void OnControlAbort(bool, const SetupPacket&) override { ++abort_count; }
 };
-
-static constexpr auto TEST_LANGUAGE = DescriptorStrings::MakeLanguagePack(
-    DescriptorStrings::Language::EN_US, "LibXR", "USB tests", "0");
 
 class TestDevice : public DeviceCore<BasicCapabilities>
 {
@@ -437,573 +1081,198 @@ class TestDevice : public DeviceCore<BasicCapabilities>
   }
 };
 
+struct ControlFixture
+{
+  Block<128> in_storage, out_storage;
+  Block<64> ep0_in_storage, ep0_out_storage, comm_storage;
+  EndpointPool pool{4};
+  MockEndpoint in0{Number::EP0, Direction::IN, ep0_in_storage.Raw()};
+  MockEndpoint out0{Number::EP0, Direction::OUT, ep0_out_storage.Raw()};
+  void Setup(TestDevice& device, uint8_t kind, uint8_t request, uint16_t value,
+             uint16_t length, uint16_t index = 0)
+  {
+    // A SETUP cancels the old hardware control transfer independently from software.
+    in0.active = false;
+    out0.active = false;
+    SetupPacket packet{kind, request, value, index, length};
+    device.OnSetupPacket(true, &packet);
+  }
+};
+
 void TestControlTransactions()
 {
-  Fixture f;
-  std::array<uint8_t, 64> in_bytes{}, out_bytes{};
-  MockEndpoint in0(Number::EP0, Direction::IN, {in_bytes.data(), in_bytes.size()});
-  MockEndpoint out0(Number::EP0, Direction::OUT, {out_bytes.data(), out_bytes.size()});
-  f.pool.SetEndpoint0(&in0, &out0);
+  ControlFixture f;
+  f.pool.SetEndpoint0(&f.in0, &f.out0);
   ControlClass klass;
   TestDevice device(f.pool, klass);
   device.Init(false);
   TEST_ASSERT(device.IsInited() && klass.events.empty());
-  auto setup = [&](uint8_t kind, uint8_t request, uint16_t value, uint16_t length)
-  {
-    // USB SETUP cancels the old hardware control transfer independently from
-    // software dispatch. The production core must then cancel old class state.
-    in0.active = false;
-    out0.active = false;
-    SetupPacket packet{kind, request, value, 0, length};
-    device.OnSetupPacket(true, &packet);
-  };
-  setup(0x80, 8, 0, 1);
-  TEST_ASSERT(in0.starts.back().data == std::vector<uint8_t>{0});
-  in0.Complete();
-  out0.Receive({});
-  setup(0, 9, 1, 0);
+  f.Setup(device, 0x80, 8, 0, 1);  // GET_CONFIGURATION
+  TEST_ASSERT(f.in0.Last().data == std::vector<uint8_t>{0});
+  f.in0.Complete();
+  f.out0.HostSends({});
+  f.Setup(device, 0, 9, 1, 0);  // SET_CONFIGURATION 1
   TEST_ASSERT(klass.events.size() == 1 && klass.events.back() == DeviceEvent::CONFIGURED);
-  TEST_ASSERT(in0.active && in0.starts.back().length == 0);
-  in0.Complete();
+  TEST_ASSERT(f.in0.active && f.in0.Last().length == 0);
+  f.in0.Complete();
 
   // Empty IN is data, not "no action" or a STALL.
   klass.response_size = 0;
-  setup(0xa1, 0x70, 0, 8);
-  TEST_ASSERT(in0.active && in0.starts.back().length == 0 && klass.complete_count == 0);
-  in0.Complete();
+  f.Setup(device, 0xa1, 0x70, 0, 8);
+  TEST_ASSERT(f.in0.active && f.in0.Last().length == 0 && klass.complete_count == 0);
+  f.in0.Complete();
   TEST_ASSERT(klass.complete_count == 0);
-  out0.Receive({});
+  f.out0.HostSends({});
   TEST_ASSERT(klass.complete_count == 1);
 
   // Full-packet short response needs one real zero packet, then true status.
   klass.response_size = 64;
   for (unsigned i = 0; i < 64; ++i) klass.input[i] = static_cast<uint8_t>(i);
-  setup(0xa1, 0x70, 0, 128);
-  in0.Complete();
-  TEST_ASSERT(in0.active && in0.starts.back().length == 0);
-  out0.Receive({});
+  f.Setup(device, 0xa1, 0x70, 0, 128);
+  f.in0.Complete();
+  TEST_ASSERT(f.in0.active && f.in0.Last().length == 0);
+  f.out0.HostSends({});
   TEST_ASSERT(klass.complete_count == 1);
-  in0.Complete();
+  f.in0.Complete();
   TEST_ASSERT(klass.complete_count == 2);
 
-  setup(0x21, 0x71, 0, 150);
+  // OUT data stage across packets; the class gets the whole stage once.
+  f.Setup(device, 0x21, 0x71, 0, 150);
   auto a = Bytes(64, 1), b = Bytes(64, 65), c = Bytes(22, 129);
-  out0.Receive(a);
-  out0.Receive(b);
+  f.out0.HostSends(a);
+  f.out0.HostSends(b);
   TEST_ASSERT(klass.data_count == 0 && klass.complete_count == 2);
-  out0.Receive(c);
+  f.out0.HostSends(c);
   TEST_ASSERT(klass.data_count == 1 && klass.last_actual == 150);
-  TEST_ASSERT(klass.complete_count == 2 && in0.active && in0.starts.back().length == 0);
-  in0.Complete();
+  TEST_ASSERT(std::equal(a.begin(), a.end(), klass.output.begin()) &&
+              std::equal(c.begin(), c.end(), klass.output.begin() + 128));
+  TEST_ASSERT(klass.complete_count == 2 && f.in0.active && f.in0.Last().length == 0);
+  f.in0.Complete();
   TEST_ASSERT(klass.complete_count == 3);
 
   // A handler rejection is not acknowledged as a successful status stage.
   klass.reject_data = true;
-  setup(0x21, 0x71, 0, 7);
-  out0.Receive(Bytes(7, 17));
-  TEST_ASSERT(in0.IsStalled() && out0.IsStalled() && klass.complete_count == 3);
+  f.Setup(device, 0x21, 0x71, 0, 7);
+  f.out0.HostSends(Bytes(7, 17));
+  TEST_ASSERT(f.in0.IsStalled() && f.out0.IsStalled() && klass.complete_count == 3);
   TEST_ASSERT(klass.abort_count == 1);
   klass.reject_data = false;
 
-  setup(0x21, 0x71, 0, 150);
-  out0.Receive(a);
-  setup(0x21, 0x72, 0, 0);  // New SETUP cancels unfinished data, not a fake completion.
+  f.Setup(device, 0x21, 0x71, 0, 150);
+  f.out0.HostSends(a);
+  f.Setup(device, 0x21, 0x72, 0, 0);  // New SETUP cancels unfinished data.
   TEST_ASSERT(klass.abort_count == 2 && klass.data_count == 2);
-  in0.Complete();
+  f.in0.Complete();
   TEST_ASSERT(klass.complete_count == 4);
 
-  device.OnSuspend(true);
-  TEST_ASSERT(device.IsInited() && klass.events.back() == DeviceEvent::SUSPENDED);
-  device.OnResume(true);
-  TEST_ASSERT(klass.events.back() == DeviceEvent::RESUMED);
-  setup(0x80, 8, 0, 1);
-  TEST_ASSERT(in0.starts.back().data[0] == 1);
-  in0.Complete();
-  out0.Receive({});
-  device.OnBusReset(true);
-  TEST_ASSERT(device.IsInited() && klass.events.back() == DeviceEvent::RESET);
-  setup(0x80, 8, 0, 1);
-  TEST_ASSERT(in0.starts.back().data[0] == 0);
-  in0.Complete();
-  out0.Receive({});
-}
-
-class TestFlash : public Flash
-{
- public:
-  std::array<uint8_t, 1024> bytes;
-  unsigned erases = 0, writes = 0;
-  std::function<void()> on_erase;
-  TestFlash() : Flash(128, 1, {bytes.data(), bytes.size()}) { bytes.fill(0xff); }
-  ErrorCode Erase(size_t offset, size_t size) override
-  {
-    TEST_ASSERT(offset <= bytes.size() && size <= bytes.size() - offset);
-    ++erases;
-    if (on_erase) on_erase();
-    std::fill(bytes.begin() + offset, bytes.begin() + offset + size, 0xff);
-    return ErrorCode::OK;
-  }
-  ErrorCode Write(size_t offset, ConstRawData data) override
-  {
-    TEST_ASSERT(offset <= bytes.size() && data.size_ <= bytes.size() - offset);
-    ++writes;
-    const auto* source = static_cast<const uint8_t*>(data.addr_);
-    for (size_t i = 0; i < data.size_; ++i) bytes[offset + i] &= source[i];
-    return ErrorCode::OK;
-  }
-  ErrorCode Read(size_t offset, RawData data) override
-  {
-    TEST_ASSERT(offset <= bytes.size() && data.size_ <= bytes.size() - offset);
-    std::memcpy(data.addr_, bytes.data() + offset, data.size_);
-    return ErrorCode::OK;
-  }
-};
-
-void TestDFUWorkerOwnership()
-{
-  TestFlash flash;
-  DfuBootloaderBackend backend(flash, 0, 512, 480, nullptr);
-  auto block = Bytes(80, 9);
-  uint32_t poll = 0;
-  TEST_ASSERT(backend.DfuDownload(0, 0, {block.data(), block.size()}, poll) ==
-              DFUStatusCode::OK);
-  TEST_ASSERT(!backend.RunPendingWork());  // Merely receiving a block cannot erase.
-  backend.DfuAbort(0);
-  backend.AllowPendingWork();
-  TEST_ASSERT(!backend.RunPendingWork() && flash.erases == 0);
-
-  TEST_ASSERT(backend.DfuDownload(0, 0, {block.data(), block.size()}, poll) ==
-              DFUStatusCode::OK);
-  backend.AllowPendingWork();
-  TEST_ASSERT(backend.RunPendingWork() && flash.writes == 1);
-  TEST_ASSERT(backend.HasPendingWork());  // Result publication is not slot release.
-  TEST_ASSERT(backend.DfuDownload(0, 1, {block.data(), block.size()}, poll) ==
-              DFUStatusCode::ERR_NOTDONE);
-  backend.CommitWorkResult();
-  TEST_ASSERT(!backend.HasPendingWork());
-  backend.DfuAbort(0);
-
-  std::atomic<bool> entered{false}, release{false};
-  flash.on_erase = [&]
-  {
-    entered.store(true, std::memory_order_release);
-    while (!release.load(std::memory_order_acquire)) std::this_thread::yield();
-  };
-  TEST_ASSERT(backend.DfuDownload(0, 0, {block.data(), block.size()}, poll) ==
-              DFUStatusCode::OK);
-  backend.AllowPendingWork();
-  const auto old_writes = flash.writes;
-  std::thread worker([&] { TEST_ASSERT(backend.RunPendingWork()); });
-  while (!entered.load(std::memory_order_acquire)) std::this_thread::yield();
-  backend.DfuAbort(0);
-  TEST_ASSERT(backend.HasPendingWork());
-  TEST_ASSERT(backend.DfuDownload(0, 0, {block.data(), block.size()}, poll) ==
-              DFUStatusCode::ERR_NOTDONE);
-  release.store(true, std::memory_order_release);
-  worker.join();
-  TEST_ASSERT(flash.writes == old_writes && backend.HasPendingWork());
-  backend.CommitWorkResult();
-  TEST_ASSERT(!backend.HasPendingWork());
-  flash.on_erase = {};
-
-  // Cancellation after the manifest erase call reaches its safe boundary must
-  // prevent the old session from issuing the following seal write.
-  TestFlash manifest_flash;
-  DfuBootloaderBackend manifest_backend(manifest_flash, 0, 1024, 896, nullptr);
-  auto manifest_block = Bytes(64, 33);
-  TEST_ASSERT(manifest_backend.DfuDownload(
-                  0, 0, {manifest_block.data(), manifest_block.size()}, poll) ==
-              DFUStatusCode::OK);
-  manifest_backend.AllowPendingWork();
-  TEST_ASSERT(manifest_backend.RunPendingWork());
-  manifest_backend.CommitWorkResult();
-  const unsigned writes_before_manifest = manifest_flash.writes;
-  TEST_ASSERT(manifest_backend.DfuManifest(0, poll) == DFUStatusCode::OK);
-  manifest_backend.AllowPendingWork();
-  entered.store(false, std::memory_order_release);
-  release.store(false, std::memory_order_release);
-  manifest_flash.on_erase = [&]
-  {
-    entered.store(true, std::memory_order_release);
-    while (!release.load(std::memory_order_acquire)) std::this_thread::yield();
-  };
-  std::thread manifest_worker(
-      [&] { TEST_ASSERT(manifest_backend.RunPendingWork()); });
-  while (!entered.load(std::memory_order_acquire)) std::this_thread::yield();
-  manifest_backend.DfuAbort(0);
-  release.store(true, std::memory_order_release);
-  manifest_worker.join();
-  TEST_ASSERT(manifest_flash.writes == writes_before_manifest);
-  manifest_backend.CommitWorkResult();
-  TEST_ASSERT(!manifest_backend.HasPendingWork());
-  manifest_flash.on_erase = {};
-
-  // Preserve the prior seal/payload same-erase-block repair.
-  const auto firmware = Bytes(480, 51);
-  unsigned block_number = 0;
-  for (size_t offset = 0; offset < firmware.size(); offset += 128)
-  {
-    const size_t size = std::min<size_t>(128, firmware.size() - offset);
-    TEST_ASSERT(backend.DfuDownload(0, static_cast<uint16_t>(block_number++),
-                                    {firmware.data() + offset, size},
-                                    poll) == DFUStatusCode::OK);
-    backend.AllowPendingWork();
-    TEST_ASSERT(backend.RunPendingWork());
-    backend.CommitWorkResult();
-  }
-  const unsigned erased_before_seal = flash.erases;
-  TEST_ASSERT(backend.DfuManifest(0, poll) == DFUStatusCode::OK);
-  backend.AllowPendingWork();
-  TEST_ASSERT(backend.RunPendingWork());
-  backend.CommitWorkResult();
-  TEST_ASSERT(flash.erases == erased_before_seal);
-  TEST_ASSERT(backend.HasValidImage() && backend.ImageSize() == firmware.size());
-  TEST_ASSERT(std::equal(firmware.begin(), firmware.end(), flash.bytes.begin()));
-  DfuBootloaderBackend recovered(flash, 0, 512, 480, nullptr);
-  TEST_ASSERT(recovered.HasValidImage() && recovered.ImageSize() == firmware.size());
-}
-
-void TestDFUProtocolTimer()
-{
-  // LibXR objects and registered Timer nodes are initialization-lifetime objects.
-  // Keep this fixture alive until process exit, and drive the real Timer manually
-  // rather than create a scheduler thread whose timing would mask the boundaries.
-  Timer::list_ = new LockFreeList();
-  auto* f = new Fixture;
-  auto* in_bytes = new std::array<uint8_t, 64>{};
-  auto* out_bytes = new std::array<uint8_t, 64>{};
-  auto* in0 =
-      new MockEndpoint(Number::EP0, Direction::IN, {in_bytes->data(), in_bytes->size()});
-  auto* out0 = new MockEndpoint(Number::EP0, Direction::OUT,
-                                {out_bytes->data(), out_bytes->size()});
-  f->pool.SetEndpoint0(in0, out0);
-  auto* flash = new TestFlash;
-  auto* launches = new unsigned{0};
-  auto* dfu = new DfuBootloaderClassT<256>(
-      *flash, 0, 1024, 992, +[](void* count) { ++*static_cast<unsigned*>(count); },
-      launches);
-  auto* device = new TestDevice(f->pool, *dfu);
-  device->Init(false);
-  TEST_ASSERT(device->IsInited());
-  auto setup = [&](uint8_t kind, uint8_t request, uint16_t value, uint16_t length)
-  {
-    in0->active = false;
-    out0->active = false;
-    SetupPacket packet{kind, request, value, 0, length};
-    device->OnSetupPacket(true, &packet);
-  };
-  setup(0, 9, 1, 0);
-  in0->Complete();
-  const auto bytes = Bytes(64, 7);
-  setup(0x21, static_cast<uint8_t>(DFURequest::DNLOAD), 0, bytes.size());
-  out0->Receive(bytes);
-  Timer::Refresh();
-  TEST_ASSERT(flash->writes == 0 && flash->erases == 0);
-  in0->Complete();
-  setup(0xa1, static_cast<uint8_t>(DFURequest::GETSTATUS), 0, 6);
-  TEST_ASSERT(in0->starts.back().data[4] == static_cast<uint8_t>(DFUState::DFU_DNBUSY));
-  Timer::Refresh();
-  TEST_ASSERT(flash->writes == 0);
-  in0->Complete();
-  Timer::Refresh();
-  TEST_ASSERT(flash->writes == 0);
-  out0->Receive({});  // Only this actual STATUS OUT makes Flash runnable.
-  Timer::Refresh();
-  TEST_ASSERT(flash->writes == 1 && !dfu->HasPendingWork());
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
-  setup(0xa1, static_cast<uint8_t>(DFURequest::GETSTATUS), 0, 6);
-  TEST_ASSERT(in0->starts.back().data[4] ==
-              static_cast<uint8_t>(DFUState::DFU_DNLOAD_IDLE));
-  in0->Complete();
-  out0->Receive({});
-
-  setup(0x21, static_cast<uint8_t>(DFURequest::DNLOAD), 1, 0);
-  in0->Complete();
-  setup(0xa1, static_cast<uint8_t>(DFURequest::GETSTATUS), 0, 6);
-  TEST_ASSERT(in0->starts.back().data[4] == static_cast<uint8_t>(DFUState::DFU_MANIFEST));
-  in0->Complete();
-  out0->Receive({});
-  Timer::Refresh();
-  TEST_ASSERT(dfu->HasValidImage() && *launches == 0);
-  std::this_thread::sleep_for(std::chrono::milliseconds(55));
-  setup(0xa1, static_cast<uint8_t>(DFURequest::GETSTATUS), 0, 6);
-  TEST_ASSERT(in0->starts.back().data[4] ==
-              static_cast<uint8_t>(DFUState::DFU_MANIFEST_WAIT_RESET));
-  in0->Complete();
-  TEST_ASSERT(!dfu->TryConsumeAppLaunch(0));
-  out0->Receive({});
-  TEST_ASSERT(*launches == 0);
-  TEST_ASSERT(dfu->TryConsumeAppLaunch(0) && *launches == 1);
-}
-
-class TestHID : public HID<1, 8, 8>
-{
- public:
-  TestHID() : HID(Number::EP1, Number::EP_INVALID, false) {}
-  using HID::BindEndpoints;
-  using HID::SendInputReport;
-  using HID::UnbindEndpoints;
-
- protected:
-  ConstRawData GetReportDesc() override
-  {
-    static const uint8_t descriptor = 0;
-    return {&descriptor, 1};
-  }
-};
-
-void TestHIDStableInput()
-{
-  Fixture f;
-  TestHID hid;
-  hid.BindEndpoints(f.pool, 0, false);
-  auto data = Bytes(8, 30);
-  // Simulate a different current controller owner. The caller's temporary data
-  // disappears before TX_WORK is drained, so a retained pointer would fail.
-  f.pool.SetControlHandler(Callback<uint32_t>::Create(
-      [](bool, TestHID* h, uint32_t)
-      {
-        auto temporary = Bytes(8, 30);
-        TEST_ASSERT(h->SendInputReport({temporary.data(), temporary.size()}) ==
-                    ErrorCode::OK);
-        std::fill(temporary.begin(), temporary.end(), 0xee);
-      },
-      &hid));
-  f.pool.PostControl(1U, false);
-  TEST_ASSERT(f.in.starts.size() == 1 && f.in.starts.back().data == data);
-  TEST_ASSERT(hid.SendInputReport({data.data(), data.size()}) == ErrorCode::BUSY);
-  f.in.Complete();
-  TEST_ASSERT(hid.SendInputReport({data.data(), data.size()}) == ErrorCode::OK);
-  f.in.Complete();
-}
-
-class TestAudio : public UAC1MicrophoneQ<2, 16>
-{
- public:
-  TestAudio() : UAC1MicrophoneQ(Number::EP1, 44100) {}
-  using UAC1MicrophoneQ::BindEndpoints;
-  using UAC1MicrophoneQ::SetAltSetting;
-};
-
-void TestAudioIntegerFrames()
-{
-  Fixture f;
-  f.in.segment_limit = 1024;
-  TestAudio audio;
-  audio.BindEndpoints(f.pool, 0, false);
-  TEST_ASSERT(f.in.GetState() == State::DISABLED);  // Alt0 is genuinely inactive.
-  TEST_ASSERT(audio.SetAltSetting(1, 1) == ErrorCode::OK);
-  for (unsigned i = 0; i < 10; ++i) f.in.Complete();
-  size_t bytes = 0;
-  for (size_t i = 0; i < 10; ++i)
-  {
-    TEST_ASSERT(f.in.sent[i].size() == 176 || f.in.sent[i].size() == 180);
-    bytes += f.in.sent[i].size();
-  }
-  TEST_ASSERT(bytes == 1764 && audio.UnderrunCount() >= 10);
-  TEST_ASSERT(audio.SetAltSetting(1, 0) == ErrorCode::OK);
-}
-
-class TestHighSpeedDevice : public DeviceCore<HighSpeedCapabilities>
-{
- public:
-  TestHighSpeedDevice(EndpointPool& pool, DeviceClass& item)
-      : DeviceCore(pool, USBSpec::USB_2_0, Speed::HIGH,
-                   DeviceDescriptor::PacketSize0::SIZE_64, 0x1209, 0x4321, 0x100,
-                   {&TEST_LANGUAGE}, {{&item}})
-  {
-  }
-  Speed observed = Speed::HIGH;
-  void Start(bool) override {}
-  void Stop(bool) override {}
-
- protected:
-  ErrorCode SetAddress(uint8_t, ControlContext) override { return ErrorCode::OK; }
-  Speed ReadBusSpeed() const override { return observed; }
-};
-
-void TestSpeedProfiles()
-{
-  Fixture f;
-  std::array<uint8_t, 64> a{}, b{};
-  MockEndpoint in0(Number::EP0, Direction::IN, {a.data(), a.size()});
-  MockEndpoint out0(Number::EP0, Direction::OUT, {b.data(), b.size()});
-  f.pool.SetEndpoint0(&in0, &out0);
-  TestCDC cdc;
-  TestHighSpeedDevice device(f.pool, cdc);
-  device.Init(false);
-  TEST_ASSERT(device.IsInited());
-  auto request = [&](uint16_t value, uint16_t length)
-  {
-    in0.active = false;
-    out0.active = false;
-    SetupPacket setup{0x80, 6, value, 0, length};
-    device.OnSetupPacket(true, &setup);
-  };
-  request(0x0600, 10);
-  TEST_ASSERT(in0.starts.back().data.size() == 10 && in0.starts.back().data[1] == 6);
-  in0.Complete();
-  out0.Receive({});
-  request(0x0700, 255);
-  TEST_ASSERT(in0.starts.back().data[1] == 7);
-  while (in0.active) in0.Complete();
-  out0.Receive({});
-  device.observed = Speed::FULL;
-  device.OnBusReset(true);
-  TEST_ASSERT(device.IsInited() && f.pool.GetSpeed() == Speed::FULL);
-  SetupPacket configure{0, 9, 1, 0, 0};
-  device.OnSetupPacket(true, &configure);
-  in0.Complete();
-  TEST_ASSERT(f.in.MaxPacketSize() == 64 && f.out.MaxPacketSize() == 64);
-  request(0x0700, 255);
-  TEST_ASSERT(in0.starts.back().data[1] == 7);
-  while (in0.active) in0.Complete();
-  out0.Receive({});
-}
-
-void TestCrossCoreProducerAndIRQ()
-{
-  Fixture f;
-  std::recursive_mutex hardware;
-  f.pool.SetHardwareGuard(
-      &hardware,
-      +[](void* mutex) -> uintptr_t
-      {
-        static_cast<std::recursive_mutex*>(mutex)->lock();
-        return 0;
-      },
-      +[](void* mutex, uintptr_t)
-      { static_cast<std::recursive_mutex*>(mutex)->unlock(); });
-  TestCDC cdc;
-  cdc.BindEndpoints(f.pool, 0, false);
-  std::atomic<unsigned> finished{0};
-  auto callback = Callback<ErrorCode>::Create(
-      [](bool, std::atomic<unsigned>* count, ErrorCode error)
-      {
-        TEST_ASSERT(error == ErrorCode::OK);
-        count->fetch_add(1, std::memory_order_relaxed);
-      },
-      &finished);
-  WriteOperation op(callback);
-  std::atomic<bool> stop{false};
-  std::thread irq(
-      [&]
-      {
-        while (!stop.load(std::memory_order_acquire))
-        {
-          {
-            EndpointPool::InterruptScope batch(f.pool);
-            if (f.in.active) f.in.Complete(true);
-          }
-          std::this_thread::yield();
-        }
-      });
-  std::vector<uint8_t> expected;
-  for (unsigned i = 0; i < 1000; ++i)
-  {
-    auto packet = Bytes(1U + (i * 17U) % 173U, static_cast<uint8_t>(i));
-    ErrorCode result;
-    do
-    {
-      result = cdc.Write({packet.data(), packet.size()}, op);
-      TEST_ASSERT(result == ErrorCode::OK || result == ErrorCode::FULL);
-      if (result != ErrorCode::OK) std::this_thread::yield();
-    } while (result != ErrorCode::OK);
-    expected.insert(expected.end(), packet.begin(), packet.end());
-    std::fill(packet.begin(), packet.end(), 0xa7);  // Input lifetime ends immediately.
-  }
-  // IDLE is temporarily observable while the owner retires one transfer before
-  // promoting the prepared one. Completion of the last Write is also only stable
-  // storage admission. Neither is a cross-core "all bytes on wire" barrier.
-  while (finished.load(std::memory_order_acquire) != 1000U ||
-         f.in.wire_bytes.load(std::memory_order_acquire) < expected.size())
-    std::this_thread::yield();
-  stop.store(true, std::memory_order_release);
-  irq.join();
-  while (f.in.active)
+  // SET_ADDRESS: status completion applies the address even when the next SETUP
+  // arrives in the same IRQ batch.
+  device.address_phases.clear();
+  f.Setup(device, 0, 9, 0, 0);  // Deconfigure first; SET_ADDRESS needs config 0.
+  f.in0.Complete();
+  f.Setup(device, 0, 5, 7, 0);
+  TEST_ASSERT(f.in0.active && f.in0.Last().length == 0);
   {
     EndpointPool::InterruptScope batch(f.pool);
-    f.in.Complete(true);
+    f.in0.Complete(true);
+    SetupPacket next{0x80, 8, 0, 0, 1};
+    device.OnSetupPacket(true, &next);
   }
-  CheckData(f.in, expected);
+  TEST_ASSERT(device.address_phases.size() == 3 &&
+              device.address_phases.back() == ControlContext::STATUS_IN_COMPLETE);
+  TEST_ASSERT(f.in0.active && f.in0.Last().data == std::vector<uint8_t>{0});
+
+  device.OnSuspend(true);
+  TEST_ASSERT(device.IsInited());
+  device.OnResume(true);
+  device.OnBusReset(true);
+  TEST_ASSERT(device.IsInited() && klass.events.back() == DeviceEvent::RESET);
 }
 
-class TestSWD : public Debug::Swd
+// A data endpoint whose stop needs a hardware event holds back the reset and the
+// SET_CONFIGURATION status stage until the stop is confirmed.
+void TestStopHoldsLifecycle()
 {
- public:
-  unsigned clock_changes = 0;
-  void Close() override {}
-  ErrorCode SetClockHz(uint32_t) override
-  {
-    ++clock_changes;
-    return ErrorCode::OK;
-  }
-  ErrorCode LineReset() override { return ErrorCode::OK; }
-  ErrorCode EnterSwd() override { return ErrorCode::OK; }
-  ErrorCode Transfer(const Debug::SwdProtocol::Request&,
-                     Debug::SwdProtocol::Response&) override
-  {
-    return ErrorCode::OK;
-  }
-  void IdleClocks(uint32_t) override {}
-  ErrorCode SeqWriteBits(uint32_t, const uint8_t*) override { return ErrorCode::OK; }
-  ErrorCode SeqReadBits(uint32_t, uint8_t*) override { return ErrorCode::OK; }
-};
-class TestDAP1 : public DapLinkV1Class<TestSWD>
-{
- public:
-  explicit TestDAP1(TestSWD& swd) : DapLinkV1Class(Number::EP1, Number::EP2, swd) {}
-  using DapLinkV1Class::BindEndpoints;
-};
-class TestDAP2 : public DapLinkV2Class<TestSWD, 64, 4, 64>
-{
- public:
-  explicit TestDAP2(TestSWD& swd) : DapLinkV2Class(Number::EP1, Number::EP2, swd) {}
-  using DapLinkV2Class::BindEndpoints;
-};
+  ControlFixture f;
+  MockEndpoint in{Number::EP1, Direction::IN, f.in_storage.Raw()};
+  MockEndpoint out{Number::EP2, Direction::OUT, f.out_storage.Raw()};
+  MockEndpoint comm{Number::EP3, Direction::IN, f.comm_storage.Raw()};
+  TEST_ASSERT(f.pool.Put(&in) == ErrorCode::OK);
+  TEST_ASSERT(f.pool.Put(&out) == ErrorCode::OK);
+  TEST_ASSERT(f.pool.Put(&comm) == ErrorCode::OK);
+  f.pool.SetEndpoint0(&f.in0, &f.out0);
+  TestCDC cdc;
+  TestDevice device(f.pool, cdc);
+  device.Init(false);
+  f.Setup(device, 0, 9, 1, 0);
+  f.in0.Complete();
+  TEST_ASSERT(out.active && out.Last().length == 64);
 
-template <typename DAP>
-void TestDAPResponseOwnership()
-{
-  Fixture f;
-  TestSWD swd;
-  DAP dap(swd);
-  dap.BindEndpoints(f.pool, 0, false);
-  const unsigned initial = swd.clock_changes;
-  // DAP_SWJ_Clock causes an observable side effect; every received command must
-  // execute once even when Endpoint immediately asks for a second prewrite.
-  const std::vector<uint8_t> command{0x11, 0x40, 0x42, 0x0f, 0};
-  TEST_ASSERT(f.out.active);
-  f.out.Receive(command);
-  TEST_ASSERT(swd.clock_changes == initial + 1 && f.in.active);
-  TEST_ASSERT(f.out.active);
-  f.out.Receive(command);
-  TEST_ASSERT(swd.clock_changes == initial + 2 && f.in.GetActiveLength() != 0);
-  f.in.Complete();
-  TEST_ASSERT(swd.clock_changes == initial + 2 && f.in.active);
-  f.in.Complete();
-  TEST_ASSERT(swd.clock_changes == initial + 2 && f.in.GetState() == State::IDLE);
+  // SET_LINE_CODING with its data stage, then GET_LINE_CODING.
+  const uint8_t coding[7] = {0x00, 0xC2, 0x01, 0x00, 0, 0, 8};  // 115200 8N1
+  f.Setup(device, 0x21, 0x20, 0, 7, 0);
+  f.out0.HostSends(std::vector<uint8_t>(coding, coding + 7));
+  TEST_ASSERT(f.in0.active && f.in0.Last().length == 0 && !f.in0.IsStalled());
+  f.in0.Complete();
+  f.Setup(device, 0xA1, 0x21, 0, 7, 0);
+  TEST_ASSERT(f.in0.Last().data == std::vector<uint8_t>(coding, coding + 7));
+  f.in0.Complete();
+  f.out0.HostSends({});
+
+  // Bulk IN in flight with a slow stop; the host resets the bus.
+  const auto bytes = Bytes(40, 3);
+  WriteOperation plain;
+  TEST_ASSERT(cdc.Write({bytes.data(), bytes.size()}, plain) == ErrorCode::OK);
+  TEST_ASSERT(in.active);
+  in.pending_stop = true;
+  device.OnBusReset(true);
+  TEST_ASSERT(in.stop_requested && !device.IsInited());
+  // SETUP arriving meanwhile waits.
+  SetupPacket get_config{0x80, 8, 0, 0, 1};
+  device.OnSetupPacket(true, &get_config);
+  TEST_ASSERT(!device.IsInited() && !f.in0.active);
+  in.ConfirmStop();
+  TEST_ASSERT(device.IsInited() && in.closes >= 1);
+  in.pending_stop = false;
+
+  // Configure again; in flight again; SET_CONFIGURATION 0 with a slow stop answers
+  // only after the stop is confirmed.
+  f.Setup(device, 0, 9, 1, 0);
+  f.in0.Complete();
+  TEST_ASSERT(cdc.Write({bytes.data(), bytes.size()}, plain) == ErrorCode::OK);
+  TEST_ASSERT(in.active);
+  in.pending_stop = true;
+  f.Setup(device, 0, 9, 0, 0);
+  TEST_ASSERT(in.stop_requested && !f.in0.active);
+  in.ConfirmStop();
+  TEST_ASSERT(f.in0.active && f.in0.Last().length == 0);
+  f.in0.Complete();
 }
 }  // namespace
 
 int main()
 {
-  TestCDCPrewriteAndZero();
-  TestLateWriteAndCallbackReentry();
-  TestExactCompletionDuringFill();
-  TestReceiveRetentionAndSmallReadQueue();
-  TestResetWhileFilling();
-  TestReceiveSegmentsAndZero();
+  TestGeometry();
+  TestInBorrowOrder();
+  TestZeroLengthTailAndShort();
+  TestOutLease();
+  TestCloseMakesLentSlotsStale();
+  TestCloseWithPendingStop();
+  TestLateCompletionDropped();
+  TestCopyWrite();
+  TestCopyRead();
+  TestStall();
+  TestStaleSlotBlocksOverlap();
+  for (uint32_t seed = 1; seed <= 4; ++seed)
+  {
+    TestRandomModel(Direction::IN, seed);
+    TestRandomModel(Direction::OUT, seed);
+  }
+  TestThreadedProducers();
+  TestCDCWrite();
+  TestCDCReceiveBackpressure();
+  TestCDCRebind();
   TestControlTransactions();
-  TestDFUWorkerOwnership();
-  TestDFUProtocolTimer();
-  TestHIDStableInput();
-  TestAudioIntegerFrames();
-  TestSpeedProfiles();
-  TestCrossCoreProducerAndIRQ();
-  TestDAPResponseOwnership<TestDAP1>();
-  TestDAPResponseOwnership<TestDAP2>();
-  std::puts(
-      "USB endpoint/control: prewrite, ZLP, reentry, reset, RX, EP0 stages and lifecycle "
-      "passed");
+  TestStopHoldsLifecycle();
+  std::puts("USB endpoint slots, copy mode, stop, CDC and EP0 lifecycle passed");
 }
