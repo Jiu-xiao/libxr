@@ -1,7 +1,13 @@
 #pragma once
 
-#include "double_buffer.hpp"
 #include "main.h"
+
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+// OTG (DWC2) controllers: register runtime without the PCD handle.
+#include "stm32_usb_otg.hpp"
+#else
+
+#include "double_buffer.hpp"
 #include "stm32_usb.hpp"
 #include "stm32_usb_ep.hpp"
 #include "usb/core/ep_pool.hpp"
@@ -14,11 +20,7 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd);
 
 namespace LibXR
 {
-#if defined(USB_OTG_HS)
-using STM32USBDeviceCore = USB::DeviceCore<USB::HighSpeedCapabilities>;
-#else
 using STM32USBDeviceCore = USB::DeviceCore<USB::FullSpeedCapabilities>;
-#endif
 
 /**
  * @brief STM32 USB 设备核心实现 / STM32 USB device core implementation
@@ -69,14 +71,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
   {
     USB::EndpointPool::HardwareScope hardware(this);
     map_[id_] = this;
-    if (WantsBusTime())
-    {
-#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
-      hpcd_->Instance->GINTMSK |= USB_OTG_GINTMSK_SOFM;
-#else
-      hpcd_->Instance->CNTR |= USB_CNTR_SOFM;
-#endif
-    }
+    if (WantsBusTime()) hpcd_->Instance->CNTR |= USB_CNTR_SOFM;
     HAL_PCD_Start(hpcd_);
   }
   void Stop(bool in_isr) override;
@@ -84,14 +79,7 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
   void OnStopTimeout(bool in_isr) override;
   void OnStopsSettled() override;
 
-  USB::Speed ReadBusSpeed() const override
-  {
-#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
-    return hpcd_->Init.speed == PCD_SPEED_HIGH ? USB::Speed::HIGH : USB::Speed::FULL;
-#else
-    return USB::Speed::FULL;
-#endif
-  }
+  USB::Speed ReadBusSpeed() const override { return USB::Speed::FULL; }
 
   static STM32USBDevice* FindDevice(PCD_HandleTypeDef* hpcd)
   {
@@ -107,85 +95,6 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
   /// The link must wrap HAL_PCD_IRQHandler (LibXR adds -Wl,--wrap=HAL_PCD_IRQHandler).
   static void RequireInterruptWrap();
 };
-
-#if defined(USB_OTG_FS)
-#if !defined(USB_OTG_FS_TOTAL_FIFO_SIZE)
-#if defined(STM32H7) || defined(STM32N6)
-#define USB_OTG_FS_TOTAL_FIFO_SIZE 4096
-#else
-#define USB_OTG_FS_TOTAL_FIFO_SIZE 1280
-#endif
-#endif
-/**
- * @brief STM32 OTG FS 设备实现 / STM32 OTG FS device implementation
- */
-class STM32USBDeviceOtgFS : public STM32USBDevice
-{
- public:
-  /**
-   * @brief OTG FS IN 端点配置 / OTG FS IN endpoint configuration
-   */
-  struct EPInConfig
-  {
-    LibXR::RawData buffer;
-    size_t fifo_size;
-  };
-
-  /**
-   * @brief 构造 OTG FS 设备对象 / Construct OTG FS device object
-   */
-  STM32USBDeviceOtgFS(
-      PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
-      const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
-      const std::initializer_list<EPInConfig> TX_EP_CFGS,
-      USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
-      uint16_t bcd,
-      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
-      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS,
-      ConstRawData uid = {nullptr, 0});
-
-  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
-};
-
-#endif
-
-#if defined(USB_OTG_HS)
-#if !defined(USB_OTG_HS_TOTAL_FIFO_SIZE)
-#define USB_OTG_HS_TOTAL_FIFO_SIZE 4096
-#endif
-/**
- * @brief STM32 OTG HS 设备实现 / STM32 OTG HS device implementation
- */
-class STM32USBDeviceOtgHS : public STM32USBDevice
-{
- public:
-  /**
-   * @brief OTG HS IN 端点配置 / OTG HS IN endpoint configuration
-   */
-  struct EPInConfig
-  {
-    LibXR::RawData buffer;
-    size_t fifo_size;
-  };
-
-  /**
-   * @brief 构造 OTG HS 设备对象 / Construct OTG HS device object
-   */
-  STM32USBDeviceOtgHS(
-      PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
-      const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
-      const std::initializer_list<EPInConfig> TX_EP_CFGS,
-      USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
-      uint16_t bcd,
-      const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
-      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-          CONFIGS,
-      ConstRawData uid = {nullptr, 0});
-
-  ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
-};
-#endif
 
 #if defined(USB_BASE) || defined(USB_DRD_FS)
 
@@ -327,4 +236,6 @@ class STM32USBDeviceDevFs : public STM32USBDevice
 #endif
 
 }  // namespace LibXR
+#endif
+
 #endif

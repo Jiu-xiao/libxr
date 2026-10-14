@@ -1,7 +1,6 @@
 #include "stm32_usb_dev.hpp"
 
-#include "stm32_dcache.hpp"
-#if defined(HAL_PCD_MODULE_ENABLED)
+#if defined(HAL_PCD_MODULE_ENABLED) && !(defined(USB_OTG_FS) || defined(USB_OTG_HS))
 
 using namespace LibXR;
 
@@ -64,11 +63,7 @@ void STM32USBDevice::OnStopsSettled()
 {
   if (WantsBusTime()) return;
   USB::EndpointPool::HardwareScope hardware(this);
-#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
-  hpcd_->Instance->GINTMSK &= ~USB_OTG_GINTMSK_SOFM;
-#else
   hpcd_->Instance->CNTR &= ~USB_CNTR_SOFM;
-#endif
 }
 
 void STM32USBDevice::RequireInterruptWrap()
@@ -82,18 +77,7 @@ extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef* hpcd)
 {
   auto* usb = STM32USBDevice::FindDevice(hpcd);
   if (!usb) return;
-#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
-  auto* device = reinterpret_cast<USB_OTG_DeviceTypeDef*>(
-      reinterpret_cast<uintptr_t>(hpcd->Instance) + USB_OTG_DEVICE_BASE);
-  const uint32_t position = (device->DSTS & USB_OTG_DSTS_FNSOF) >> 8U;
-  if (hpcd->Init.speed == PCD_SPEED_HIGH)
-    usb->OnSof(true, static_cast<uint16_t>(position >> 3U),
-               static_cast<uint8_t>(position & 7U));
-  else
-    usb->OnSof(true, static_cast<uint16_t>(position & 0x7ffU));
-#else
   usb->OnSof(true, static_cast<uint16_t>(hpcd->Instance->FNR & 0x7ffU));
-#endif
 }
 
 extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
@@ -110,11 +94,6 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef* hpcd)
   if (!usb)
   {
     return;
-  }
-
-  if (STM32USBUsesDma(hpcd))
-  {
-    STM32_InvalidateDCacheByAddr(hpcd->Setup, sizeof(USB::SetupPacket));
   }
 
   usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket*>(hpcd->Setup));
@@ -141,172 +120,6 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef* hpcd)
 extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
 
 extern "C" void HAL_PCD_DisconnectCallback(PCD_HandleTypeDef* hpcd) { UNUSED(hpcd); }
-
-#if (defined(USB_OTG_FS))
-
-STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
-    PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
-    const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
-    const std::initializer_list<EPInConfig> TX_EP_CFGS,
-    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
-    uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-        CONFIGS,
-    ConstRawData uid)
-    : STM32USBDevice(hpcd, STM32_USB_OTG_FS, RX_EP_CFGS.size() + TX_EP_CFGS.size(),
-                     packet_size, vid, pid, bcd, LANG_LIST, CONFIGS, uid)
-{
-  ASSERT(RX_EP_CFGS.size() > 0 && RX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_FS_MAX_SIZE);
-  ASSERT(TX_EP_CFGS.size() > 0 && TX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_FS_MAX_SIZE);
-  ASSERT(64 * RX_EP_CFGS.size() <= rx_fifo_size);
-  // Holds one received packet of an abandoned OUT request.
-  const size_t scratch = LibXR::min<size_t>(rx_fifo_size, 1024U);
-  STM32Endpoint::SetScratch(id_, {new uint8_t[scratch], scratch});
-
-  auto rx_cfgs_itr = RX_EP_CFGS.begin();
-  auto tx_cfgs_itr = TX_EP_CFGS.begin();
-
-  // EP0 OUT 先设置 GRXFSIZ；HAL_PCDEx_SetTxFiFo(0) 以 GRXFSIZ 作为 TX0 起始地址。
-  // EP0 OUT sets GRXFSIZ first; HAL_PCDEx_SetTxFiFo(0) uses GRXFSIZ as the TX0 start.
-  auto ep0_out =
-      new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
-                        USB::Endpoint::Direction::OUT, rx_fifo_size, (*rx_cfgs_itr));
-
-  auto ep0_in = new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
-                                  USB::Endpoint::Direction::IN, (*tx_cfgs_itr).fifo_size,
-                                  (*tx_cfgs_itr).buffer);
-
-  USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
-
-  rx_cfgs_itr++;
-  tx_cfgs_itr++;
-
-  USB::Endpoint::EPNumber rx_ep_index = USB::Endpoint::EPNumber::EP1;
-
-  size_t fifo_used_size = rx_fifo_size;
-
-  for (; rx_cfgs_itr != RX_EP_CFGS.end(); rx_cfgs_itr++)
-  {
-    auto ep = new STM32Endpoint(rx_ep_index, id_, hpcd_, USB::Endpoint::Direction::OUT,
-                                rx_fifo_size, (*rx_cfgs_itr));
-    USB::EndpointPool::Put(ep);
-    rx_ep_index = USB::Endpoint::NextEPNumber(rx_ep_index);
-  }
-
-  USB::Endpoint::EPNumber tx_ep_index = USB::Endpoint::EPNumber::EP1;
-
-  for (; tx_cfgs_itr != TX_EP_CFGS.end(); tx_cfgs_itr++)
-  {
-    auto ep = new STM32Endpoint(tx_ep_index, id_, hpcd_, USB::Endpoint::Direction::IN,
-                                (*tx_cfgs_itr).fifo_size, (*tx_cfgs_itr).buffer);
-    USB::EndpointPool::Put(ep);
-    tx_ep_index = USB::Endpoint::NextEPNumber(tx_ep_index);
-    fifo_used_size += (*tx_cfgs_itr).fifo_size;
-  }
-
-  if (fifo_used_size > USB_OTG_FS_TOTAL_FIFO_SIZE)
-  {
-    ASSERT(false);
-  }
-}
-
-ErrorCode STM32USBDeviceOtgFS::SetAddress(uint8_t address, USB::ControlContext context)
-{
-  HAL_StatusTypeDef ans = HAL_OK;
-
-  if (context == USB::ControlContext::STATUS_IN_ARMED)
-  {
-    ans = HAL_PCD_SetAddress(hpcd_, address);
-  }
-  return (ans == HAL_OK) ? ErrorCode::OK : ErrorCode::FAILED;
-}
-
-#endif
-
-#if (defined(USB_OTG_HS))
-
-STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
-    PCD_HandleTypeDef* hpcd, size_t rx_fifo_size,
-    const std::initializer_list<LibXR::RawData> RX_EP_CFGS,
-    const std::initializer_list<EPInConfig> TX_EP_CFGS,
-    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
-    uint16_t bcd,
-    const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
-    const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
-        CONFIGS,
-    ConstRawData uid)
-    : STM32USBDevice(
-          hpcd, STM32_USB_OTG_HS, RX_EP_CFGS.size() + TX_EP_CFGS.size(), packet_size, vid,
-          pid, bcd, LANG_LIST, CONFIGS, uid,
-          hpcd->Init.speed == PCD_SPEED_HIGH ? USB::Speed::HIGH : USB::Speed::FULL)
-{
-  ASSERT(RX_EP_CFGS.size() > 0 && RX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_HS_MAX_SIZE);
-  ASSERT(TX_EP_CFGS.size() > 0 && TX_EP_CFGS.size() <= STM32Endpoint::EP_OTG_HS_MAX_SIZE);
-  ASSERT(64 * RX_EP_CFGS.size() <= rx_fifo_size);
-  // Holds one received packet of an abandoned OUT request.
-  const size_t scratch = LibXR::min<size_t>(rx_fifo_size, 1024U);
-  STM32Endpoint::SetScratch(id_, {new uint8_t[scratch], scratch});
-
-  auto rx_cfgs_itr = RX_EP_CFGS.begin();
-  auto tx_cfgs_itr = TX_EP_CFGS.begin();
-
-  // EP0 OUT 先设置 GRXFSIZ；HAL_PCDEx_SetTxFiFo(0) 以 GRXFSIZ 作为 TX0 起始地址。
-  // EP0 OUT sets GRXFSIZ first; HAL_PCDEx_SetTxFiFo(0) uses GRXFSIZ as the TX0 start.
-  auto ep0_out =
-      new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
-                        USB::Endpoint::Direction::OUT, rx_fifo_size, (*rx_cfgs_itr));
-
-  auto ep0_in = new STM32Endpoint(USB::Endpoint::EPNumber::EP0, id_, hpcd_,
-                                  USB::Endpoint::Direction::IN, (*tx_cfgs_itr).fifo_size,
-                                  (*tx_cfgs_itr).buffer);
-
-  USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
-
-  rx_cfgs_itr++;
-  tx_cfgs_itr++;
-
-  USB::Endpoint::EPNumber rx_ep_index = USB::Endpoint::EPNumber::EP1;
-
-  size_t fifo_used_size = rx_fifo_size;
-
-  for (; rx_cfgs_itr != RX_EP_CFGS.end(); rx_cfgs_itr++)
-  {
-    auto ep = new STM32Endpoint(rx_ep_index, id_, hpcd_, USB::Endpoint::Direction::OUT,
-                                rx_fifo_size, (*rx_cfgs_itr));
-    USB::EndpointPool::Put(ep);
-    rx_ep_index = USB::Endpoint::NextEPNumber(rx_ep_index);
-  }
-
-  USB::Endpoint::EPNumber tx_ep_index = USB::Endpoint::EPNumber::EP1;
-
-  for (; tx_cfgs_itr != TX_EP_CFGS.end(); tx_cfgs_itr++)
-  {
-    auto ep = new STM32Endpoint(tx_ep_index, id_, hpcd_, USB::Endpoint::Direction::IN,
-                                (*tx_cfgs_itr).fifo_size, (*tx_cfgs_itr).buffer);
-    USB::EndpointPool::Put(ep);
-    tx_ep_index = USB::Endpoint::NextEPNumber(tx_ep_index);
-    fifo_used_size += (*tx_cfgs_itr).fifo_size;
-  }
-
-  if (fifo_used_size > USB_OTG_HS_TOTAL_FIFO_SIZE)
-  {
-    ASSERT(false);
-  }
-}
-
-ErrorCode STM32USBDeviceOtgHS::SetAddress(uint8_t address, USB::ControlContext context)
-{
-  HAL_StatusTypeDef ans = HAL_OK;
-
-  if (context == USB::ControlContext::STATUS_IN_ARMED)
-  {
-    ans = HAL_PCD_SetAddress(hpcd_, address);
-  }
-  return (ans == HAL_OK) ? ErrorCode::OK : ErrorCode::FAILED;
-}
-
-#endif
 
 #if defined(USB_BASE) || defined(USB_DRD_FS)
 STM32USBDeviceDevFs::STM32USBDeviceDevFs(
