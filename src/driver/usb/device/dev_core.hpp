@@ -61,6 +61,11 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   /// Backend-specific software bookkeeping after physical reset, before EP0 open.
   virtual void OnControllerReset() {}
   virtual void OnControlReady() {}
+  /// An endpoint stop has not been confirmed for STOP_FRAME_LIMIT frames. The backend
+  /// resets the controller and confirms every pending stop; the host enumerates again.
+  virtual void OnStopTimeout(bool in_isr) { UNUSED(in_isr); }
+  /// Every endpoint stop is confirmed (frame counting may end).
+  virtual void OnStopsSettled() {}
   virtual Speed ReadBusSpeed() const { return speed_; }
   Speed GetSpeed() const { return speed_; }
 
@@ -74,6 +79,7 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   static constexpr uint32_t TIME_EVENT = EndpointPool::TIME_EVENT;
   static constexpr uint32_t CLASS_EVENT = EndpointPool::CLASS_EVENT;
   static constexpr uint32_t STOP_DONE_EVENT = EndpointPool::STOP_DONE_EVENT;
+  static constexpr uint32_t STOP_TIMEOUT_EVENT = EndpointPool::STOP_TIMEOUT_EVENT;
   static constexpr uint32_t LIFECYCLE_EVENTS = EndpointPool::LIFECYCLE_EVENTS;
 
   void RequestLifecycle(bool in_isr, uint32_t event, bool enabled)

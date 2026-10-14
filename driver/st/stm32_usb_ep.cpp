@@ -149,7 +149,7 @@ ErrorCode STM32Endpoint::ConfigureHardware(const Config& cfg, Granted& granted)
 {
   UNUSED(granted);
   hw_tag_ = 0;
-  SetStopWait(false);
+  SetStopStage(StopStage::NONE);
   const uint16_t packet = cfg.max_packet_size < 8U ? 8U : cfg.max_packet_size;
   return HAL_PCD_EP_Open(hpcd_, HalAddress(), packet, static_cast<uint8_t>(cfg.type)) ==
                  HAL_OK
@@ -161,7 +161,7 @@ void STM32Endpoint::CloseHardware(bool in_isr)
 {
   UNUSED(in_isr);
   hw_tag_ = 0;
-  SetStopWait(false);
+  SetStopStage(StopStage::NONE);
   (void)HAL_PCD_EP_Close(hpcd_, HalAddress());
 }
 
@@ -244,29 +244,46 @@ USB::Endpoint::StopResult STM32Endpoint::StopHardware(bool in_isr)
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
   if (IsOtg(id_))
   {
+    auto* device = Device(hpcd_);
     if (IsIn())
     {
-      // HAL refills the TxFIFO from the slot only on TXFE.
-      Device(hpcd_)->DIEPEMPMSK &= ~(1UL << num);
-      ep->xfer_len = 0U;
       auto* in_ep = InEndpoint(hpcd_, num);
+      if (hpcd_->Init.dma_enable == 0U)
+      {
+        // HAL refills the TxFIFO from the slot only on TXFE, and only below xfer_len.
+        device->DIEPEMPMSK &= ~(1UL << num);
+        ep->xfer_len = ep->xfer_count;
+      }
       if ((in_ep->DIEPCTL & USB_OTG_DIEPCTL_EPENA) == 0U)
         return StopResult::DONE;  // Finished; its XFRC, if pending, is a late fact.
+      // Reference-manual order: SNAK, wait for NAK effective, then EPDIS and EPDISD.
+      // Both waits are interrupts (INEPNE, EPDISD); AfterInterrupt advances them.
+      device->DIEPMSK |= USB_OTG_DIEPMSK_INEPNEM;
       in_ep->DIEPCTL |= USB_OTG_DIEPCTL_SNAK;
-      in_ep->DIEPCTL |= USB_OTG_DIEPCTL_EPDIS;
-      SetStopWait(true);  // HAL flushes the TxFIFO on EPDISD; AfterInterrupt confirms.
+      SetStopStage(StopStage::IN_NAK);
+      ArmStopTimeout();
       return StopResult::PENDING;
     }
     auto* out_ep = OutEndpoint(hpcd_, num);
-    if (hpcd_->Init.dma_enable == 1U && num != 0U &&
-        (out_ep->DOEPCTL & USB_OTG_DOEPCTL_EPENA) != 0U)
+    if (num != 0U && (out_ep->DOEPCTL & USB_OTG_DOEPCTL_EPENA) != 0U)
     {
-      // DMA writes the slot directly; wait for the endpoint to be disabled.
-      out_ep->DOEPCTL |= USB_OTG_DOEPCTL_SNAK;
-      out_ep->DOEPCTL |= USB_OTG_DOEPCTL_EPDIS;
-      SetStopWait(true);
+      // An OUT endpoint is disabled under global OUT NAK: SGONAK, wait for GONAKEFF,
+      // EPDIS, wait for EPDISD (HAL then clears the global NAK).
+      if ((hpcd_->Instance->GINTSTS & USB_OTG_GINTSTS_BOUTNAKEFF) != 0U)
+      {
+        out_ep->DOEPCTL |= USB_OTG_DOEPCTL_SNAK | USB_OTG_DOEPCTL_EPDIS;
+        SetStopStage(StopStage::OUT_DISABLE);
+      }
+      else
+      {
+        hpcd_->Instance->GINTMSK |= USB_OTG_GINTMSK_GONAKEFFM;
+        device->DCTL |= USB_OTG_DCTL_SGONAK;
+        SetStopStage(StopStage::OUT_GLOBAL_NAK);
+      }
+      ArmStopTimeout();
       return StopResult::PENDING;
     }
+    // EP0 OUT cannot be disabled, and a finished OUT endpoint has nothing to stop.
     // Without DMA the IRQ copies each packet to xfer_buff: point it at the scratch area
     // and NAK further packets; the slot is never written again.
     out_ep->DOEPCTL |= USB_OTG_DOEPCTL_SNAK;
@@ -303,14 +320,17 @@ size_t STM32Endpoint::ReapProgress(const HwRequest& request, bool& retired)
   if (IsOtg(id_))
   {
     auto* in_ep = InEndpoint(hpcd_, EPNumberToInt8(GetNumber()));
+    // Only a transfer complete not yet handled by HAL proves the host took everything.
+    retired = (in_ep->DIEPINT & USB_OTG_DIEPINT_XFRC) != 0U;
+    if (retired) return request.length;
     const uint32_t remaining =
         (in_ep->DIEPTSIZ & USB_OTG_DIEPTSIZ_PKTCNT) >> USB_OTG_DIEPTSIZ_PKTCNT_Pos;
     const size_t packet = MaxPacketSize();
     const size_t total =
         request.length == 0U ? 1U : (request.length + packet - 1U) / packet;
-    retired = remaining == 0U;
-    if (retired) return request.length;
-    const size_t sent = total > remaining ? total - remaining : 0U;
+    // PKTCNT drops when a packet leaves the FIFO; the last one may lack the host's ACK.
+    size_t sent = total > remaining ? total - remaining : 0U;
+    if (sent != 0U) --sent;
     return LibXR::min(sent * packet, request.length);
   }
 #endif
@@ -348,10 +368,10 @@ void STM32Endpoint::OnTransferDone(ErrorCode result)
   OnHardwareComplete(true, tag, actual, result);
 }
 
-void STM32Endpoint::SetStopWait(bool wait)
+void STM32Endpoint::SetStopStage(StopStage stage)
 {
-  stop_wait_ = wait;
-  if (wait)
+  stop_stage_ = stage;
+  if (stage != StopStage::NONE)
     stop_mask_[id_] |= MaskBit();
   else
     stop_mask_[id_] &= ~MaskBit();
@@ -379,31 +399,99 @@ void STM32Endpoint::VisitRedirected(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hp
   }
 }
 
+void STM32Endpoint::ArmStopTimeout()
+{
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  // SOF counts the frames a stop has been waiting (escalation in DeviceCore).
+  hpcd_->Instance->GINTMSK |= USB_OTG_GINTMSK_SOFM;
+#endif
+}
+
+void STM32Endpoint::ConfirmStop(bool in_isr)
+{
+  if (!IsIn())
+  {
+    // Packets still in the RxFIFO for this endpoint go to the scratch area.
+    stopped_actual_ = HalEndpoint()->xfer_count;
+    Redirect();
+  }
+  SetStopStage(StopStage::NONE);
+  OnHardwareStopped(in_isr);
+}
+
 void STM32Endpoint::VisitStopping(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd)
 {
 #if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  const bool global_nak = (hpcd->Instance->GINTSTS & USB_OTG_GINTSTS_BOUTNAKEFF) != 0U;
+  bool out_waiting = false;
   for (uint32_t bits = stop_mask_[id], bit = 0; bits != 0U; ++bit, bits >>= 1U)
   {
     if ((bits & 1U) == 0U) continue;
     const uint8_t num = static_cast<uint8_t>(bit & 15U);
-    const bool in = bit >= 16U;
-    STM32Endpoint* ep = Find(hpcd, num, in);
+    STM32Endpoint* ep = Find(hpcd, num, bit >= 16U);
     if (ep == nullptr) continue;
-    // Disabled, and HAL has already handled (and cleared) the EPDISD of this pass:
-    // for IN that handling flushed the TxFIFO.
-    const bool stopped =
-        in ? (InEndpoint(hpcd, num)->DIEPCTL & USB_OTG_DIEPCTL_EPENA) == 0U &&
-                 (InEndpoint(hpcd, num)->DIEPINT & USB_OTG_DIEPINT_EPDISD) == 0U
-           : (OutEndpoint(hpcd, num)->DOEPCTL & USB_OTG_DOEPCTL_EPENA) == 0U &&
-                 (OutEndpoint(hpcd, num)->DOEPINT & USB_OTG_DOEPINT_EPDISD) == 0U;
-    if (!stopped) continue;
-    ep->SetStopWait(false);
-    ep->OnHardwareStopped(true);
+    auto* in_ep = InEndpoint(hpcd, num);
+    auto* out_ep = OutEndpoint(hpcd, num);
+    switch (ep->stop_stage_)
+    {
+      case StopStage::IN_NAK:
+        if ((in_ep->DIEPCTL & USB_OTG_DIEPCTL_EPENA) == 0U)
+          ep->ConfirmStop(true);  // Completed before the NAK; the FIFO is empty.
+        else if ((in_ep->DIEPCTL & USB_OTG_DIEPCTL_NAKSTS) != 0U)
+        {
+          in_ep->DIEPCTL |= USB_OTG_DIEPCTL_SNAK | USB_OTG_DIEPCTL_EPDIS;
+          ep->SetStopStage(StopStage::IN_DISABLE);
+        }
+        break;
+      case StopStage::IN_DISABLE:
+        // HAL flushed the TxFIFO while handling EPDISD in this pass.
+        if ((in_ep->DIEPCTL & USB_OTG_DIEPCTL_EPENA) == 0U &&
+            (in_ep->DIEPINT & USB_OTG_DIEPINT_EPDISD) == 0U)
+          ep->ConfirmStop(true);
+        break;
+      case StopStage::OUT_GLOBAL_NAK:
+        if ((out_ep->DOEPCTL & USB_OTG_DOEPCTL_EPENA) == 0U)
+          ep->ConfirmStop(true);
+        else if (global_nak)
+        {
+          out_ep->DOEPCTL |= USB_OTG_DOEPCTL_SNAK | USB_OTG_DOEPCTL_EPDIS;
+          ep->SetStopStage(StopStage::OUT_DISABLE);
+          out_waiting = true;
+        }
+        else
+          out_waiting = true;
+        break;
+      case StopStage::OUT_DISABLE:
+        if ((out_ep->DOEPCTL & USB_OTG_DOEPCTL_EPENA) == 0U &&
+            (out_ep->DOEPINT & USB_OTG_DOEPINT_EPDISD) == 0U)
+          ep->ConfirmStop(true);
+        else
+          out_waiting = true;
+        break;
+      case StopStage::NONE:
+        break;
+    }
   }
+  // HAL clears the global OUT NAK on EPDISD; clear it here if no disable is pending.
+  if (!out_waiting && (hpcd->Instance->GINTSTS & USB_OTG_GINTSTS_BOUTNAKEFF) != 0U)
+    Device(hpcd)->DCTL |= USB_OTG_DCTL_CGONAK;
 #else
   UNUSED(id);
   UNUSED(hpcd);
 #endif
+}
+
+void STM32Endpoint::ForceStopAll(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd,
+                                 bool in_isr)
+{
+  // The controller has been stopped: nothing touches a slot any more.
+  for (uint32_t bits = stop_mask_[id], bit = 0; bits != 0U; ++bit, bits >>= 1U)
+  {
+    if ((bits & 1U) == 0U) continue;
+    STM32Endpoint* ep = Find(hpcd, static_cast<uint8_t>(bit & 15U), bit >= 16U);
+    if (ep != nullptr) ep->ConfirmStop(in_isr);
+  }
+  stop_mask_[id] = 0U;
 }
 
 // --- HAL C callbacks ---

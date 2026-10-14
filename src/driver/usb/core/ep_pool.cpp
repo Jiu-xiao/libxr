@@ -231,8 +231,9 @@ void EndpointPool::KickEndpoints(bool in_isr)
 
 void EndpointPool::StopFinished(bool in_isr)
 {
-  ASSERT(stopping_count_ != 0U);
-  if (--stopping_count_ == 0U) PostControl(STOP_DONE_EVENT, in_isr);
+  ASSERT(stopping_count_.load(std::memory_order_relaxed) != 0U);
+  if (stopping_count_.fetch_sub(1U, std::memory_order_relaxed) == 1U)
+    PostControl(STOP_DONE_EVENT, in_isr);
 }
 
 void EndpointPool::SetDataEnabled(bool enabled, bool in_isr)

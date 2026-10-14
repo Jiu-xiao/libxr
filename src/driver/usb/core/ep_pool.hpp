@@ -186,6 +186,9 @@ class EndpointPool
   static constexpr uint32_t CLASS_EVENT = 128U;
   static constexpr uint32_t ENDPOINT_EVENT = 256U;
   static constexpr uint32_t STOP_DONE_EVENT = 512U;
+  static constexpr uint32_t STOP_TIMEOUT_EVENT = 1024U;
+  /// Frames an unconfirmed stop may wait before the controller is reset.
+  static constexpr uint32_t STOP_FRAME_LIMIT = 8U;
   static constexpr uint32_t LIFECYCLE_EVENTS =
       INIT_EVENT | DEINIT_EVENT | RESET_EVENT | DISCONNECT_EVENT;
 
@@ -219,12 +222,27 @@ class EndpointPool
   /// Owner: whether an endpoint may start hardware now.
   bool CanStart(bool ep0) const
   {
-    return !planning_ && !suspended_ && !HasPendingControl(LIFECYCLE_EVENTS) &&
-           (ep0 || data_enabled_);
+    return !planning_ && !suspended_ && !lifecycle_hold_ &&
+           !HasPendingControl(LIFECYCLE_EVENTS) && (ep0 || data_enabled_);
   }
   /// Owner: count of endpoints whose hardware stop is not yet confirmed.
-  bool AnyStopping() const { return stopping_count_ != 0U; }
-  void AddStopping() { ++stopping_count_; }
+  bool AnyStopping() const
+  {
+    return stopping_count_.load(std::memory_order_relaxed) != 0U;
+  }
+  void AddStopping()
+  {
+    if (stopping_count_.fetch_add(1U, std::memory_order_relaxed) == 0U)
+      stop_frames_.store(0U, std::memory_order_relaxed);
+  }
+  /// IRQ (SOF): true once when a stop has waited STOP_FRAME_LIMIT frames.
+  bool CountStopFrame()
+  {
+    if (stopping_count_.load(std::memory_order_relaxed) == 0U) return false;
+    return stop_frames_.fetch_add(1U, std::memory_order_relaxed) + 1U == STOP_FRAME_LIMIT;
+  }
+  /// Owner: a lifecycle event is held back; no endpoint may start meanwhile.
+  void SetLifecycleHold(bool hold) { lifecycle_hold_ = hold; }
   void StopFinished(bool in_isr);
 
   bool DataEnabled() const { return data_enabled_; }
@@ -276,7 +294,9 @@ class EndpointPool
   Endpoint* by_bit_[2 * SLOT_COUNT] = {};
   void Register(Endpoint* ep, size_t number, size_t dir);
   Callback<uint32_t> control_handler_;
-  uint32_t stopping_count_ = 0;  ///< Controller-owner state.
+  std::atomic<uint32_t> stopping_count_{0};  ///< Changed by the owner only.
+  std::atomic<uint32_t> stop_frames_{0};
+  bool lifecycle_hold_ = false;  ///< Controller-owner state.
   bool data_enabled_ = true;
   bool planning_ = false;
   Speed speed_ = Speed::FULL;

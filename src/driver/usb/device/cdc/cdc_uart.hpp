@@ -212,8 +212,9 @@ class CDCUart : public CDCBase, public LibXR::UART
   void OnDataInComplete(bool in_isr, const Endpoint::Completion& completion) override
   {
     // WriteQueue settlement already completed the bytes when they entered the slot.
-    UNUSED(completion);
     if (tx_outstanding_ != 0U) --tx_outstanding_;
+    // Nothing reached the host for a failed or aborted request; it needs no ZLP.
+    if (completion.result != ErrorCode::OK) tx_tail_ = false;
     PumpTx(in_isr);
   }
 
@@ -291,7 +292,7 @@ class CDCUart : public CDCBase, public LibXR::UART
       {
         if (!read_port_cdc_.Readable()) return;
         // Set before trying, so space freed meanwhile still requests another pass.
-        rx_waiting_.store(1U, std::memory_order_seq_cst);
+        (void)rx_waiting_.exchange(1U, std::memory_order_seq_cst);
         auto queue = read_port_cdc_.GetReadQueue(in_isr);
         const size_t amount =
             LibXR::min(queue.EmptySize(), lease.data.size_ - rx_offset_);
@@ -318,7 +319,9 @@ class CDCUart : public CDCBase, public LibXR::UART
   friend class CDCUartReadPort;
   void OnReceiveSpace(bool in_isr)
   {
-    // Only a lease held back by a full read port needs the owner.
+    // Only a lease held back by a full read port needs the owner. Both sides use a
+    // read-modify-write on the flag: either DrainRx sees the freed space or this sees
+    // its flag.
     if (rx_waiting_.exchange(0U, std::memory_order_seq_cst) != 0U)
       RequestClassService(in_isr);
   }

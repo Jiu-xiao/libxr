@@ -88,8 +88,12 @@ void DeviceCore<C>::ProcessEvents(bool in_isr, uint32_t events)
 {
   // While an endpoint stop is unconfirmed nothing else proceeds; the confirmation
   // posts STOP_DONE_EVENT and the held events run then.
-  events = (events | deferred_events_) & ~STOP_DONE_EVENT;
+  if ((events & STOP_TIMEOUT_EVENT) && pool_.AnyStopping()) OnStopTimeout(in_isr);
+  if ((events & STOP_DONE_EVENT) && !pool_.AnyStopping()) OnStopsSettled();
+  events = (events | deferred_events_) & ~(STOP_DONE_EVENT | STOP_TIMEOUT_EVENT);
   deferred_events_ = 0;
+  // A held-back lifecycle event also holds every endpoint start.
+  pool_.SetLifecycleHold((events & LIFECYCLE_EVENTS) != 0U);
   if (pool_.AnyStopping())
   {
     deferred_events_ = events;
@@ -133,6 +137,8 @@ void DeviceCore<C>::ProcessEvents(bool in_isr, uint32_t events)
       }
     }
     events &= ~LIFECYCLE_EVENTS;
+    pool_.SetLifecycleHold(false);
+    pool_.KickEndpoints(in_isr);
   }
   if (continuation_ != Continuation::NONE)
   {
@@ -788,6 +794,7 @@ ErrorCode DeviceCore<C>::HandleStandardRequest(bool in_isr)
 template <typename C>
 void DeviceCore<C>::OnSof(bool in_isr, uint16_t frame, uint8_t microframe)
 {
+  if (pool_.CountStopFrame()) pool_.PostControl(STOP_TIMEOUT_EVENT, in_isr);
   if constexpr (C::BUS_TIME)
   {
     this->observed_ms.store(static_cast<uint32_t>(Timebase::GetMilliseconds()),

@@ -48,6 +48,9 @@ class STM32Endpoint : public USB::Endpoint
     if (stop_mask_[id] != 0U) VisitStopping(id, hpcd);
   }
   static STM32Endpoint* Find(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool is_in);
+  /// 控制器已停止：确认所有等待中的停止 / The controller stopped: confirm every pending
+  /// stop
+  static void ForceStopAll(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd, bool in_isr);
 
   /// HAL 回调：当前请求完成 / HAL callback: the current request finished
   void OnTransferDone(ErrorCode result);
@@ -72,7 +75,17 @@ class STM32Endpoint : public USB::Endpoint
 #endif
   static void VisitRedirected(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd);
   static void VisitStopping(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd);
-  void SetStopWait(bool wait);
+  enum class StopStage : uint8_t
+  {
+    NONE,
+    IN_NAK,          ///< SNAK issued; waiting for NAK effective.
+    IN_DISABLE,      ///< EPDIS issued; waiting for EPDISD.
+    OUT_GLOBAL_NAK,  ///< SGONAK issued; waiting for global OUT NAK effective.
+    OUT_DISABLE      ///< EPDIS issued; waiting for EPDISD.
+  };
+  void SetStopStage(StopStage stage);
+  void ArmStopTimeout();
+  void ConfirmStop(bool in_isr);
   void SetRedirected(bool redirected);
   uint32_t MaskBit() const
   {
@@ -91,7 +104,7 @@ class STM32Endpoint : public USB::Endpoint
   uint32_t hw_tag_ = 0;
   size_t hw_length_ = 0;
   RawData hw_slot_{nullptr, 0};
-  bool stop_wait_ = false;     ///< SNAK/EPDIS issued; waiting for the disable.
+  StopStage stop_stage_ = StopStage::NONE;
   bool redirected_ = false;    ///< HAL's OUT write cursor points at the scratch area.
   size_t stopped_actual_ = 0;  ///< OUT bytes in the slot when it was abandoned.
 

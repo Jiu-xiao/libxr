@@ -79,15 +79,10 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
     }
     HAL_PCD_Start(hpcd_);
   }
-  void Stop(bool) override
-  {
-    USB::EndpointPool::HardwareScope hardware(this);
-    HAL_PCD_Stop(hpcd_);
-    if (map_[id_] == this)
-    {
-      map_[id_] = nullptr;
-    }
-  }
+  void Stop(bool in_isr) override;
+
+  void OnStopTimeout(bool in_isr) override;
+  void OnStopsSettled() override;
 
   USB::Speed ReadBusSpeed() const override
   {

@@ -72,15 +72,16 @@ uint32_t Endpoint::NextTag(uint8_t index)
 
 ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
 {
+  // A configured endpoint is never touched by a rejected Configure.
+  const bool planning = IsPlanning();
+  if (!planning && (stopping_ || GetState() != State::DISABLED))
+    return ErrorCode::STATE_ERR;
   if (cfg.direction == Direction::BOTH ||
       (avail_direction_ != Direction::BOTH && cfg.direction != avail_direction_))
   {
     SetState(State::ERROR);
     return ErrorCode::ARG_ERR;
   }
-  const bool planning = IsPlanning();
-  if (!planning && (stopping_ || GetState() != State::DISABLED))
-    return ErrorCode::STATE_ERR;
 
   const Speed speed = pool_ ? pool_->GetSpeed() : Speed::FULL;
   const size_t speed_limit =
@@ -379,37 +380,44 @@ void Endpoint::RetireCompletion(bool in_isr) { RetireMailbox(in_isr); }
 
 void Endpoint::StartNext(bool in_isr)
 {
-  while (!stopping_ && inflight_ == NO_REQUEST && GetState() == State::IDLE &&
-         CanStart() && completion_ready_.load(std::memory_order_acquire) == 0U)
+  // A failed start completes at once; then the next queued request is tried.
+  while (StartOne(in_isr, false))
   {
-    uint32_t old = word_.load(std::memory_order_acquire);
-    uint32_t next;
-    uint8_t pick;
-    do
-    {
-      if (old & ZLP_QUEUED_BIT)
-      {
-        pick = ZLP_INDEX;
-        next = (old & ~ZLP_QUEUED_BIT) | ZLP_INFLIGHT_BIT;
-      }
-      else
-      {
-        const bool q0 = SlotOf(old, 0U) == QUEUED;
-        const bool q1 = SlotOf(old, 1U) == QUEUED;
-        if (!q0 && !q1) return;
-        pick = (q0 && q1) ? ((old & HEAD_BIT) ? 1U : 0U) : (q0 ? 0U : 1U);
-        next = WithSlot(old, pick, INFLIGHT);
-      }
-    } while (!word_.compare_exchange_weak(old, next, std::memory_order_acq_rel,
-                                          std::memory_order_acquire));
-    inflight_ = pick;
-    inflight_tail_ = false;
-    StartRequest(in_isr, pick, pick == ZLP_INDEX ? 0U : meta_[pick].length);
-    // A failed start completes at once; try the next queued request.
   }
 }
 
-void Endpoint::StartRequest(bool in_isr, uint8_t index, size_t length)
+bool Endpoint::StartOne(bool in_isr, bool defer_failure)
+{
+  if (stopping_ || inflight_ != NO_REQUEST || GetState() != State::IDLE || !CanStart() ||
+      completion_ready_.load(std::memory_order_acquire) != 0U)
+    return false;
+  uint32_t old = word_.load(std::memory_order_acquire);
+  uint32_t next;
+  uint8_t pick;
+  do
+  {
+    if (old & ZLP_QUEUED_BIT)
+    {
+      pick = ZLP_INDEX;
+      next = (old & ~ZLP_QUEUED_BIT) | ZLP_INFLIGHT_BIT;
+    }
+    else
+    {
+      const bool q0 = SlotOf(old, 0U) == QUEUED;
+      const bool q1 = SlotOf(old, 1U) == QUEUED;
+      if (!q0 && !q1) return false;
+      pick = (q0 && q1) ? ((old & HEAD_BIT) ? 1U : 0U) : (q0 ? 0U : 1U);
+      next = WithSlot(old, pick, INFLIGHT);
+    }
+  } while (!word_.compare_exchange_weak(old, next, std::memory_order_acq_rel,
+                                        std::memory_order_acquire));
+  inflight_ = pick;
+  inflight_tail_ = false;
+  StartRequest(in_isr, pick, pick == ZLP_INDEX ? 0U : meta_[pick].length, defer_failure);
+  return true;
+}
+
+void Endpoint::StartRequest(bool in_isr, uint8_t index, size_t length, bool defer_failure)
 {
   const RawData slot = index == ZLP_INDEX ? RawData{memory_.addr_, 0U}
                                           : SlotData(index, granted_.slot_capacity);
@@ -423,7 +431,10 @@ void Endpoint::StartRequest(bool in_isr, uint8_t index, size_t length)
   if (result != ErrorCode::OK)
   {
     inflight_tag_.store(0U, std::memory_order_release);
-    FinishInflight(in_isr, ErrorCode::FAILED, 0U);
+    if (defer_failure)
+      start_failed_ = true;  // Completed after the completion being delivered now.
+    else
+      FinishInflight(in_isr, ErrorCode::FAILED, 0U);
   }
 }
 
@@ -483,6 +494,7 @@ void Endpoint::FinishInflight(bool in_isr, ErrorCode result, size_t actual)
   const uint8_t index = inflight_;
   inflight_ = NO_REQUEST;
   inflight_tail_ = false;
+  start_failed_ = false;  // A failed early start is ended by whoever retires it first.
   inflight_tag_.store(0U, std::memory_order_release);
   const bool in = config_.direction == Direction::IN;
   // OUT data that arrives while the endpoint is being stopped belongs to nobody.
@@ -491,9 +503,10 @@ void Endpoint::FinishInflight(bool in_isr, ErrorCode result, size_t actual)
   if (index == ZLP_INDEX)
   {
     word_.fetch_and(~ZLP_INFLIGHT_BIT, std::memory_order_acq_rel);
-    if (start_before_deliver_) StartNext(in_isr);
+    const bool early = StartEarly(in_isr);
     Deliver(in_isr, result, 0U);
     DeliverAborts(in_isr);
+    if (early) FinishFailedStart(in_isr);
     return;
   }
 
@@ -514,12 +527,28 @@ void Endpoint::FinishInflight(bool in_isr, ErrorCode result, size_t actual)
                                       std::memory_order_acquire))
   {
   }
-  if (start_before_deliver_) StartNext(in_isr);
+  const bool early = StartEarly(in_isr);
   if (lease)
     Deliver(in_isr, result, actual, {RawData{SlotData(index, 0U).addr_, actual}, index});
   else
     Deliver(in_isr, result, actual);
   DeliverAborts(in_isr);
+  if (early) FinishFailedStart(in_isr);
+}
+
+bool Endpoint::StartEarly(bool in_isr)
+{
+  if (!start_before_deliver_) return false;
+  start_before_deliver_ = false;  // Only the first retirement of a pass starts early.
+  StartOne(in_isr, true);
+  return true;
+}
+
+void Endpoint::FinishFailedStart(bool in_isr)
+{
+  if (!start_failed_) return;
+  start_failed_ = false;
+  FinishInflight(in_isr, ErrorCode::FAILED, 0U);
 }
 
 void Endpoint::Deliver(bool in_isr, ErrorCode result, size_t actual)
@@ -845,8 +874,10 @@ size_t Endpoint::CopyReadArm(size_t capacity, size_t packet) const
 
 void Endpoint::CompleteCopy(bool in_isr, ErrorCode result)
 {
+  // Read before the claim is released: a new copy may start right after it.
+  const size_t done = copy_done_;
   word_.fetch_and(~(COPY_BIT | COPY_LIVE_BIT), std::memory_order_acq_rel);
-  Deliver(in_isr, result, copy_done_);
+  Deliver(in_isr, result, done);
 }
 
 void Endpoint::FinishCopyWrite(bool in_isr, uint8_t index, ErrorCode result,

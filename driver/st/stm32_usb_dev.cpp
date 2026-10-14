@@ -24,7 +24,7 @@ extern "C" void __real_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd);
 extern "C" void __wrap_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd)
 {
   const auto id = STM32USBDeviceGetID(hpcd);
-  if (id >= STM32_USB_DEV_ID_NUM)
+  if (id >= STM32_USB_DEV_ID_NUM || STM32USBDevice::map_[id] == nullptr)
   {
     __real_HAL_PCD_IRQHandler(hpcd);
     return;
@@ -33,6 +33,42 @@ extern "C" void __wrap_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd)
   STM32Endpoint::BeforeInterrupt(id, hpcd);
   __real_HAL_PCD_IRQHandler(hpcd);
   STM32Endpoint::AfterInterrupt(id, hpcd);
+}
+
+void STM32USBDevice::Stop(bool in_isr)
+{
+  {
+    USB::EndpointPool::HardwareScope hardware(this);
+    HAL_PCD_Stop(hpcd_);
+    if (map_[id_] == this)
+    {
+      map_[id_] = nullptr;
+    }
+  }
+  // With the controller stopped no stop confirmation will arrive any more.
+  STM32Endpoint::ForceStopAll(id_, hpcd_, in_isr);
+}
+
+void STM32USBDevice::OnStopTimeout(bool in_isr)
+{
+  {
+    USB::EndpointPool::HardwareScope hardware(this);
+    HAL_PCD_Stop(hpcd_);
+  }
+  STM32Endpoint::ForceStopAll(id_, hpcd_, in_isr);
+  USB::EndpointPool::HardwareScope hardware(this);
+  HAL_PCD_Start(hpcd_);
+}
+
+void STM32USBDevice::OnStopsSettled()
+{
+  if (WantsBusTime()) return;
+  USB::EndpointPool::HardwareScope hardware(this);
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  hpcd_->Instance->GINTMSK &= ~USB_OTG_GINTMSK_SOFM;
+#else
+  hpcd_->Instance->CNTR &= ~USB_CNTR_SOFM;
+#endif
 }
 
 void STM32USBDevice::RequireInterruptWrap()

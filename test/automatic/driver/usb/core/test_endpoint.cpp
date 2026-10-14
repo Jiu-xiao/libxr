@@ -68,6 +68,7 @@ class MockEndpoint : public Endpoint
   unsigned closes = 0, stalls = 0, clear_stalls = 0;
   size_t limit = UINT16_MAX;
   ErrorCode configure_result = ErrorCode::OK;
+  bool fail_next_start = false;
   std::mutex lock;  // Only the threaded stress test plays hardware from another thread.
 
   const Start& Last() const { return starts.back(); }
@@ -127,6 +128,11 @@ class MockEndpoint : public Endpoint
   ErrorCode StartHardware(const HwRequest& request, bool) override
   {
     std::lock_guard<std::mutex> guard(lock);
+    if (fail_next_start)
+    {
+      fail_next_start = false;
+      return ErrorCode::FAILED;
+    }
     TEST_ASSERT(!active && !stop_requested);
     TEST_ASSERT(request.length <= request.slot.size_ || request.slot.size_ == 0U);
     Start start{request.tag,
@@ -1078,6 +1084,7 @@ class TestDevice : public DeviceCore<BasicCapabilities>
   void Start(bool) override {}
   void Stop(bool) override {}
   std::vector<ControlContext> address_phases;
+  unsigned stop_timeouts = 0;
 
  protected:
   ErrorCode SetAddress(uint8_t, ControlContext context) override
@@ -1085,6 +1092,7 @@ class TestDevice : public DeviceCore<BasicCapabilities>
     address_phases.push_back(context);
     return ErrorCode::OK;
   }
+  void OnStopTimeout(bool) override { ++stop_timeouts; }
 };
 
 struct ControlFixture
@@ -1253,6 +1261,50 @@ void TestStopHoldsLifecycle()
   in.ConfirmStop();
   TEST_ASSERT(f.in0.active && f.in0.Last().length == 0);
   f.in0.Complete();
+  in.pending_stop = false;
+
+  // A stop still pending when the host resets the bus: the reset waits, no endpoint
+  // starts meanwhile, and after STOP_FRAME_LIMIT frames the backend is asked to reset.
+  f.Setup(device, 0, 9, 1, 0);
+  f.in0.Complete();
+  TEST_ASSERT(out.active);
+  TEST_ASSERT(cdc.Write({bytes.data(), bytes.size()}, plain) == ErrorCode::OK);
+  TEST_ASSERT(in.active);
+  in.pending_stop = true;
+  f.Setup(device, 0x02, 3, 0, 0, 0x81);  // SET_FEATURE(ENDPOINT_HALT) on EP1 IN
+  TEST_ASSERT(in.stop_requested && f.in0.active);
+  f.in0.Complete();
+  device.OnBusReset(true);
+  const size_t out_starts = out.starts.size();
+  out.HostSends(Bytes(64, 9));
+  TEST_ASSERT(!out.active && out.starts.size() == out_starts);
+  for (uint16_t frame = 0; frame < EndpointPool::STOP_FRAME_LIMIT; ++frame)
+    device.OnSof(true, frame);
+  TEST_ASSERT(device.stop_timeouts == 1);
+  in.ConfirmStop();
+  TEST_ASSERT(device.IsInited());
+}
+
+// A queued request whose early start fails completes after the request that just
+// finished.
+void TestStartFailureOrder()
+{
+  Fixture f;
+  Recorder rec;
+  f.in.SetOnComplete(rec.Bind());
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  Slot a, b;
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(a, 5, false, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Submit(b, 6, false, false) == ErrorCode::OK);
+  f.in.fail_next_start = true;
+  f.in.Complete();
+  TEST_ASSERT(rec.list.size() == 2 && rec.list[0].result == ErrorCode::OK &&
+              rec.list[0].actual == 5 && rec.list[1].result == ErrorCode::FAILED);
+  TEST_ASSERT(!f.in.active);
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
 }
 }  // namespace
 
@@ -1280,5 +1332,6 @@ int main()
   TestCDCRebind();
   TestControlTransactions();
   TestStopHoldsLifecycle();
+  TestStartFailureOrder();
   std::puts("USB endpoint slots, copy mode, stop, CDC and EP0 lifecycle passed");
 }

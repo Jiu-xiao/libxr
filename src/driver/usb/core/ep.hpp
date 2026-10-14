@@ -337,7 +337,10 @@ class Endpoint
   static bool Usable(uint32_t word, uint8_t index);
   RawData SlotData(uint8_t index, size_t capacity) const;
   void StartNext(bool in_isr);
-  void StartRequest(bool in_isr, uint8_t index, size_t length);
+  bool StartOne(bool in_isr, bool defer_failure);
+  bool StartEarly(bool in_isr);
+  void FinishFailedStart(bool in_isr);
+  void StartRequest(bool in_isr, uint8_t index, size_t length, bool defer_failure);
   void RetireMailbox(bool in_isr);
   void FinishInflight(bool in_isr, ErrorCode result, size_t actual);
   void FinishCopyWrite(bool in_isr, uint8_t index, ErrorCode result, size_t actual);
@@ -387,6 +390,7 @@ class Endpoint
   bool close_after_stop_ = false;
   bool stall_after_stop_ = false;
   bool start_before_deliver_ = false;
+  bool start_failed_ = false;  // An early start failed; its FAILED completion is pending.
 
   // Copy transfer, published by the claiming caller before its submit and owned by the
   // owner after it.
