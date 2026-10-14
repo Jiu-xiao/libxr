@@ -26,14 +26,18 @@ class STM32OtgEndpoint;
  *        registers directly
  *
  * 不使用 PCD 句柄。构造时用临时句柄调用 CubeMX 生成的 HAL_PCD_MspInit()（时钟、引脚、NVIC），
- * 再用 LL 函数初始化 core；之后中断、端点启停、FIFO、DMA、连接与断开都由驱动完成。中断向量
- * 函数由驱动定义，CubeMX 中该 USB 实例须设置"不生成函数调用"并取消"生成 IRQ 处理函数"。
+ * 再用 LL 函数初始化 core；之后中断、端点启停、FIFO、DMA、连接与断开都由驱动完成。CubeMX
+ * 保持默认设置：链接时包装 HAL_PCD_Init() 和 HAL_PCD_IRQHandler()，main() 里的
+ * MX_USB_OTG_*_PCD_Init() 不再初始化控制器，CubeMX 生成的中断函数进入 Dispatch()。CubeMX
+ * 不生成中断函数时，由 CodeGenerator 生成的向量函数调用 Dispatch()。
  *
  * No PCD handle is used. The constructor calls the CubeMX-generated HAL_PCD_MspInit()
  * (clocks, pins, NVIC) through a temporary handle and initializes the core with the LL
  * functions; from then on the driver handles interrupts, endpoint start and stop, the
- * FIFOs, DMA, connect and disconnect. The driver defines the interrupt vector; in CubeMX
- * the USB instance needs "Do Not Generate Function Call" and no generated IRQ handler.
+ * FIFOs, DMA, connect and disconnect. CubeMX keeps its default settings: the link wraps
+ * HAL_PCD_Init() and HAL_PCD_IRQHandler(), so MX_USB_OTG_*_PCD_Init() in main() no longer
+ * initializes the controller and the CubeMX interrupt handler enters Dispatch(). When CubeMX
+ * generates no interrupt handler, the vector function CodeGenerator writes calls Dispatch().
  */
 class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
 {
@@ -65,8 +69,8 @@ class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
     size_t fifo_size;
   };
 
-  /// 中断入口：由向量函数调用 / Interrupt entry, called by the vector function
-  static void Dispatch(uint8_t index, USB_OTG_GlobalTypeDef* core);
+  /// 中断入口：控制器 core 的中断 / Interrupt entry for the controller core
+  static void Dispatch(USB_OTG_GlobalTypeDef* core);
 
   void Init(bool in_isr) override { STM32USBDeviceCore::Init(in_isr); }
   void Deinit(bool in_isr) override { STM32USBDeviceCore::Deinit(in_isr); }

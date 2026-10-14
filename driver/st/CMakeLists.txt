@@ -17,6 +17,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
                               PROPERTIES COMPILE_OPTIONS "-Wno-stringop-overflow")
 endif()
 
-# USB on FSDEV controllers: the device stack wraps HAL_PCD_IRQHandler so the BSP's
-# interrupt file stays as CubeMX generates it. OTG controllers define their vectors.
-target_link_options(${PROJECT_NAME} INTERFACE "-Wl,--wrap=HAL_PCD_IRQHandler")
+# USB: the device stack wraps HAL_PCD_Init and HAL_PCD_IRQHandler so the BSP's CubeMX code
+# stays as generated (stm32_usb_otg_wrap.cpp for OTG, stm32_usb_dev.cpp for FSDEV).
+target_link_options(${PROJECT_NAME} INTERFACE "-Wl,--wrap=HAL_PCD_Init"
+                    "-Wl,--wrap=HAL_PCD_IRQHandler")

@@ -295,11 +295,20 @@ void STM32USBOtgDevice::ArmSetup()
   }
 }
 
-void STM32USBOtgDevice::Dispatch(uint8_t index, USB_OTG_GlobalTypeDef* core)
+void STM32USBOtgDevice::Dispatch(USB_OTG_GlobalTypeDef* core)
 {
-  STM32USBOtgDevice* device = index < MAX_DEVICES ? devices_[index] : nullptr;
+  uint8_t index = MAX_DEVICES;
+#if defined(USB_OTG_FS)
+  if (core == USB_OTG_FS) index = OTG_FS_INDEX;
+#endif
+#if defined(USB_OTG_HS)
+  if (core == USB_OTG_HS) index = OTG_HS_INDEX;
+#endif
+  if (index >= MAX_DEVICES) return;
+  STM32USBOtgDevice* device = devices_[index];
   if (device == nullptr)
   {
+    // Not constructed yet: keep the line quiet until the driver owns the controller.
     core->GAHBCFG &= ~USB_OTG_GAHBCFG_GINT;
     return;
   }
@@ -1111,10 +1120,6 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
 {
 }
 
-extern "C" void OTG_FS_IRQHandler(void)
-{
-  STM32USBOtgDevice::Dispatch(OTG_FS_INDEX, USB_OTG_FS);
-}
 #endif
 
 #if defined(USB_OTG_HS)
@@ -1133,10 +1138,26 @@ STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
 {
 }
 
-extern "C" void OTG_HS_IRQHandler(void)
-{
-  STM32USBOtgDevice::Dispatch(OTG_HS_INDEX, USB_OTG_HS);
-}
 #endif
+
+// Entry from the wrapped HAL_PCD_IRQHandler() (stm32_usb_otg_wrap.cpp). The handle is only
+// a hint: when main() never ran MX_USB_OTG_*_PCD_Init() its Instance is null, so the active
+// exception names the controller instead.
+extern "C" void libxr_stm32_otg_dispatch(PCD_HandleTypeDef* hpcd)
+{
+  USB_OTG_GlobalTypeDef* core = hpcd != nullptr ? hpcd->Instance : nullptr;
+  if (core == nullptr)
+  {
+    const int32_t irq = static_cast<int32_t>(__get_IPSR()) - 16;
+#if defined(USB_OTG_FS)
+    if (irq == OTG_FS_IRQn) core = USB_OTG_FS;
+#endif
+#if defined(USB_OTG_HS)
+    if (irq == OTG_HS_IRQn) core = USB_OTG_HS;
+#endif
+    if (core == nullptr) return;
+  }
+  STM32USBOtgDevice::Dispatch(core);
+}
 
 #endif
