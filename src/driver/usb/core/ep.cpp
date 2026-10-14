@@ -7,23 +7,18 @@
 
 namespace LibXR::USB
 {
-namespace
-{
-bool Overlaps(size_t a_offset, size_t a_size, size_t b_offset, size_t b_size)
-{
-  return a_size != 0U && b_size != 0U && a_offset < b_offset + b_size &&
-         b_offset < a_offset + a_size;
-}
-}  // namespace
-
-Endpoint::Endpoint(EPNumber number, Direction direction, RawData slots)
+Endpoint::Endpoint(EPNumber number, Direction direction, RawData slots, uint8_t slot_count)
     : number_(number), avail_direction_(direction), memory_(slots)
 {
   REQUIRE(slots.addr_ != nullptr && slots.size_ != 0U);
   REQUIRE(reinterpret_cast<uintptr_t>(slots.addr_) % HW_CACHE_LINE_SIZE == 0U);
   REQUIRE(slots.size_ % HW_CACHE_LINE_SIZE == 0U);
-  half_ = slots.size_ / 2U;
-  half_ -= half_ % HW_CACHE_LINE_SIZE;
+  if (slot_count == 0U) slot_count = number == EPNumber::EP0 ? 1U : 2U;
+  REQUIRE(slot_count == 1U || (slot_count == 2U && number != EPNumber::EP0));
+  slot_count_ = slot_count;
+  slot_size_ = slots.size_ / slot_count;
+  slot_size_ -= slot_size_ % HW_CACHE_LINE_SIZE;
+  REQUIRE(slot_size_ != 0U);
 }
 
 uint32_t Endpoint::Enqueue(uint32_t word, uint8_t index)
@@ -34,17 +29,9 @@ uint32_t Endpoint::Enqueue(uint32_t word, uint8_t index)
   return head == 1U ? (word | HEAD_BIT) : (word & ~HEAD_BIT);
 }
 
-bool Endpoint::Usable(uint32_t word, uint8_t index)
-{
-  if (SlotOf(word, index) != FREE) return false;
-  if (index == 0U) return (word & BLOCK0_BIT) == 0U || SlotOf(word, 1U) != STALE;
-  return (word & TWO_BIT) != 0U &&
-         ((word & BLOCK1_BIT) == 0U || SlotOf(word, 0U) != STALE);
-}
-
 RawData Endpoint::SlotData(uint8_t index, size_t capacity) const
 {
-  return {static_cast<uint8_t*>(memory_.addr_) + (index == 0U ? 0U : half_), capacity};
+  return {static_cast<uint8_t*>(memory_.addr_) + index * slot_size_, capacity};
 }
 
 bool Endpoint::IsPlanning() const { return pool_ != nullptr && pool_->IsPlanning(); }
@@ -110,15 +97,15 @@ ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
     return ErrorCode::ARG_ERR;
   }
 
-  const bool two = number_ != EPNumber::EP0 && half_ >= packet;
-  size_t capacity = number_ == EPNumber::EP0 ? packet
-                    : two                    ? (half_ / packet) * packet
-                                             : (memory_.size_ / packet) * packet;
-  if (packet > memory_.size_ || capacity == 0U)
+  // The slot count is fixed at construction; a slot that cannot hold one packet is
+  // NO_BUFF, never a silent switch to one slot.
+  if (packet > slot_size_)
   {
     SetState(State::ERROR);
     return ErrorCode::NO_BUFF;
   }
+  const size_t capacity =
+      number_ == EPNumber::EP0 ? packet : (slot_size_ / packet) * packet;
   size_t receive = cfg.receive_size == 0U ? capacity : cfg.receive_size;
   if (receive > capacity || receive % packet != 0U)
   {
@@ -129,8 +116,7 @@ ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
   config_ = cfg;
   config_.max_packet_size = static_cast<uint16_t>(packet);
   config_.receive_size = receive;
-  granted_ = {static_cast<uint16_t>(packet), cfg.mult, cfg.burst, capacity,
-              static_cast<uint8_t>(two ? 2U : 1U)};
+  granted_ = {static_cast<uint16_t>(packet), cfg.mult, cfg.burst, capacity, slot_count_};
   if (planning)
   {
     SetState(State::IDLE);
@@ -158,18 +144,11 @@ ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
   uint32_t next;
   do
   {
-    // A stale slot of the old geometry keeps its memory until its holder returns it;
-    // a new slot overlapping it waits.
+    // A stale slot keeps its memory until its holder returns it; the slots never move,
+    // so it blocks only itself.
     next = (old & (SLOT_FIELDS | COPY_BIT)) | ENABLED_BIT;
     next += (old & ~(GEN_ONE - 1U)) + GEN_ONE;
-    if (two) next |= TWO_BIT;
     if (cfg.direction == Direction::IN) next |= DIR_IN_BIT;
-    if (SlotOf(old, 1U) == STALE &&
-        Overlaps(stale_region_[1].offset, stale_region_[1].size, 0U, capacity))
-      next |= BLOCK0_BIT;
-    if (two && SlotOf(old, 0U) == STALE &&
-        Overlaps(stale_region_[0].offset, stale_region_[0].size, half_, capacity))
-      next |= BLOCK1_BIT;
   } while (!word_.compare_exchange_weak(old, next, std::memory_order_acq_rel,
                                         std::memory_order_acquire));
   return ErrorCode::OK;
@@ -253,7 +232,6 @@ void Endpoint::EndRequests(bool in_isr, bool disable)
       }
       else if (state == LENT && disable)
       {
-        stale_region_[i] = {i == 0U ? 0U : half_, granted_.slot_capacity};
         next = WithSlot(next, i, STALE);
       }
     }

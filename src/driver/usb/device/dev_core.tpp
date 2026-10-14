@@ -794,7 +794,7 @@ ErrorCode DeviceCore<C>::HandleStandardRequest(bool in_isr)
 template <typename C>
 void DeviceCore<C>::OnSof(bool in_isr, uint16_t frame, uint8_t microframe)
 {
-  if (pool_.CountStopFrame()) pool_.PostControl(STOP_TIMEOUT_EVENT, in_isr);
+  if (pool_.CountStopFrame(frame)) pool_.PostControl(STOP_TIMEOUT_EVENT, in_isr);
   if constexpr (C::BUS_TIME)
   {
     this->observed_ms.store(static_cast<uint32_t>(Timebase::GetMilliseconds()),

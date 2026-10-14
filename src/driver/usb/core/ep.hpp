@@ -17,18 +17,18 @@ class EndpointPool;
  * @class Endpoint
  * @brief USB 端点基类 / USB endpoint base class
  *
- * 端点的内存由 BSP 提供，按当前包长划分成最多两个槽。取槽、往槽里写数据、提交、归还可以在
- * 任何上下文进行：取槽和提交各是一次对端点状态字的原子修改，中间的拷贝不加锁。借出的槽只能
- * 由持有者归还；端点解绑时借出的槽作废，持有者之后提交得到
- * `ABORTED`。启动硬件、回收完成、 解绑与停止只在设备的串行化执行者（owner）中进行。
+ * 端点的内存由 BSP 提供，构造时分成固定的一个或两个槽，之后不随包长和速度变化。取槽、往槽里
+ * 写数据、提交、归还可以在任何上下文进行：取槽和提交各是一次对端点状态字的原子修改，中间的
+ * 拷贝不加锁。借出的槽只能由持有者归还；端点解绑时借出的槽作废，持有者之后提交得到
+ * `ABORTED`。启动硬件、回收完成、解绑与停止只在设备的串行化执行者（owner）中进行。
  *
- * Endpoint memory is supplied by the BSP and split into at most two slots for the current
- * packet size. Acquiring, filling, submitting and returning a slot work in any context:
- * acquire and submit are one atomic update of the endpoint state word each, and the copy
- * in between takes no lock. A lent slot is only ever returned by its holder; unbinding
- * marks it stale and a later submit returns `ABORTED`. Hardware start, completion
- * retirement, unbinding and stopping run only in the device's serialized executor
- * (owner).
+ * Endpoint memory is supplied by the BSP and split into one or two slots at construction;
+ * the split does not follow the packet size or the bus speed. Acquiring, filling,
+ * submitting and returning a slot work in any context: acquire and submit are one atomic
+ * update of the endpoint state word each, and the copy in between takes no lock. A lent
+ * slot is only ever returned by its holder; unbinding marks it stale and a later submit
+ * returns `ABORTED`. Hardware start, completion retirement, unbinding and stopping run
+ * only in the device's serialized executor (owner).
  */
 class Endpoint
 {
@@ -140,7 +140,7 @@ class Endpoint
     Mult mult = Mult::ONE;
     uint8_t burst = 1;
     size_t slot_capacity = 0;  ///< 包长整数倍 / Multiple of the packet size
-    uint8_t slot_count = 0;    ///< 1 或 2 / 1 or 2
+    uint8_t slot_count = 0;    ///< 构造时确定的 1 或 2 / 1 or 2, fixed at construction
   };
 
   /// 槽句柄，只有槽号 / Slot handle; the index is the whole identity
@@ -164,8 +164,11 @@ class Endpoint
    * @param avail 可用方向 / Available direction
    * @param slots 槽内存，起点与长度按 HW_CACHE_LINE_SIZE 对齐 / Slot memory, start and
    * length aligned to HW_CACHE_LINE_SIZE
+   * @param slot_count 槽数：1 或 2；0 表示 EP0 一个、其余两个。两个槽时内存平分，每个槽的
+   * 起点与长度按 HW_CACHE_LINE_SIZE 对齐 / Slot count, 1 or 2; 0 means one for EP0 and two
+   * for the others. Two slots split the memory in halves aligned to HW_CACHE_LINE_SIZE
    */
-  Endpoint(EPNumber number, Direction avail, RawData slots);
+  Endpoint(EPNumber number, Direction avail, RawData slots, uint8_t slot_count = 0);
   virtual ~Endpoint() = default;
   Endpoint(const Endpoint&) = delete;
   Endpoint& operator=(const Endpoint&) = delete;
@@ -287,10 +290,11 @@ class Endpoint
   };
 
   // State word: slot 0 [2:0], slot 1 [5:3], head [6] (slot 1 was queued first), enabled
-  // [7], zero-length queued [8], copy claimed [9], zero-length in flight [10], slot 0
-  // waits for stale slot 1 [11], slot 1 waits for stale slot 0 [12], two slots [13], IN
-  // [14], copy accepted [15], binding generation [31:16]. Everything a non-owner caller
-  // decides on is in this word; the generation makes a CAS fail across a rebinding.
+  // [7], zero-length queued [8], copy claimed [9], zero-length in flight [10], reserved
+  // [13:11], IN [14], copy accepted [15], binding generation [31:16]. Everything a
+  // non-owner caller decides on is in this word; the generation makes a CAS fail across a
+  // rebinding. A slot keeps its place across bindings, so a stale slot only ever blocks
+  // itself.
   static constexpr uint32_t SLOT_BITS = 3U;
   static constexpr uint32_t SLOT_MASK = 7U;
   static constexpr uint32_t SLOT_FIELDS = (SLOT_MASK << SLOT_BITS) | SLOT_MASK;
@@ -299,9 +303,6 @@ class Endpoint
   static constexpr uint32_t ZLP_QUEUED_BIT = 1U << 8U;
   static constexpr uint32_t COPY_BIT = 1U << 9U;
   static constexpr uint32_t ZLP_INFLIGHT_BIT = 1U << 10U;
-  static constexpr uint32_t BLOCK0_BIT = 1U << 11U;
-  static constexpr uint32_t BLOCK1_BIT = 1U << 12U;
-  static constexpr uint32_t TWO_BIT = 1U << 13U;
   static constexpr uint32_t DIR_IN_BIT = 1U << 14U;
   static constexpr uint32_t COPY_LIVE_BIT = 1U << 15U;
   static constexpr uint32_t GEN_ONE = 1U << 16U;
@@ -324,17 +325,14 @@ class Endpoint
     bool zlp = false;
   };
 
-  struct Region
-  {
-    size_t offset = 0;
-    size_t size = 0;
-  };
-
   void Attach(EndpointPool& pool) { pool_ = &pool; }
   void Service(bool in_isr);
   void NotifyOwner(bool in_isr);
   bool CanStart() const;
-  static bool Usable(uint32_t word, uint8_t index);
+  bool Usable(uint32_t word, uint8_t index) const
+  {
+    return index < slot_count_ && SlotOf(word, index) == FREE;
+  }
   RawData SlotData(uint8_t index, size_t capacity) const;
   void StartNext(bool in_isr);
   bool StartOne(bool in_isr, bool defer_failure);
@@ -364,7 +362,8 @@ class Endpoint
   EPNumber number_;
   Direction avail_direction_;
   RawData memory_;
-  size_t half_ = 0;  // Fixed start of slot 1, a cache-line multiple.
+  uint8_t slot_count_ = 1;  // Fixed at construction.
+  size_t slot_size_ = 0;    // Bytes of each slot; slot 1 starts here. Cache-line multiple.
   Config config_;
   Granted granted_;
   std::atomic<State> state_{State::DISABLED};
@@ -377,7 +376,6 @@ class Endpoint
   std::atomic<uint32_t> packet_{0};
   std::atomic<uint32_t> receive_size_{0};
   SlotMeta meta_[2];
-  Region stale_region_[2];
 
   // Owner-only request state.
   uint8_t inflight_ = NO_REQUEST;

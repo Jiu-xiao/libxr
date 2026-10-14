@@ -53,8 +53,8 @@ class MockEndpoint : public Endpoint
     std::vector<uint8_t> data;
   };
 
-  MockEndpoint(Number number, Direction dir, RawData storage)
-      : Endpoint(number, dir, storage)
+  MockEndpoint(Number number, Direction dir, RawData storage, uint8_t slot_count = 0)
+      : Endpoint(number, dir, storage, slot_count)
   {
   }
 
@@ -205,9 +205,10 @@ std::vector<uint8_t> Wire(const MockEndpoint& ep)
 
 struct Fixture
 {
+  // Two slots need two cache lines; the host build's line is 64 B.
   Block<128> in_storage;
   Block<128> out_storage;
-  Block<64> comm_storage;
+  Block<128> comm_storage;
   EndpointPool pool{4};
   MockEndpoint in{Number::EP1, Direction::IN, in_storage.Raw()};
   MockEndpoint out{Number::EP2, Direction::OUT, out_storage.Raw()};
@@ -238,11 +239,33 @@ void TestGeometry()
               f.in.GetGranted().slot_count == 2 && f.in.GetGranted().slot_capacity == 64);
   f.in.Close(false);
   TEST_ASSERT(f.in.GetState() == State::DISABLED && f.in.closes == 1);
+  // 128 B as two slots of 64 B: a 128 B high-speed packet is NO_BUFF; the count never
+  // drops to one.
+  f.pool.SetSpeed(Speed::HIGH);
+  TEST_ASSERT(f.comm.Configure({Direction::IN, Type::INTERRUPT, 128}, false) ==
+              ErrorCode::NO_BUFF);
+  f.comm.Close(false);
   TEST_ASSERT(f.comm.Configure({Direction::IN, Type::INTERRUPT, 64}, false) ==
               ErrorCode::OK);
-  TEST_ASSERT(f.comm.GetGranted().slot_count == 1 &&
+  TEST_ASSERT(f.comm.GetGranted().slot_count == 2 &&
               f.comm.GetGranted().slot_capacity == 64);
   f.comm.Close(false);
+  f.pool.SetSpeed(Speed::FULL);
+  // The same 128 B built as one slot holds the 128 B packet.
+  Block<128> single_storage;
+  EndpointPool single_pool{2};
+  MockEndpoint single{Number::EP4, Direction::IN, single_storage.Raw(), 1};
+  TEST_ASSERT(single_pool.Put(&single) == ErrorCode::OK);
+  single_pool.SetSpeed(Speed::HIGH);
+  TEST_ASSERT(single.Configure({Direction::IN, Type::INTERRUPT, 128}, false) ==
+              ErrorCode::OK);
+  TEST_ASSERT(single.GetGranted().slot_count == 1 &&
+              single.GetGranted().slot_capacity == 128);
+  // EP0 is one slot holding one packet.
+  Block<64> ep0_storage;
+  MockEndpoint ep0{Number::EP0, Direction::IN, ep0_storage.Raw()};
+  TEST_ASSERT(ep0.Configure({Direction::IN, Type::CONTROL, 64}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep0.GetGranted().slot_count == 1 && ep0.GetGranted().slot_capacity == 64);
   // Bulk FS packets are 8/16/32/64 only.
   TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 48}, false) ==
               ErrorCode::ARG_ERR);
@@ -274,6 +297,17 @@ void TestGeometry()
   TEST_ASSERT(ep.AcquireSlot(b, false) == ErrorCode::OK);
   TEST_ASSERT(static_cast<uint8_t*>(b.data.addr_) - static_cast<uint8_t*>(a.data.addr_) ==
               512);
+  ep.ReleaseSlot(a, false);
+  ep.ReleaseSlot(b, false);
+  ep.Close(false);
+  // The speed changes the packet size, never the slot count or the slot places.
+  pool.SetSpeed(Speed::HIGH);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.MaxPacketSize() == 512 && ep.GetGranted().slot_count == 2 &&
+              ep.GetGranted().slot_capacity == 512);
+  Slot c, d;
+  TEST_ASSERT(ep.AcquireSlot(c, false) == ErrorCode::OK && c.data.addr_ == a.data.addr_);
+  TEST_ASSERT(ep.AcquireSlot(d, false) == ErrorCode::OK && d.data.addr_ == b.data.addr_);
 }
 
 void TestInBorrowOrder()
@@ -601,10 +635,10 @@ void TestStall()
   TEST_ASSERT(rec.list.size() == 2 && rec.list[1].result == ErrorCode::OK);
 }
 
-void TestStaleSlotBlocksOverlap()
+void TestStaleSlotBlocksOnlyItself()
 {
-  // 256 B: two slots start at 0 and 128. An isochronous 200 B packet needs one slot at
-  // 0..199, which overlaps a stale slot 1 of the old two-slot binding.
+  // A slot lent across a rebinding stays its holder's; the other slot serves the new
+  // binding at once, and the stale one comes back when its holder returns it.
   Block<256> storage;
   EndpointPool pool{2};
   MockEndpoint ep{Number::EP1, Direction::IN, storage.Raw()};
@@ -615,13 +649,17 @@ void TestStaleSlotBlocksOverlap()
   TEST_ASSERT(ep.AcquireSlot(b, false) == ErrorCode::OK && b.index == 1);
   ep.ReleaseSlot(a, false);
   ep.Close(false);
-  TEST_ASSERT(ep.Configure({Direction::IN, Type::ISOCHRONOUS, 200}, false) ==
+  // A different packet size in the new binding does not move the slots.
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::ISOCHRONOUS, 100}, false) ==
               ErrorCode::OK);
-  TEST_ASSERT(ep.GetGranted().slot_count == 1 && ep.GetGranted().slot_capacity == 200);
-  Slot c;
-  TEST_ASSERT(ep.AcquireSlot(c, false) == ErrorCode::BUSY);
-  TEST_ASSERT(ep.Submit(b, 1, false, false) == ErrorCode::ABORTED);
+  TEST_ASSERT(ep.GetGranted().slot_count == 2 && ep.GetGranted().slot_capacity == 100);
+  Slot c, d;
   TEST_ASSERT(ep.AcquireSlot(c, false) == ErrorCode::OK && c.index == 0);
+  TEST_ASSERT(c.data.addr_ == a.data.addr_);
+  TEST_ASSERT(ep.AcquireSlot(d, false) == ErrorCode::BUSY);
+  TEST_ASSERT(ep.Submit(b, 1, false, false) == ErrorCode::ABORTED);
+  TEST_ASSERT(ep.AcquireSlot(d, false) == ErrorCode::OK && d.index == 1);
+  TEST_ASSERT(d.data.addr_ == b.data.addr_);
 }
 
 // Random interleavings of holders, owner and hardware on one endpoint. The oracle is
@@ -1097,8 +1135,8 @@ class TestDevice : public DeviceCore<BasicCapabilities>
 
 struct ControlFixture
 {
-  Block<128> in_storage, out_storage;
-  Block<64> ep0_in_storage, ep0_out_storage, comm_storage;
+  Block<128> in_storage, out_storage, comm_storage;
+  Block<64> ep0_in_storage, ep0_out_storage;
   EndpointPool pool{4};
   MockEndpoint in0{Number::EP0, Direction::IN, ep0_in_storage.Raw()};
   MockEndpoint out0{Number::EP0, Direction::OUT, ep0_out_storage.Raw()};
@@ -1278,8 +1316,14 @@ void TestStopHoldsLifecycle()
   const size_t out_starts = out.starts.size();
   out.HostSends(Bytes(64, 9));
   TEST_ASSERT(!out.active && out.starts.size() == out_starts);
-  for (uint16_t frame = 0; frame < EndpointPool::STOP_FRAME_LIMIT; ++frame)
+  // The limit counts 1 ms frames: the eight microframes of one high-speed frame are one.
+  for (uint8_t microframe = 0; microframe < 8U; ++microframe)
+    device.OnSof(true, 100, microframe);
+  TEST_ASSERT(device.stop_timeouts == 0);
+  for (uint16_t frame = 101; frame < 100U + EndpointPool::STOP_FRAME_LIMIT; ++frame)
     device.OnSof(true, frame);
+  TEST_ASSERT(device.stop_timeouts == 1);
+  device.OnSof(true, 200);
   TEST_ASSERT(device.stop_timeouts == 1);
   in.ConfirmStop();
   TEST_ASSERT(device.IsInited());
@@ -1320,7 +1364,7 @@ int main()
   TestCopyWrite();
   TestCopyRead();
   TestStall();
-  TestStaleSlotBlocksOverlap();
+  TestStaleSlotBlocksOnlyItself();
   for (uint32_t seed = 1; seed <= 4; ++seed)
   {
     TestRandomModel(Direction::IN, seed);

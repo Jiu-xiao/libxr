@@ -233,12 +233,21 @@ class EndpointPool
   void AddStopping()
   {
     if (stopping_count_.fetch_add(1U, std::memory_order_relaxed) == 0U)
+    {
       stop_frames_.store(0U, std::memory_order_relaxed);
+      stop_last_frame_.store(NO_FRAME, std::memory_order_relaxed);
+    }
   }
-  /// IRQ (SOF): true once when a stop has waited STOP_FRAME_LIMIT frames.
-  bool CountStopFrame()
+  /// IRQ (bus tick): true once when a stop has waited STOP_FRAME_LIMIT 1 ms frames. A
+  /// high-speed bus ticks every microframe; only a new frame number counts. 0xFFFF is an
+  /// unknown frame number (full-speed controllers without a frame counter): every tick
+  /// is one frame.
+  bool CountStopFrame(uint16_t frame)
   {
     if (stopping_count_.load(std::memory_order_relaxed) == 0U) return false;
+    if (frame != 0xFFFFU &&
+        stop_last_frame_.exchange(frame, std::memory_order_relaxed) == frame)
+      return false;
     return stop_frames_.fetch_add(1U, std::memory_order_relaxed) + 1U == STOP_FRAME_LIMIT;
   }
   /// Owner: a lifecycle event is held back; no endpoint may start meanwhile.
@@ -296,6 +305,8 @@ class EndpointPool
   Callback<uint32_t> control_handler_;
   std::atomic<uint32_t> stopping_count_{0};  ///< Changed by the owner only.
   std::atomic<uint32_t> stop_frames_{0};
+  static constexpr uint32_t NO_FRAME = UINT32_MAX;
+  std::atomic<uint32_t> stop_last_frame_{NO_FRAME};  ///< Frame number of the last count.
   bool lifecycle_hold_ = false;  ///< Controller-owner state.
   bool data_enabled_ = true;
   bool planning_ = false;
