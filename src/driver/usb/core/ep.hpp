@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "core.hpp"
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
@@ -189,6 +190,12 @@ class Endpoint
   State GetState() const { return state_.load(std::memory_order_acquire); }
   Type GetType() const { return config_.type; }
   uint16_t MaxPacketSize() const { return granted_.max_packet_size; }
+  /// 当前速度下槽和后端都放得下的最大合法包长；没有时为 0。只读查询，Configure 仍须显式
+  /// 指定包长 / Largest packet size legal at the current speed that the slot and the
+  /// backend hold, 0 when there is none. A query only: Configure still takes an explicit size
+  uint16_t LargestPacketSize(Type type) const;
+  /// 包长对该类型和速度是否合法 / Whether the packet size is legal for the type and speed
+  static bool IsLegalPacket(Type type, Speed speed, size_t packet);
   bool IsStalled() const { return GetState() == State::STALLED; }
   const Granted& GetGranted() const { return granted_; }
 

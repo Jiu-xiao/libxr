@@ -287,7 +287,18 @@ void TestGeometry()
   // Direction must match the registered direction.
   TEST_ASSERT(f.in.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
   f.in.Close(false);
+  // The query names the largest legal size the slot and the backend hold.
+  TEST_ASSERT(f.in.LargestPacketSize(Type::BULK) == 64);
+  f.pool.SetSpeed(Speed::HIGH);
+  TEST_ASSERT(f.in.LargestPacketSize(Type::BULK) == 0);  // 512 does not fit a 64 B slot.
+  TEST_ASSERT(f.in.LargestPacketSize(Type::INTERRUPT) == 64);
+  f.pool.SetSpeed(Speed::FULL);
   // A packet above the backend FIFO limit is ARG_ERR; a legal smaller one fits.
+  f.in.limit = 32;
+  TEST_ASSERT(f.in.LargestPacketSize(Type::BULK) == 32);
+  f.in.limit = 40;  // Not a legal bulk size: the next smaller legal one.
+  TEST_ASSERT(f.in.LargestPacketSize(Type::BULK) == 32 &&
+              f.in.LargestPacketSize(Type::INTERRUPT) == 40);
   f.in.limit = 32;
   TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
   f.in.Close(false);
@@ -1072,6 +1083,37 @@ void TestCDCReceivesOnePacketPerRequest()
   TEST_ASSERT(out.active && out.Last().length == 64);
 }
 
+void TestCDCTakesTheEndpointPacketSize()
+{
+  // The controller only holds 32 B packets on these endpoints: CDC binds with 32 B and
+  // still moves data in both directions.
+  CDCFixture f;
+  f.in.limit = 32;
+  f.out.limit = 32;
+  f.comm.limit = 8;
+  f.cdc.BindEndpoints(f.pool, 0, false);
+  TEST_ASSERT(f.in.MaxPacketSize() == 32 && f.out.MaxPacketSize() == 32 &&
+              f.comm.MaxPacketSize() == 8);
+  TEST_ASSERT(f.out.active && f.out.Last().length == 32);
+  const auto bytes = Bytes(40, 9);
+  WriteOperation op;
+  TEST_ASSERT(f.cdc.Write({bytes.data(), bytes.size()}, op) == ErrorCode::OK);
+  while (f.in.active) f.in.Complete();
+  TEST_ASSERT(Wire(f.in) == bytes);
+  const auto packet = Bytes(32, 4);
+  f.out.HostSends(packet);
+  std::array<uint8_t, 32> data{};
+  ReadOperation read;
+  TEST_ASSERT(f.cdc.Read({data.data(), data.size()}, read) == ErrorCode::OK);
+  TEST_ASSERT(std::vector<uint8_t>(data.begin(), data.end()) == packet);
+  f.cdc.UnbindEndpoints(f.pool, false);
+  // Nothing legal fits (512 B high-speed bulk in 64 B slots): Configure rejects the size.
+  f.pool.SetSpeed(Speed::HIGH);
+  f.in.limit = f.out.limit = f.comm.limit = UINT16_MAX;
+  f.cdc.BindEndpoints(f.pool, 0, false);
+  TEST_ASSERT(f.in.GetState() == State::ERROR && f.out.GetState() == State::ERROR);
+}
+
 void TestCDCRebind()
 {
   CDCFixture f;
@@ -1418,6 +1460,7 @@ int main()
   TestCDCWrite();
   TestCDCReceiveBackpressure();
   TestCDCReceivesOnePacketPerRequest();
+  TestCDCTakesTheEndpointPacketSize();
   TestCDCRebind();
   TestControlTransactions();
   TestStopHoldsLifecycle();

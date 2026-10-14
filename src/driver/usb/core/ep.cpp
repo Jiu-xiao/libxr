@@ -57,6 +57,58 @@ uint32_t Endpoint::NextTag(uint8_t index)
 // Configuration
 // ---------------------------------------------------------------------------
 
+namespace
+{
+// Largest packet of the type at the speed (USB 2.0 5.5.3 / 5.7.3 / 5.8.3 / 5.6.3).
+size_t SpeedLimit(Endpoint::Type type, Speed speed)
+{
+  switch (type)
+  {
+    case Endpoint::Type::CONTROL:
+      return speed == Speed::LOW ? 8U : 64U;
+    case Endpoint::Type::BULK:
+      return speed == Speed::HIGH ? 512U : 64U;
+    case Endpoint::Type::ISOCHRONOUS:
+      return speed == Speed::HIGH ? 1024U : 1023U;
+    default:
+      return speed == Speed::HIGH ? 1024U : speed == Speed::LOW ? 8U : 64U;
+  }
+}
+
+bool IsPowerOfTwo8To64(size_t packet)
+{
+  return packet == 8U || packet == 16U || packet == 32U || packet == 64U;
+}
+}  // namespace
+
+bool Endpoint::IsLegalPacket(Type type, Speed speed, size_t packet)
+{
+  if (packet == 0U || packet > SpeedLimit(type, speed)) return false;
+  if (type == Type::CONTROL)
+    return speed == Speed::HIGH  ? packet == 64U
+           : speed == Speed::LOW ? packet == 8U
+                                 : IsPowerOfTwo8To64(packet);
+  if (type == Type::BULK)
+    return speed == Speed::HIGH ? packet == 512U
+                                : speed != Speed::LOW && IsPowerOfTwo8To64(packet);
+  return true;
+}
+
+uint16_t Endpoint::LargestPacketSize(Type type) const
+{
+  const Speed speed = pool_ ? pool_->GetSpeed() : Speed::FULL;
+  const size_t room = std::min(slot_size_, MaxPacketSizeLimit(type));
+  if (type == Type::CONTROL || type == Type::BULK)
+  {
+    // The legal sizes are a short list: take the largest one that fits.
+    for (size_t packet = SpeedLimit(type, speed); packet >= 8U; packet /= 2U)
+      if (packet <= room && IsLegalPacket(type, speed, packet))
+        return static_cast<uint16_t>(packet);
+    return 0U;
+  }
+  return static_cast<uint16_t>(std::min(room, SpeedLimit(type, speed)));
+}
+
 ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
 {
   // A configured endpoint is never touched by a rejected Configure.
@@ -71,26 +123,8 @@ ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
   }
 
   const Speed speed = pool_ ? pool_->GetSpeed() : Speed::FULL;
-  const size_t speed_limit =
-      cfg.type == Type::CONTROL       ? (speed == Speed::LOW ? 8U : 64U)
-      : cfg.type == Type::BULK        ? (speed == Speed::HIGH ? 512U : 64U)
-      : cfg.type == Type::ISOCHRONOUS ? (speed == Speed::HIGH ? 1024U : 1023U)
-                                      : (speed == Speed::HIGH  ? 1024U
-                                         : speed == Speed::LOW ? 8U
-                                                               : 64U);
-  const size_t limit = std::min(speed_limit, MaxPacketSizeLimit(cfg.type));
-  // The caller names the packet size; it must be legal for the type and the bus speed
-  // (USB 2.0 5.5.3 / 5.8.3): control 8/16/32/64 (64 at high speed), bulk 8/16/32/64 at
-  // full speed and 512 at high speed.
   const size_t packet = cfg.max_packet_size;
-  const bool power_of_two_8_64 = packet == 8U || packet == 16U || packet == 32U || packet == 64U;
-  const bool illegal =
-      (cfg.type == Type::CONTROL && (speed == Speed::HIGH ? packet != 64U
-                                     : speed == Speed::LOW ? packet != 8U
-                                                           : !power_of_two_8_64)) ||
-      (cfg.type == Type::BULK &&
-       (speed == Speed::LOW || (speed == Speed::HIGH ? packet != 512U : !power_of_two_8_64)));
-  if (packet == 0U || packet > limit || illegal)
+  if (!IsLegalPacket(cfg.type, speed, packet) || packet > MaxPacketSizeLimit(cfg.type))
   {
     SetState(State::ERROR);
     return ErrorCode::ARG_ERR;

@@ -257,17 +257,21 @@ class CDCBase : public DeviceClass
     // Configure endpoint parameters.
     // A failed Configure leaves the endpoint in ERROR; the composition then rejects
     // the configuration.
-    // Bulk packets are 64 B at full speed and 512 B at high speed. A CDC stream has no
-    // transfer boundaries, so each OUT request is one packet: a longer request would hold
-    // received bytes until it fills.
-    const uint16_t bulk_packet = endpoint_pool.GetSpeed() == Speed::HIGH ? 512U : 64U;
-    (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, bulk_packet},
+    // Each endpoint takes the largest legal packet its slots and the controller hold at
+    // this speed (none at all: 0, rejected by Configure). A CDC stream has no transfer
+    // boundaries, so each OUT request is one packet: a longer request would hold received
+    // bytes until it fills. The notification needs no more than 16 B.
+    const uint16_t in_packet = ep_data_in_->LargestPacketSize(Endpoint::Type::BULK);
+    const uint16_t out_packet = ep_data_out_->LargestPacketSize(Endpoint::Type::BULK);
+    const uint16_t comm_packet = LibXR::min<uint16_t>(
+        16U, ep_comm_in_->LargestPacketSize(Endpoint::Type::INTERRUPT));
+    (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, in_packet},
                                  in_isr);
     (void)ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK,
-                                   bulk_packet, Endpoint::Mult::ONE, 1, bulk_packet},
+                                   out_packet, Endpoint::Mult::ONE, 1, out_packet},
                                   in_isr);
-    (void)ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16},
-                                 in_isr);
+    (void)ep_comm_in_->Configure(
+        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, comm_packet}, in_isr);
 
     // === 填充CDC描述符块 ===
     static constexpr uint8_t COMM_INTERFACE = 0;  // 通信接口号
@@ -354,7 +358,7 @@ class CDCBase : public DeviceClass
         static_cast<uint8_t>(DescriptorType::ENDPOINT),
         static_cast<uint8_t>(ep_comm_in_->GetAddress()),  // IN端点地址
         static_cast<uint8_t>(Endpoint::Type::INTERRUPT),
-        16,   // 16字节最大包大小
+        ep_comm_in_->MaxPacketSize(),
         0x04  // 轮询间隔FS-4ms HS-1ms
     };
 
