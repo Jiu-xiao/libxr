@@ -79,19 +79,18 @@ ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
                                          : speed == Speed::LOW ? 8U
                                                                : 64U);
   const size_t limit = std::min(speed_limit, MaxPacketSizeLimit(cfg.type));
-  size_t packet = cfg.max_packet_size;
-  if (packet == UINT16_MAX)
-  {
-    packet = limit;
-    if (cfg.type == Type::BULK && speed != Speed::HIGH)
-      packet = limit >= 64U ? 64U : limit >= 32U ? 32U : limit >= 16U ? 16U : 8U;
-  }
-  const bool bulk_illegal = cfg.type == Type::BULK &&
-                            (speed == Speed::LOW ||
-                             (speed == Speed::HIGH ? packet != 512U
-                                                   : packet != 8U && packet != 16U &&
-                                                         packet != 32U && packet != 64U));
-  if (packet == 0U || packet > limit || bulk_illegal)
+  // The caller names the packet size; it must be legal for the type and the bus speed
+  // (USB 2.0 5.5.3 / 5.8.3): control 8/16/32/64 (64 at high speed), bulk 8/16/32/64 at
+  // full speed and 512 at high speed.
+  const size_t packet = cfg.max_packet_size;
+  const bool power_of_two_8_64 = packet == 8U || packet == 16U || packet == 32U || packet == 64U;
+  const bool illegal =
+      (cfg.type == Type::CONTROL && (speed == Speed::HIGH ? packet != 64U
+                                     : speed == Speed::LOW ? packet != 8U
+                                                           : !power_of_two_8_64)) ||
+      (cfg.type == Type::BULK &&
+       (speed == Speed::LOW || (speed == Speed::HIGH ? packet != 512U : !power_of_two_8_64)));
+  if (packet == 0U || packet > limit || illegal)
   {
     SetState(State::ERROR);
     return ErrorCode::ARG_ERR;

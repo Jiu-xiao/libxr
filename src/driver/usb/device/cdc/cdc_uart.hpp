@@ -270,12 +270,12 @@ class CDCUart : public CDCBase, public LibXR::UART
     if (write_port_cdc_.Size() != 0U) RequestClassService(in_isr);
   }
 
-  /// Owner: arm every free OUT slot.
+  /// Owner: arm every free OUT slot, one packet each (see CDCBase::BindEndpoints).
   void ArmRx(bool in_isr)
   {
     Endpoint* ep = GetDataOutEndpoint();
     if (!Inited() || ep == nullptr) return;
-    const size_t size = ep->GetGranted().slot_capacity;
+    const size_t size = ep->MaxPacketSize();
     while (ep->Receive(size, in_isr) == ErrorCode::OK)
     {
     }

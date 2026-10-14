@@ -234,7 +234,7 @@ void Fill(const Slot& slot, uint8_t seed, size_t length)
 void TestGeometry()
 {
   Fixture f;
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.GetGranted().max_packet_size == 64 &&
               f.in.GetGranted().slot_count == 2 && f.in.GetGranted().slot_capacity == 64);
   f.in.Close(false);
@@ -273,15 +273,25 @@ void TestGeometry()
   f.in.Close(false);
   // A slot that cannot hold one packet is NO_BUFF, not fatal.
   f.pool.SetSpeed(Speed::HIGH);
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::NO_BUFF);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 512}, false) ==
+              ErrorCode::NO_BUFF);
+  f.in.Close(false);
+  // A packet size that is illegal at the current speed is ARG_ERR: high-speed bulk is 512
+  // only.
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
   f.in.Close(false);
   f.pool.SetSpeed(Speed::FULL);
-  // Direction must match the registered direction.
-  TEST_ASSERT(f.in.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::ARG_ERR);
+  // The packet size is never chosen for the caller: 0 is invalid.
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::ARG_ERR);
   f.in.Close(false);
-  // The backend FIFO limit lowers the default packet size.
+  // Direction must match the registered direction.
+  TEST_ASSERT(f.in.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
+  f.in.Close(false);
+  // A packet above the backend FIFO limit is ARG_ERR; a legal smaller one fits.
   f.in.limit = 32;
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
+  f.in.Close(false);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 32}, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.MaxPacketSize() == 32 && f.in.GetGranted().slot_capacity == 64);
   f.in.Close(false);
   f.in.limit = UINT16_MAX;
@@ -290,7 +300,7 @@ void TestGeometry()
   EndpointPool pool{2};
   MockEndpoint ep{Number::EP1, Direction::IN, big.Raw()};
   TEST_ASSERT(pool.Put(&ep) == ErrorCode::OK);
-  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(ep.GetGranted().slot_count == 2 && ep.GetGranted().slot_capacity == 512);
   Slot a, b;
   TEST_ASSERT(ep.AcquireSlot(a, false) == ErrorCode::OK);
@@ -302,7 +312,7 @@ void TestGeometry()
   ep.Close(false);
   // The speed changes the packet size, never the slot count or the slot places.
   pool.SetSpeed(Speed::HIGH);
-  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK, 512}, false) == ErrorCode::OK);
   TEST_ASSERT(ep.MaxPacketSize() == 512 && ep.GetGranted().slot_count == 2 &&
               ep.GetGranted().slot_capacity == 512);
   Slot c, d;
@@ -315,7 +325,7 @@ void TestInBorrowOrder()
   Fixture f;
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot a, b, c;
   TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
@@ -351,7 +361,7 @@ void TestZeroLengthTailAndShort()
   Fixture f;
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot slot;
   TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
   Fill(slot, 3, 64);
@@ -390,7 +400,7 @@ void TestOutLease()
   Fixture f;
   Recorder rec;
   f.out.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(f.out.Receive(63, false) == ErrorCode::SIZE_ERR);
   TEST_ASSERT(f.out.Receive(0, false) == ErrorCode::SIZE_ERR);
   TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
@@ -426,12 +436,12 @@ void TestCloseMakesLentSlotsStale()
   Fixture f;
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot held, spare;
   TEST_ASSERT(f.in.AcquireSlot(held, false) == ErrorCode::OK);
   f.in.Close(false);
   TEST_ASSERT(f.in.AcquireSlot(spare, false) == ErrorCode::STATE_ERR);
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   // The new binding only gets the free slot.
   TEST_ASSERT(f.in.AcquireSlot(spare, false) == ErrorCode::OK);
   TEST_ASSERT(spare.index != held.index);
@@ -442,7 +452,7 @@ void TestCloseMakesLentSlotsStale()
   TEST_ASSERT(rec.list.empty() && f.in.starts.empty());
   TEST_ASSERT(f.in.AcquireSlot(none, false) == ErrorCode::OK && none.index == held.index);
   // A stale OUT lease returns ABORTED too.
-  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::OK);
   Recorder out_rec;
   f.out.SetOnComplete(out_rec.Bind());
   TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
@@ -460,7 +470,7 @@ void TestCloseWithPendingStop()
   f.in.SetOnComplete(rec.Bind());
   f.in.pending_stop = true;
   f.in.reap_actual = 0;
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot a, b;
   TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
@@ -475,7 +485,7 @@ void TestCloseWithPendingStop()
   TEST_ASSERT(rec.list.size() == 2 && rec.list[0].result == ErrorCode::ABORTED &&
               rec.list[1].result == ErrorCode::ABORTED && f.in.closes == 1);
   // The slots are free for the next binding.
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
   f.in.ReleaseSlot(a, false);
@@ -495,7 +505,7 @@ void TestCloseWithPendingStop()
 
   // A retired IN request reaped after the stop is reported OK with its bytes.
   rec.list.clear();
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.Submit(a, 8, false, false) == ErrorCode::OK);
   f.in.reap_retired = true;
@@ -509,7 +519,7 @@ void TestCloseWithPendingStop()
   Recorder out_rec;
   f.out.SetOnComplete(out_rec.Bind());
   f.out.pending_stop = true;
-  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
   f.out.Close(false);
   f.out.HostSends(Bytes(7, 1));
@@ -524,7 +534,7 @@ void TestLateCompletionDropped()
   Fixture f;
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot slot;
   TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.Submit(slot, 8, false, false) == ErrorCode::OK);
@@ -546,7 +556,7 @@ void TestCopyWrite()
   Fixture f;
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   const auto data = Bytes(300, 9);
   TEST_ASSERT(f.in.Write({data.data(), data.size()}, true, false) == ErrorCode::OK);
   Slot slot;
@@ -574,7 +584,7 @@ void TestCopyWrite()
   f.in.Close(false);
   TEST_ASSERT(rec.list.size() == 4 && rec.list[3].result == ErrorCode::ABORTED &&
               rec.list[3].actual == 64);
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(slot, false) == ErrorCode::OK);
 }
 
@@ -583,7 +593,7 @@ void TestCopyRead()
   Fixture f;
   Recorder rec;
   f.out.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::OK);
   std::array<uint8_t, 100> buffer{};
   TEST_ASSERT(f.out.Read({buffer.data(), buffer.size()}, false) == ErrorCode::OK);
   TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::BUSY);
@@ -616,7 +626,7 @@ void TestStall()
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
   f.in.pending_stop = true;
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot a, b;
   TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.Submit(a, 8, false, false) == ErrorCode::OK);
@@ -643,7 +653,7 @@ void TestStaleSlotBlocksOnlyItself()
   EndpointPool pool{2};
   MockEndpoint ep{Number::EP1, Direction::IN, storage.Raw()};
   TEST_ASSERT(pool.Put(&ep) == ErrorCode::OK);
-  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot a, b;
   TEST_ASSERT(ep.AcquireSlot(a, false) == ErrorCode::OK && a.index == 0);
   TEST_ASSERT(ep.AcquireSlot(b, false) == ErrorCode::OK && b.index == 1);
@@ -705,7 +715,7 @@ void TestRandomModel(Direction direction, uint32_t seed)
   bool enabled = false;
   auto configure = [&]
   {
-    TEST_ASSERT(ep.Configure({direction, Type::BULK}, false) == ErrorCode::OK);
+    TEST_ASSERT(ep.Configure({direction, Type::BULK, 64}, false) == ErrorCode::OK);
     enabled = true;
   };
   configure();
@@ -811,7 +821,7 @@ void TestRandomModel(Direction direction, uint32_t seed)
   if (enabled) ep.Close(false);
   if (ep.stop_requested) ep.ConfirmStop();
   TEST_ASSERT(track.expected.empty());
-  TEST_ASSERT(ep.Configure({direction, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({direction, Type::BULK, 64}, false) == ErrorCode::OK);
   if (in)
   {
     Slot a, b;
@@ -853,7 +863,7 @@ void TestThreadedProducers()
         count->fetch_add(1U, std::memory_order_relaxed);
       },
       &completed));
-  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(ep.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   constexpr uint32_t PER_THREAD = 20000;
   std::atomic<uint32_t> submitted{0};
   auto producer = [&](uint8_t seed)
@@ -1026,6 +1036,40 @@ void TestCDCReceiveBackpressure()
   // Drained lease returned and rearmed behind the armed slot.
   f.out.HostSends(Bytes(3, 1));
   TEST_ASSERT(f.out.active && f.out.starts.size() == 3);
+}
+
+void TestCDCReceivesOnePacketPerRequest()
+{
+  // Slots of several packets: a full-speed 64 B packet ends no request longer than one
+  // packet, so CDC must not wait for a slot to fill before handing bytes to the reader.
+  Block<128> in_storage;
+  Block<1024> out_storage;
+  Block<128> comm_storage;
+  EndpointPool pool{4};
+  MockEndpoint in{Number::EP1, Direction::IN, in_storage.Raw()};
+  MockEndpoint out{Number::EP2, Direction::OUT, out_storage.Raw()};
+  MockEndpoint comm{Number::EP3, Direction::IN, comm_storage.Raw()};
+  TEST_ASSERT(pool.Put(&in) == ErrorCode::OK && pool.Put(&out) == ErrorCode::OK &&
+              pool.Put(&comm) == ErrorCode::OK);
+  TestCDC cdc;
+  DeviceComposition composition(pool, {&TEST_LANGUAGE}, {{&cdc}});
+  pool.SetControlHandler(Callback<uint32_t>::Create(
+      [](bool in_isr, TestCDC* cdc, uint32_t events)
+      {
+        if (events & EndpointPool::CLASS_EVENT) cdc->OnService(in_isr);
+      },
+      &cdc));
+  pool.SetDataEnabled(true, false);
+  cdc.BindEndpoints(pool, 0, false);
+  TEST_ASSERT(out.GetGranted().slot_capacity == 512);
+  TEST_ASSERT(out.active && out.Last().length == 64);
+  const auto packet = Bytes(64, 3);
+  out.HostSends(packet);
+  std::array<uint8_t, 64> data{};
+  ReadOperation op;
+  TEST_ASSERT(cdc.Read({data.data(), data.size()}, op) == ErrorCode::OK);
+  TEST_ASSERT(std::vector<uint8_t>(data.begin(), data.end()) == packet);
+  TEST_ASSERT(out.active && out.Last().length == 64);
 }
 
 void TestCDCRebind()
@@ -1336,7 +1380,7 @@ void TestStartFailureOrder()
   Fixture f;
   Recorder rec;
   f.in.SetOnComplete(rec.Bind());
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::OK);
   Slot a, b;
   TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
@@ -1373,6 +1417,7 @@ int main()
   TestThreadedProducers();
   TestCDCWrite();
   TestCDCReceiveBackpressure();
+  TestCDCReceivesOnePacketPerRequest();
   TestCDCRebind();
   TestControlTransactions();
   TestStopHoldsLifecycle();

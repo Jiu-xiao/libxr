@@ -257,8 +257,14 @@ class CDCBase : public DeviceClass
     // Configure endpoint parameters.
     // A failed Configure leaves the endpoint in ERROR; the composition then rejects
     // the configuration.
-    (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK}, in_isr);
-    (void)ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK},
+    // Bulk packets are 64 B at full speed and 512 B at high speed. A CDC stream has no
+    // transfer boundaries, so each OUT request is one packet: a longer request would hold
+    // received bytes until it fills.
+    const uint16_t bulk_packet = endpoint_pool.GetSpeed() == Speed::HIGH ? 512U : 64U;
+    (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, bulk_packet},
+                                 in_isr);
+    (void)ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK,
+                                   bulk_packet, Endpoint::Mult::ONE, 1, bulk_packet},
                                   in_isr);
     (void)ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16},
                                  in_isr);

@@ -126,7 +126,9 @@ class Endpoint
   {
     Direction direction = Direction::OUT;
     Type type = Type::BULK;
-    uint16_t max_packet_size = UINT16_MAX;  ///< UINT16_MAX：当前速度下的最大合法值
+    /// 最大包长，必须是该类型在当前速度下的合法值；0 无效 / Max packet size; must be legal
+    /// for the type at the current speed; 0 is invalid
+    uint16_t max_packet_size = 0;
     Mult mult = Mult::ONE;
     uint8_t burst = 1;
     size_t receive_size = 0;  ///< OUT：ReturnSlot 重新挂接收的长度；0 表示槽容量
