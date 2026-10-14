@@ -33,8 +33,8 @@ class CDCBase : public DeviceClass
   {
     HEADER = 0x00,  ///< 头功能描述符 / Header functional descriptor
     CALL_MANAGEMENT =
-        0x01,    ///< 呼叫管理功能描述符 / Call management functional descriptor
-    ACM = 0x02,  ///< 抽象控制模型描述符 / Abstract control model descriptor
+        0x01,      ///< 呼叫管理功能描述符 / Call management functional descriptor
+    ACM = 0x02,    ///< 抽象控制模型描述符 / Abstract control model descriptor
     UNION = 0x06,  ///< 联合功能描述符 / Union functional descriptor
   };
 
@@ -65,8 +65,8 @@ class CDCBase : public DeviceClass
   /// CDC类特定请求 / CDC class-specific requests
   enum class ClassRequest : uint8_t
   {
-    SET_LINE_CODING = 0x20,  ///< 设置串行线路编码 / Set line coding parameters
-    GET_LINE_CODING = 0x21,  ///< 获取当前线路编码 / Get current line coding
+    SET_LINE_CODING = 0x20,         ///< 设置串行线路编码 / Set line coding parameters
+    GET_LINE_CODING = 0x21,         ///< 获取当前线路编码 / Get current line coding
     SET_CONTROL_LINE_STATE = 0x22,  ///< 设置控制线路状态 / Set control line state
     SEND_BREAK = 0x23               ///< 发送BREAK信号 / Send BREAK signal
   };
@@ -92,7 +92,7 @@ class CDCBase : public DeviceClass
    */
   struct CDCLineCoding
   {
-    uint32_t dwDTERate;  ///< 波特率（小端格式） / Baud rate (little-endian)
+    uint32_t dwDTERate;   ///< 波特率（小端格式） / Baud rate (little-endian)
     uint8_t bCharFormat;  ///< 停止位：0=1位，1=1.5位，2=2位 / Stop bits: 0=1, 1=1.5, 2=2
     uint8_t bParityType;  ///< 校验：0=None,1=Odd,2=Even,3=Mark,4=Space / Parity:
                           ///< 0=None,1=Odd,2=Even,3=Mark,4=Space
@@ -260,8 +260,8 @@ class CDCBase : public DeviceClass
     (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK}, in_isr);
     (void)ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK},
                                   in_isr);
-    (void)ep_comm_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16}, in_isr);
+    (void)ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16},
+                                 in_isr);
 
     // === 填充CDC描述符块 ===
     static constexpr uint8_t COMM_INTERFACE = 0;  // 通信接口号
@@ -640,7 +640,7 @@ class CDCBase : public DeviceClass
     InterfaceDescriptor data_intf;  ///< 数据接口描述符 / Data interface descriptor
 
     EndpointDescriptor data_ep_out;  ///< 数据OUT端点描述符 / Data OUT endpoint descriptor
-    EndpointDescriptor data_ep_in;  ///< 数据IN端点描述符 / Data IN endpoint descriptor
+    EndpointDescriptor data_ep_in;   ///< 数据IN端点描述符 / Data IN endpoint descriptor
   } desc_block_;
   LIBXR_PACKED_END
 
@@ -660,7 +660,7 @@ class CDCBase : public DeviceClass
   // Endpoint numbers.
   Endpoint::EPNumber data_in_ep_num_;   ///< 数据IN端点号 / Data IN endpoint number
   Endpoint::EPNumber data_out_ep_num_;  ///< 数据OUT端点号 / Data OUT endpoint number
-  Endpoint::EPNumber comm_ep_num_;  ///< 通信端点号 / Communication endpoint number
+  Endpoint::EPNumber comm_ep_num_;      ///< 通信端点号 / Communication endpoint number
   const char* control_interface_string_ =
       nullptr;  ///< 控制接口字符串 / Control interface string
   const char* data_interface_string_ =

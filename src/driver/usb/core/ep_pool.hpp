@@ -163,7 +163,9 @@ class EndpointPool
     }
     ~InterruptScope()
     {
-      if (pool_.interrupt_depth_.fetch_sub(1U, std::memory_order_acq_rel) == 1U)
+      // A batch that recorded nothing (a FIFO refill, say) does not run the owner.
+      if (pool_.interrupt_depth_.fetch_sub(1U, std::memory_order_acq_rel) == 1U &&
+          pool_.irq_deferred_.exchange(0U, std::memory_order_acq_rel) != 0U)
         pool_.RequestService(true);
     }
     InterruptScope(const InterruptScope&) = delete;
@@ -202,7 +204,16 @@ class EndpointPool
     return (control_pending_.load(std::memory_order_acquire) & mask) != 0U;
   }
   /// An endpoint has work: a submit, a completion or a stop confirmation.
-  void PostEndpointEvent(bool in_isr) { PostControl(ENDPOINT_EVENT, in_isr); }
+  /// Owner: clear an endpoint's pending bit; true if it was set.
+  bool TakeEndpointBit(uint32_t bit)
+  {
+    return (endpoint_pending_.fetch_and(~bit, std::memory_order_acq_rel) & bit) != 0U;
+  }
+  void NotifyEndpoint(uint32_t bit, bool in_isr)
+  {
+    endpoint_pending_.fetch_or(bit, std::memory_order_release);
+    PostControl(ENDPOINT_EVENT, in_isr);
+  }
   /// Owner: make every endpoint recheck its queue after a start gate opened.
   void KickEndpoints(bool in_isr);
   /// Owner: whether an endpoint may start hardware now.
@@ -245,22 +256,25 @@ class EndpointPool
    * @param dir 端点方向（IN/OUT）/ Endpoint direction
    * @return size_t 下标（OUT=0, IN=1）/ Index (OUT=0, IN=1)
    */
-  static void ServiceEndpoint(Endpoint* ep, bool in_isr);
-
   static size_t DirIndex(Endpoint::Direction dir)
   {
     return (dir == Endpoint::Direction::IN) ? 1U : 0U;
   }
 
   Endpoint* slots_[SLOT_COUNT][DIR_COUNT] = {};  ///< [端点号][方向] 端点指针 / [num][dir]
-  SlotUse use_[SLOT_COUNT][DIR_COUNT] = {};  ///< 对应槽占用状态 / Per-slot usage
+  SlotUse use_[SLOT_COUNT][DIR_COUNT] = {};      ///< 对应槽占用状态 / Per-slot usage
 
   void* hardware_context_ = nullptr;
   HardwareEnter hardware_enter_ = nullptr;
   HardwareLeave hardware_leave_ = nullptr;
   std::atomic<uint32_t> interrupt_depth_{0};
+  std::atomic<uint32_t> irq_deferred_{0};  ///< Work was recorded during an IRQ batch.
   SerializedService service_;
   std::atomic<uint32_t> control_pending_{0};
+  // Endpoints with work: bit 2n is EP n OUT (or a bidirectional EP n), 2n + 1 is EP n IN.
+  std::atomic<uint32_t> endpoint_pending_{0};
+  Endpoint* by_bit_[2 * SLOT_COUNT] = {};
+  void Register(Endpoint* ep, size_t number, size_t dir);
   Callback<uint32_t> control_handler_;
   uint32_t stopping_count_ = 0;  ///< Controller-owner state.
   bool data_enabled_ = true;

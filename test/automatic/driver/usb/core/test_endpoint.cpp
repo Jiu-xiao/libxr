@@ -129,8 +129,11 @@ class MockEndpoint : public Endpoint
     std::lock_guard<std::mutex> guard(lock);
     TEST_ASSERT(!active && !stop_requested);
     TEST_ASSERT(request.length <= request.slot.size_ || request.slot.size_ == 0U);
-    Start start{request.tag, static_cast<uint8_t*>(request.slot.addr_), request.slot.size_,
-                request.length, {}};
+    Start start{request.tag,
+                static_cast<uint8_t*>(request.slot.addr_),
+                request.slot.size_,
+                request.length,
+                {}};
     if (GetConfig().direction == Direction::IN && request.length)
       start.data.assign(start.address, start.address + request.length);
     starts.push_back(std::move(start));
@@ -189,7 +192,8 @@ std::vector<uint8_t> Bytes(size_t size, uint8_t seed)
 std::vector<uint8_t> Wire(const MockEndpoint& ep)
 {
   std::vector<uint8_t> data;
-  for (const auto& packet : ep.sent) data.insert(data.end(), packet.begin(), packet.end());
+  for (const auto& packet : ep.sent)
+    data.insert(data.end(), packet.begin(), packet.end());
   return data;
 }
 
@@ -230,10 +234,12 @@ void TestGeometry()
   TEST_ASSERT(f.in.GetState() == State::DISABLED && f.in.closes == 1);
   TEST_ASSERT(f.comm.Configure({Direction::IN, Type::INTERRUPT, 64}, false) ==
               ErrorCode::OK);
-  TEST_ASSERT(f.comm.GetGranted().slot_count == 1 && f.comm.GetGranted().slot_capacity == 64);
+  TEST_ASSERT(f.comm.GetGranted().slot_count == 1 &&
+              f.comm.GetGranted().slot_capacity == 64);
   f.comm.Close(false);
   // Bulk FS packets are 8/16/32/64 only.
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 48}, false) == ErrorCode::ARG_ERR);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 48}, false) ==
+              ErrorCode::ARG_ERR);
   TEST_ASSERT(f.in.GetState() == State::ERROR);
   f.in.Close(false);
   // A slot that cannot hold one packet is NO_BUFF, not fatal.

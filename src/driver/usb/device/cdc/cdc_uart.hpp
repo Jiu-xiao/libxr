@@ -43,7 +43,8 @@ class CDCUartReadPort : public ReadPort
  *
  * 发送：owner 取一个空闲槽，从写端口队头拷入一段数据后提交；以满包结束的数据在后面没有
  * 更多数据、也没有未完成的请求时补一个零长包。接收：收完的槽作为租约交给本类，数据搬进读端口后归还并重新挂接收；读端口放
- * 不下时保留租约，主机随即被 NAK。复位或切换配置时写端口里尚未取出的数据保留到下一次配置。
+ * 不下时保留租约，主机随即被
+ * NAK。复位或切换配置时写端口里尚未取出的数据保留到下一次配置。
  *
  * Transmit: the owner acquires a free slot, copies a prefix of the write-port front into
  * it and submits it; data ending on a full packet is followed by a ZLP once nothing else
@@ -222,35 +223,41 @@ class CDCUart : public CDCBase, public LibXR::UART
   {
     Endpoint* ep = GetDataInEndpoint();
     if (!Inited() || ep == nullptr) return;
-    Endpoint::Slot slot;
-    if (ep->AcquireSlot(slot, in_isr) != ErrorCode::OK) return;
-    size_t size = 0U;
+    if (write_port_cdc_.Size() == 0U)
     {
-      auto queue = write_port_cdc_.GetWriteQueue(in_isr);
-      if (!queue.Empty())
-      {
-        const auto destination = slot.data;
-        size = queue.PopWithWriter(
-            destination.size_,
-            [destination](const uint8_t* first, size_t first_size, const uint8_t* second,
-                          size_t second_size) -> size_t
-            {
-              auto* output = static_cast<uint8_t*>(destination.addr_);
-              if (first_size) std::memcpy(output, first, first_size);
-              if (second_size) std::memcpy(output + first_size, second, second_size);
-              return first_size + second_size;
-            });
-      }
-    }
-    if (size == 0U)
-    {
-      ep->ReleaseSlot(slot, in_isr);
       // A transfer ending on a packet boundary is terminated once nothing follows it.
-      if (tx_tail_ && tx_outstanding_ == 0U && ep->SubmitZeroLength(in_isr) == ErrorCode::OK)
+      if (tx_tail_ && tx_outstanding_ == 0U &&
+          ep->SubmitZeroLength(in_isr) == ErrorCode::OK)
       {
         tx_tail_ = false;
         ++tx_outstanding_;
       }
+      return;
+    }
+    Endpoint::Slot slot;
+    if (ep->AcquireSlot(slot, in_isr) != ErrorCode::OK) return;
+    // Consecutive writes share one slot until it is full or the write port is empty.
+    size_t size = 0U;
+    while (size < slot.data.size_)
+    {
+      auto queue = write_port_cdc_.GetWriteQueue(in_isr);
+      if (queue.Empty()) break;
+      auto* output = static_cast<uint8_t*>(slot.data.addr_) + size;
+      const size_t taken = queue.PopWithWriter(
+          slot.data.size_ - size,
+          [output](const uint8_t* first, size_t first_size, const uint8_t* second,
+                   size_t second_size) -> size_t
+          {
+            if (first_size) std::memcpy(output, first, first_size);
+            if (second_size) std::memcpy(output + first_size, second, second_size);
+            return first_size + second_size;
+          });
+      if (taken == 0U) break;
+      size += taken;
+    }
+    if (size == 0U)
+    {
+      ep->ReleaseSlot(slot, in_isr);
       return;
     }
     // ABORTED: unbound meanwhile; the bytes already left the write port and are dropped.
@@ -283,6 +290,8 @@ class CDCUart : public CDCBase, public LibXR::UART
       if (rx_offset_ < lease.data.size_)
       {
         if (!read_port_cdc_.Readable()) return;
+        // Set before trying, so space freed meanwhile still requests another pass.
+        rx_waiting_.store(1U, std::memory_order_seq_cst);
         auto queue = read_port_cdc_.GetReadQueue(in_isr);
         const size_t amount =
             LibXR::min(queue.EmptySize(), lease.data.size_ - rx_offset_);
@@ -296,6 +305,7 @@ class CDCUart : public CDCBase, public LibXR::UART
         }
         queue.Publish();
         if (rx_offset_ < lease.data.size_) return;  // Keep the lease: backpressure.
+        rx_waiting_.store(0U, std::memory_order_relaxed);
       }
       const Endpoint::Slot done = lease;
       rx_head_ ^= 1U;
@@ -306,7 +316,12 @@ class CDCUart : public CDCBase, public LibXR::UART
   }
 
   friend class CDCUartReadPort;
-  void OnReceiveSpace(bool in_isr) { RequestClassService(in_isr); }
+  void OnReceiveSpace(bool in_isr)
+  {
+    // Only a lease held back by a full read port needs the owner.
+    if (rx_waiting_.exchange(0U, std::memory_order_seq_cst) != 0U)
+      RequestClassService(in_isr);
+  }
 
   CDCUartReadPort read_port_cdc_;    ///< CDC 接收端口 / CDC receive port
   LibXR::WritePort write_port_cdc_;  ///< CDC 发送端口 / CDC transmit port
@@ -316,9 +331,12 @@ class CDCUart : public CDCBase, public LibXR::UART
   Endpoint::Slot rx_leases_[2];  ///< 收到未搬完的租约，按到达顺序 / Leases in order
   uint8_t rx_head_ = 0;
   uint8_t rx_count_ = 0;
+  std::atomic<uint32_t> rx_waiting_{0};  ///< 租约等读端口腾空间 / A lease waits for space
   size_t rx_offset_ = 0;  ///< 队首租约已搬走的字节 / Bytes moved from the front lease
-  uint8_t tx_outstanding_ = 0;  ///< 已提交未完成的 IN 请求 / Submitted, unfinished IN requests
-  bool tx_tail_ = false;  ///< 最后一笔以满包结束，尚未补零长包 / Last one ended on a packet
+  uint8_t tx_outstanding_ =
+      0;  ///< 已提交未完成的 IN 请求 / Submitted, unfinished IN requests
+  bool tx_tail_ =
+      false;  ///< 最后一笔以满包结束，尚未补零长包 / Last one ended on a packet
 };
 
 inline void CDCUartReadPort::OnReadQueueSpaceAvailable(bool in_isr)

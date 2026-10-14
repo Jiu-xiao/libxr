@@ -45,8 +45,9 @@ void DeviceCore<C>::Initialize(bool in_isr)
   REQUIRE(in0_ != nullptr && out0_ != nullptr);
   in0_->SetOnComplete(in_callback_);
   out0_->SetOnComplete(out_callback_);
-  if (in0_->Configure({Endpoint::Direction::IN, Endpoint::Type::CONTROL, ep0_packet_size_},
-                      in_isr) != ErrorCode::OK ||
+  if (in0_->Configure(
+          {Endpoint::Direction::IN, Endpoint::Type::CONTROL, ep0_packet_size_}, in_isr) !=
+          ErrorCode::OK ||
       out0_->Configure(
           {Endpoint::Direction::OUT, Endpoint::Type::CONTROL, ep0_packet_size_},
           in_isr) != ErrorCode::OK)
@@ -513,7 +514,8 @@ ErrorCode DeviceCore<C>::ClassRequest(bool in_isr)
   {
     if (result.write_data.size_ && result.write_data.addr_ == nullptr)
       return ErrorCode::ARG_ERR;
-    WriteControl(in_isr, result.write_data);  // An empty IN response is a valid data stage.
+    WriteControl(in_isr,
+                 result.write_data);  // An empty IN response is a valid data stage.
     return ErrorCode::OK;
   }
   // The core receives the whole OUT data stage and hands it over by OnControlData.

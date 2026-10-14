@@ -19,15 +19,16 @@ class EndpointPool;
  *
  * 端点的内存由 BSP 提供，按当前包长划分成最多两个槽。取槽、往槽里写数据、提交、归还可以在
  * 任何上下文进行：取槽和提交各是一次对端点状态字的原子修改，中间的拷贝不加锁。借出的槽只能
- * 由持有者归还；端点解绑时借出的槽作废，持有者之后提交得到 `ABORTED`。启动硬件、回收完成、
- * 解绑与停止只在设备的串行化执行者（owner）中进行。
+ * 由持有者归还；端点解绑时借出的槽作废，持有者之后提交得到
+ * `ABORTED`。启动硬件、回收完成、 解绑与停止只在设备的串行化执行者（owner）中进行。
  *
  * Endpoint memory is supplied by the BSP and split into at most two slots for the current
  * packet size. Acquiring, filling, submitting and returning a slot work in any context:
- * acquire and submit are one atomic update of the endpoint state word each, and the copy in
- * between takes no lock. A lent slot is only ever returned by its holder; unbinding marks it
- * stale and a later submit returns `ABORTED`. Hardware start, completion retirement,
- * unbinding and stopping run only in the device's serialized executor (owner).
+ * acquire and submit are one atomic update of the endpoint state word each, and the copy
+ * in between takes no lock. A lent slot is only ever returned by its holder; unbinding
+ * marks it stale and a later submit returns `ABORTED`. Hardware start, completion
+ * retirement, unbinding and stopping run only in the device's serialized executor
+ * (owner).
  */
 class Endpoint
 {
@@ -97,7 +98,10 @@ class Endpoint
     PENDING  ///< 等硬件事件后调用 OnHardwareStopped / OnHardwareStopped follows later
   };
 
-  static constexpr uint8_t EPNumberToInt8(EPNumber ep) { return static_cast<uint8_t>(ep); }
+  static constexpr uint8_t EPNumberToInt8(EPNumber ep)
+  {
+    return static_cast<uint8_t>(ep);
+  }
 
   static constexpr uint8_t EPNumberToAddr(EPNumber ep, Direction dir)
   {
@@ -374,13 +378,15 @@ class Endpoint
 
   // Owner-only request state.
   uint8_t inflight_ = NO_REQUEST;
-  bool inflight_tail_ = false;  // The ZLP tail of the in-flight slot request is on the wire.
+  bool inflight_tail_ =
+      false;  // The ZLP tail of the in-flight slot request is on the wire.
   HwRequest inflight_request_;
   uint32_t sequence_ = 0;
   uint8_t pending_aborts_ = 0;  // Queued requests ended behind the in-flight one.
   bool stopping_ = false;
   bool close_after_stop_ = false;
   bool stall_after_stop_ = false;
+  bool start_before_deliver_ = false;
 
   // Copy transfer, published by the claiming caller before its submit and owned by the
   // owner after it.
@@ -398,7 +404,7 @@ class Endpoint
   size_t completion_actual_ = 0;
   ErrorCode completion_result_ = ErrorCode::OK;
   std::atomic<uint32_t> stop_confirmed_{0};
-  std::atomic<uint32_t> pending_{0};
+  uint32_t pending_bit_ = 0;  // This endpoint's bit in the pool's pending mask.
 
   Callback<const Completion&> on_complete_;
 };

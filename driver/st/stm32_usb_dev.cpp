@@ -23,16 +23,16 @@ extern "C" void __real_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd);
 // callbacks inside the batch only record facts; the owner runs once the batch ends.
 extern "C" void __wrap_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd)
 {
-  STM32USBDevice* device = STM32USBDevice::FindDevice(hpcd);
-  if (device == nullptr)
+  const auto id = STM32USBDeviceGetID(hpcd);
+  if (id >= STM32_USB_DEV_ID_NUM)
   {
     __real_HAL_PCD_IRQHandler(hpcd);
     return;
   }
-  USB::EndpointPool::InterruptScope batch(*device);
-  STM32Endpoint::BeforeInterrupt(hpcd);
+  USB::EndpointPool::InterruptScope batch(*STM32USBDevice::map_[id]);
+  STM32Endpoint::BeforeInterrupt(id, hpcd);
   __real_HAL_PCD_IRQHandler(hpcd);
-  STM32Endpoint::AfterInterrupt(hpcd);
+  STM32Endpoint::AfterInterrupt(id, hpcd);
 }
 
 void STM32USBDevice::RequireInterruptWrap()

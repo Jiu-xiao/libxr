@@ -39,8 +39,14 @@ class STM32Endpoint : public USB::Endpoint
   /// 设置 OUT 停止后 HAL 写入的暂存区 / Set the scratch area HAL writes after an OUT stop
   static void SetScratch(stm32_usb_dev_id_t id, RawData scratch);
   /// 控制器中断批处理的前后钩子 / Hooks around one controller IRQ batch
-  static void BeforeInterrupt(PCD_HandleTypeDef* hpcd);
-  static void AfterInterrupt(PCD_HandleTypeDef* hpcd);
+  static void BeforeInterrupt(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd)
+  {
+    if (redirect_mask_[id] != 0U) VisitRedirected(id, hpcd);
+  }
+  static void AfterInterrupt(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd)
+  {
+    if (stop_mask_[id] != 0U) VisitStopping(id, hpcd);
+  }
   static STM32Endpoint* Find(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool is_in);
 
   /// HAL 回调：当前请求完成 / HAL callback: the current request finished
@@ -61,6 +67,17 @@ class STM32Endpoint : public USB::Endpoint
   uint8_t HalAddress() const;
   bool IsIn() const { return GetConfig().direction == Direction::IN; }
   void Redirect();
+#if defined(USB_OTG_FS) || defined(USB_OTG_HS)
+  void WriteFirstPacket(PCD_EPTypeDef* ep);
+#endif
+  static void VisitRedirected(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd);
+  static void VisitStopping(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hpcd);
+  void SetStopWait(bool wait);
+  void SetRedirected(bool redirected);
+  uint32_t MaskBit() const
+  {
+    return uint32_t{1} << (EPNumberToInt8(GetNumber()) + (IsIn() ? 16U : 0U));
+  }
 
   PCD_HandleTypeDef* hpcd_;
   stm32_usb_dev_id_t id_;
@@ -74,11 +91,15 @@ class STM32Endpoint : public USB::Endpoint
   uint32_t hw_tag_ = 0;
   size_t hw_length_ = 0;
   RawData hw_slot_{nullptr, 0};
-  bool stop_wait_ = false;    ///< SNAK/EPDIS issued; waiting for the disable.
-  bool redirected_ = false;   ///< HAL's OUT write cursor points at the scratch area.
+  bool stop_wait_ = false;     ///< SNAK/EPDIS issued; waiting for the disable.
+  bool redirected_ = false;    ///< HAL's OUT write cursor points at the scratch area.
   size_t stopped_actual_ = 0;  ///< OUT bytes in the slot when it was abandoned.
 
   static inline RawData scratch_[STM32_USB_DEV_ID_NUM] = {};
+  // Per controller, bit n (OUT) / 16 + n (IN): endpoints the IRQ hooks must visit.
+  // Changed with the controller IRQ masked or inside it.
+  static inline uint32_t stop_mask_[STM32_USB_DEV_ID_NUM] = {};
+  static inline uint32_t redirect_mask_[STM32_USB_DEV_ID_NUM] = {};
 
  public:
 #if defined(USB_OTG_HS)

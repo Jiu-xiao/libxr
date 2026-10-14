@@ -38,6 +38,7 @@ LibXR::ErrorCode EndpointPool::Put(Endpoint* ep)
       slots_[ep_num][d] = ep;
       use_[ep_num][d] = SlotUse::AVAILABLE;
     }
+    Register(ep, ep_num, 0);
     return LibXR::ErrorCode::OK;
   }
 
@@ -48,6 +49,7 @@ LibXR::ErrorCode EndpointPool::Put(Endpoint* ep)
   }
   slots_[ep_num][d] = ep;
   use_[ep_num][d] = SlotUse::AVAILABLE;
+  Register(ep, ep_num, d);
   return LibXR::ErrorCode::OK;
 }
 
@@ -165,8 +167,16 @@ void EndpointPool::SetEndpoint0(Endpoint* ep0_in, Endpoint* ep0_out)
 {
   ep0_in_ = ep0_in;
   ep0_out_ = ep0_out;
-  if (ep0_in_) ep0_in_->Attach(*this);
-  if (ep0_out_) ep0_out_->Attach(*this);
+  if (ep0_in_)
+  {
+    ep0_in_->Attach(*this);
+    Register(ep0_in_, 0, 1);
+  }
+  if (ep0_out_)
+  {
+    ep0_out_->Attach(*this);
+    Register(ep0_out_, 0, 0);
+  }
 }
 
 void EndpointPool::PostControl(uint32_t events, bool in_isr)
@@ -179,45 +189,43 @@ void EndpointPool::RequestService(bool in_isr)
 {
   if (interrupt_depth_.load(std::memory_order_acquire) != 0U)
   {
+    irq_deferred_.store(1U, std::memory_order_release);
     service_.Publish(1U);
     return;
   }
-  service_.Invoke(1U, in_isr,
-                  [this](uint32_t, bool current_isr)
-                  {
-                    if (interrupt_depth_.load(std::memory_order_acquire) != 0U) return;
-                    const uint32_t events =
-                        control_pending_.exchange(0U, std::memory_order_acq_rel);
-                    if ((events & ~ENDPOINT_EVENT) != 0U)
-                      control_handler_.Run(current_isr, events & ~ENDPOINT_EVENT);
-                    if ((events & ENDPOINT_EVENT) == 0U) return;
-                    ServiceEndpoint(ep0_out_, current_isr);
-                    ServiceEndpoint(ep0_in_, current_isr);
-                    for (size_t n = 1; n < SLOT_COUNT; ++n)
-                    {
-                      ServiceEndpoint(slots_[n][0], current_isr);
-                      if (slots_[n][1] != slots_[n][0])
-                        ServiceEndpoint(slots_[n][1], current_isr);
-                    }
-                  });
+  service_.Invoke(
+      1U, in_isr,
+      [this](uint32_t, bool current_isr)
+      {
+        if (interrupt_depth_.load(std::memory_order_acquire) != 0U)
+        {
+          irq_deferred_.store(1U, std::memory_order_release);
+          return;
+        }
+        const uint32_t events = control_pending_.exchange(0U, std::memory_order_acq_rel);
+        if ((events & ~ENDPOINT_EVENT) != 0U)
+          control_handler_.Run(current_isr, events & ~ENDPOINT_EVENT);
+        if ((events & ENDPOINT_EVENT) == 0U) return;
+        uint32_t bits = endpoint_pending_.exchange(0U, std::memory_order_acq_rel);
+        for (size_t i = 0; bits != 0U; ++i, bits >>= 1U)
+          if ((bits & 1U) != 0U && by_bit_[i] != nullptr)
+            by_bit_[i]->Service(current_isr);
+      });
 }
 
-void EndpointPool::ServiceEndpoint(Endpoint* ep, bool in_isr)
+void EndpointPool::Register(Endpoint* ep, size_t number, size_t dir)
 {
-  if (ep != nullptr && ep->pending_.exchange(0U, std::memory_order_acq_rel) != 0U)
-    ep->Service(in_isr);
+  const size_t index = number * DIR_COUNT + dir;
+  by_bit_[index] = ep;
+  ep->pending_bit_ = uint32_t{1} << index;
 }
 
 void EndpointPool::KickEndpoints(bool in_isr)
 {
-  auto mark = [](Endpoint* ep)
-  {
-    if (ep != nullptr) ep->pending_.store(1U, std::memory_order_release);
-  };
-  mark(ep0_out_);
-  mark(ep0_in_);
-  for (size_t n = 1; n < SLOT_COUNT; ++n)
-    for (size_t d = 0; d < DIR_COUNT; ++d) mark(slots_[n][d]);
+  uint32_t bits = 0U;
+  for (size_t i = 0; i < 2U * SLOT_COUNT; ++i)
+    if (by_bit_[i] != nullptr) bits |= uint32_t{1} << i;
+  endpoint_pending_.fetch_or(bits, std::memory_order_release);
   PostControl(ENDPOINT_EVENT, in_isr);
 }
 

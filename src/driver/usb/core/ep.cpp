@@ -56,8 +56,7 @@ bool Endpoint::CanStart() const
 
 void Endpoint::NotifyOwner(bool in_isr)
 {
-  pending_.store(1U, std::memory_order_release);
-  if (pool_ != nullptr) pool_->PostEndpointEvent(in_isr);
+  if (pool_ != nullptr) pool_->NotifyEndpoint(pending_bit_, in_isr);
 }
 
 uint32_t Endpoint::NextTag(uint8_t index)
@@ -99,12 +98,11 @@ ErrorCode Endpoint::Configure(const Config& cfg, bool in_isr)
     if (cfg.type == Type::BULK && speed != Speed::HIGH)
       packet = limit >= 64U ? 64U : limit >= 32U ? 32U : limit >= 16U ? 16U : 8U;
   }
-  const bool bulk_illegal =
-      cfg.type == Type::BULK &&
-      (speed == Speed::LOW ||
-       (speed == Speed::HIGH ? packet != 512U
-                             : packet != 8U && packet != 16U && packet != 32U &&
-                                   packet != 64U));
+  const bool bulk_illegal = cfg.type == Type::BULK &&
+                            (speed == Speed::LOW ||
+                             (speed == Speed::HIGH ? packet != 512U
+                                                   : packet != 8U && packet != 16U &&
+                                                         packet != 32U && packet != 64U));
   if (packet == 0U || packet > limit || bulk_illegal)
   {
     SetState(State::ERROR);
@@ -312,8 +310,7 @@ void Endpoint::FinishStop(bool in_isr)
         result = retired ? ErrorCode::OK : ErrorCode::ABORTED;
         actual = meta.length;
       }
-      else if (config_.direction == Direction::IN && retired &&
-               actual == meta.length &&
+      else if (config_.direction == Direction::IN && retired && actual == meta.length &&
                !(meta.zlp && meta.length != 0U && meta.length % MaxPacketSize() == 0U))
       {
         result = ErrorCode::OK;
@@ -364,18 +361,26 @@ void Endpoint::DeliverAborts(bool in_isr)
 
 void Endpoint::Service(bool in_isr)
 {
-  RetireMailbox(in_isr);
-  if (stopping_ && stop_confirmed_.load(std::memory_order_acquire) != 0U)
-    FinishStop(in_isr);
-  StartNext(in_isr);
+  do
+  {
+    // On the normal path the next queued request starts before the completion callback
+    // runs, so the callback's work does not delay the wire.
+    start_before_deliver_ = true;
+    RetireMailbox(in_isr);
+    start_before_deliver_ = false;
+    if (stopping_ && stop_confirmed_.load(std::memory_order_acquire) != 0U)
+      FinishStop(in_isr);
+    StartNext(in_isr);
+    // Work posted for this endpoint meanwhile (often by its own callback) is done here.
+  } while (pool_ != nullptr && pool_->TakeEndpointBit(pending_bit_));
 }
 
 void Endpoint::RetireCompletion(bool in_isr) { RetireMailbox(in_isr); }
 
 void Endpoint::StartNext(bool in_isr)
 {
-  while (!stopping_ && inflight_ == NO_REQUEST && GetState() == State::IDLE && CanStart() &&
-         completion_ready_.load(std::memory_order_acquire) == 0U)
+  while (!stopping_ && inflight_ == NO_REQUEST && GetState() == State::IDLE &&
+         CanStart() && completion_ready_.load(std::memory_order_acquire) == 0U)
   {
     uint32_t old = word_.load(std::memory_order_acquire);
     uint32_t next;
@@ -406,9 +411,8 @@ void Endpoint::StartNext(bool in_isr)
 
 void Endpoint::StartRequest(bool in_isr, uint8_t index, size_t length)
 {
-  const RawData slot = index == ZLP_INDEX
-                           ? RawData{memory_.addr_, 0U}
-                           : SlotData(index, granted_.slot_capacity);
+  const RawData slot = index == ZLP_INDEX ? RawData{memory_.addr_, 0U}
+                                          : SlotData(index, granted_.slot_capacity);
   inflight_request_ = {slot, length, NextTag(index)};
   inflight_tag_.store(inflight_request_.tag, std::memory_order_release);
   ErrorCode result;
@@ -435,8 +439,7 @@ void Endpoint::RetireMailbox(bool in_isr)
   if (inflight_ == ZLP_INDEX || inflight_tail_)
   {
     if (result == ErrorCode::OK && actual != 0U) result = ErrorCode::OUT_OF_RANGE;
-    FinishInflight(in_isr, result,
-                   inflight_ == ZLP_INDEX ? 0U : meta_[inflight_].length);
+    FinishInflight(in_isr, result, inflight_ == ZLP_INDEX ? 0U : meta_[inflight_].length);
     return;
   }
 
@@ -488,6 +491,7 @@ void Endpoint::FinishInflight(bool in_isr, ErrorCode result, size_t actual)
   if (index == ZLP_INDEX)
   {
     word_.fetch_and(~ZLP_INFLIGHT_BIT, std::memory_order_acq_rel);
+    if (start_before_deliver_) StartNext(in_isr);
     Deliver(in_isr, result, 0U);
     DeliverAborts(in_isr);
     return;
@@ -510,9 +514,9 @@ void Endpoint::FinishInflight(bool in_isr, ErrorCode result, size_t actual)
                                       std::memory_order_acquire))
   {
   }
+  if (start_before_deliver_) StartNext(in_isr);
   if (lease)
-    Deliver(in_isr, result, actual,
-            {RawData{SlotData(index, 0U).addr_, actual}, index});
+    Deliver(in_isr, result, actual, {RawData{SlotData(index, 0U).addr_, actual}, index});
   else
     Deliver(in_isr, result, actual);
   DeliverAborts(in_isr);
@@ -566,7 +570,8 @@ ErrorCode Endpoint::AcquireSlot(Slot& slot, bool in_isr)
   size_t capacity;
   do
   {
-    if ((old & ENABLED_BIT) == 0U || (old & DIR_IN_BIT) == 0U) return ErrorCode::STATE_ERR;
+    if ((old & ENABLED_BIT) == 0U || (old & DIR_IN_BIT) == 0U)
+      return ErrorCode::STATE_ERR;
     if (old & COPY_BIT) return ErrorCode::BUSY;
     pick = Usable(old, 0U) ? 0U : Usable(old, 1U) ? 1U : NO_REQUEST;
     if (pick == NO_REQUEST) return ErrorCode::BUSY;
@@ -614,7 +619,8 @@ ErrorCode Endpoint::SubmitZeroLength(bool in_isr)
   uint32_t next;
   do
   {
-    if ((old & ENABLED_BIT) == 0U || (old & DIR_IN_BIT) == 0U) return ErrorCode::STATE_ERR;
+    if ((old & ENABLED_BIT) == 0U || (old & DIR_IN_BIT) == 0U)
+      return ErrorCode::STATE_ERR;
     if (old & (COPY_BIT | ZLP_QUEUED_BIT | ZLP_INFLIGHT_BIT)) return ErrorCode::BUSY;
     for (uint8_t i = 0; i < 2U; ++i)
     {
@@ -649,7 +655,8 @@ ErrorCode Endpoint::Receive(size_t bytes, bool in_isr)
   uint8_t pick;
   do
   {
-    if ((old & ENABLED_BIT) == 0U || (old & DIR_IN_BIT) != 0U) return ErrorCode::STATE_ERR;
+    if ((old & ENABLED_BIT) == 0U || (old & DIR_IN_BIT) != 0U)
+      return ErrorCode::STATE_ERR;
     if (old & COPY_BIT) return ErrorCode::BUSY;
     const size_t packet = packet_.load(std::memory_order_relaxed);
     if (bytes > capacity_.load(std::memory_order_relaxed) ||
@@ -714,8 +721,8 @@ ErrorCode Endpoint::ReturnSlot(const Slot& slot, bool in_isr)
 // Copy mode
 // ---------------------------------------------------------------------------
 
-ErrorCode Endpoint::ClaimForCopy(bool in, size_t size, uint8_t& claimed,
-                                 size_t& capacity, size_t& packet)
+ErrorCode Endpoint::ClaimForCopy(bool in, size_t size, uint8_t& claimed, size_t& capacity,
+                                 size_t& packet)
 {
   uint32_t old = word_.load(std::memory_order_acquire);
   uint32_t next;
@@ -765,7 +772,8 @@ ErrorCode Endpoint::PublishCopy(const uint8_t* order, uint8_t count, uint8_t cla
     }
     for (uint8_t i = 0; i < count; ++i) next = Enqueue(next, order[i]);
     for (uint8_t i = 0; i < 2U; ++i)
-      if ((claimed & (1U << i)) && SlotOf(next, i) == LENT) next = WithSlot(next, i, FREE);
+      if ((claimed & (1U << i)) && SlotOf(next, i) == LENT)
+        next = WithSlot(next, i, FREE);
     next |= COPY_LIVE_BIT;
   } while (!word_.compare_exchange_weak(old, next, std::memory_order_acq_rel,
                                         std::memory_order_acquire));
@@ -867,7 +875,8 @@ void Endpoint::FinishCopyWrite(bool in_isr, uint8_t index, ErrorCode result,
   {
     const size_t capacity = granted_.slot_capacity;
     const size_t length = std::min(capacity, copy_size_ - copy_offset_);
-    Memory::FastCopy(SlotData(index, capacity).addr_, copy_source_ + copy_offset_, length);
+    Memory::FastCopy(SlotData(index, capacity).addr_, copy_source_ + copy_offset_,
+                     length);
     copy_offset_ += length;
     meta_[index] = {length, copy_offset_ == copy_size_ && copy_zlp_};
     while (!word_.compare_exchange_weak(old, Enqueue(WithSlot(old, index, FREE), index),
