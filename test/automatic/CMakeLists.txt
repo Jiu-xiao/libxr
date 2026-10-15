@@ -220,3 +220,10 @@ target_link_libraries(test_driver_async_condition PRIVATE xr)
 target_include_directories(test_driver_async_condition PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
+
+# gs_usb device class: per-channel queues, echo share, backpressure and USER_ID.
+add_executable(test_usb_gsusb driver/usb/device/gsusb/test_gsusb.cpp)
+target_link_libraries(test_usb_gsusb PRIVATE xr)
+target_include_directories(test_usb_gsusb PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_gsusb COMMAND test_usb_gsusb)
+set_tests_properties(usb_gsusb PROPERTIES TIMEOUT 30)
