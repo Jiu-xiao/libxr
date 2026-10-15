@@ -63,6 +63,59 @@ uint32_t EndpointType(USB::Endpoint::Type type)
 {
   return static_cast<uint32_t>(type) << 18U;
 }
+
+IRQn_Type IrqOf(uint8_t index)
+{
+#if defined(USB_OTG_FS)
+  if (index == OTG_FS_INDEX) return OTG_FS_IRQn;
+#endif
+#if defined(USB_OTG_HS)
+  if (index == OTG_HS_INDEX) return OTG_HS_IRQn;
+#endif
+  UNUSED(index);
+  return static_cast<IRQn_Type>(-1);
+}
+
+volatile uint32_t& Pcgcctl(USB_OTG_GlobalTypeDef* core)
+{
+  return *reinterpret_cast<volatile uint32_t*>(reinterpret_cast<uintptr_t>(core) +
+                                               USB_OTG_PCGCCTL_BASE);
+}
+
+// GDFIFOCFG exists on the newer cores only (H7, U5, ...).
+template <typename Core>
+auto ReadGdfifocfg(Core* core, int) -> decltype(static_cast<uint32_t>(core->GDFIFOCFG))
+{
+  return core->GDFIFOCFG;
+}
+template <typename Core>
+uint32_t ReadGdfifocfg(Core*, long)
+{
+  return 0U;
+}
+template <typename Core>
+auto WriteGdfifocfg(Core* core, uint32_t value, int)
+    -> decltype(core->GDFIFOCFG = value, void())
+{
+  core->GDFIFOCFG = value;
+}
+template <typename Core>
+void WriteGdfifocfg(Core*, uint32_t, long)
+{
+}
+
+#if defined(USB_OTG_GOTGCTL_BVALOEN) && defined(USB_OTG_GOTGCTL_BVALOVAL)
+constexpr uint32_t SESSION_OVERRIDE = USB_OTG_GOTGCTL_BVALOEN | USB_OTG_GOTGCTL_BVALOVAL;
+#else
+constexpr uint32_t SESSION_OVERRIDE = 0U;
+#endif
+
+// Reset chain limits. The AHB idles and CSRST clears within a few clocks; device mode
+// takes effect at least 25 ms after FDMOD is written (RM0090 OTG_FS_GUSBCFG.FDMOD), and
+// HAL gives up after 200 ms (HAL_USB_CURRENT_MODE_MAX_DELAY_MS).
+constexpr uint32_t RESET_STEP_TIMEOUT_MS = 10U;
+constexpr uint32_t MODE_MIN_MS = 25U;
+constexpr uint32_t MODE_TIMEOUT_MS = 200U;
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -74,7 +127,8 @@ STM32USBOtgDevice::STM32USBOtgDevice(
     const HardwareConfig& hw, size_t rx_fifo_size,
     const std::initializer_list<RawData>& rx_ep_cfgs,
     const std::initializer_list<EPInConfig>& tx_ep_cfgs,
-    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
+    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
+    uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack*>& lang_list,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>&
         configs,
@@ -87,7 +141,9 @@ STM32USBOtgDevice::STM32USBOtgDevice(
       core_(core),
       endpoint_count_(endpoint_count),
       hw_(hw),
-      bus_speed_(hw.high_speed ? USB::Speed::HIGH : USB::Speed::FULL)
+      bus_speed_(hw.high_speed ? USB::Speed::HIGH : USB::Speed::FULL),
+      irq_(IrqOf(index)),
+      reset_wait_(RecoveryCheck, RecoveryDone, this)
 {
   REQUIRE(index < MAX_DEVICES && endpoint_count <= MAX_ENDPOINTS);
   REQUIRE(rx_ep_cfgs.size() > 0 && rx_ep_cfgs.size() <= endpoint_count);
@@ -140,32 +196,28 @@ STM32USBOtgDevice::STM32USBOtgDevice(
   (void)USB_DevDisconnect(core_);
   core_->GINTMSK = 0U;
   core_->GINTSTS = 0xBFFFFFFFU;
+  gotgctl_ = core_->GOTGCTL & SESSION_OVERRIDE;
+  gahbcfg_ = core_->GAHBCFG & ~USB_OTG_GAHBCFG_GINT;
+  gusbcfg_ = core_->GUSBCFG;
+  gccfg_ = core_->GCCFG;
+  gdfifocfg_ = ReadGdfifocfg(core_, 0);
+  dcfg_ = Device()->DCFG;
 
-  // FIFO RAM: RX first, then TX0 and the TX FIFO of each IN endpoint in order.
-  const uint32_t rx_words = static_cast<uint32_t>(rx_fifo_size / 4U);
-  core_->GRXFSIZ = rx_words;
-  uint32_t offset = rx_words;
-  uint8_t fifo = 0;
+  size_t fifo_bytes = rx_fifo_size;
   for (const auto& tx : tx_ep_cfgs)
   {
     REQUIRE(tx.fifo_size >= 8U && tx.fifo_size % 4U == 0U);
-    const uint32_t words = static_cast<uint32_t>(tx.fifo_size / 4U);
-    if (fifo == 0U)
-      core_->DIEPTXF0_HNPTXFSIZ = (words << 16U) | offset;
-    else
-      core_->DIEPTXF[fifo - 1U] = (words << 16U) | offset;
-    offset += words;
-    ++fifo;
+    fifo_bytes += tx.fifo_size;
   }
-  REQUIRE(offset * 4U <= total_fifo);
+  REQUIRE(fifo_bytes <= total_fifo);
 
   auto rx = rx_ep_cfgs.begin();
   auto tx = tx_ep_cfgs.begin();
   auto* ep0_out = new STM32OtgEndpoint(*this, USB::Endpoint::EPNumber::EP0,
                                        USB::Endpoint::Direction::OUT, rx_fifo_size, *rx);
-  auto* ep0_in = new STM32OtgEndpoint(*this, USB::Endpoint::EPNumber::EP0,
-                                      USB::Endpoint::Direction::IN, tx->fifo_size,
-                                      tx->buffer);
+  auto* ep0_in =
+      new STM32OtgEndpoint(*this, USB::Endpoint::EPNumber::EP0,
+                           USB::Endpoint::Direction::IN, tx->fifo_size, tx->buffer);
   SetEndpoint0(ep0_in, ep0_out);
   auto number = USB::Endpoint::EPNumber::EP1;
   for (++rx; rx != rx_ep_cfgs.end(); ++rx)
@@ -181,6 +233,25 @@ STM32USBOtgDevice::STM32USBOtgDevice(
                              tx->buffer));
     number = USB::Endpoint::NextEPNumber(number);
   }
+  ProgramFifos();
+}
+
+void STM32USBOtgDevice::ProgramFifos()
+{
+  // FIFO RAM: RX first, then TX0 and the TX FIFO of each IN endpoint in order (IN
+  // endpoint n uses TX FIFO n).
+  const uint32_t rx_words = static_cast<uint32_t>(out_[0]->fifo_size_ / 4U);
+  core_->GRXFSIZ = rx_words;
+  uint32_t offset = rx_words;
+  for (uint8_t fifo = 0; fifo < endpoint_count_ && in_[fifo] != nullptr; ++fifo)
+  {
+    const uint32_t words = static_cast<uint32_t>(in_[fifo]->fifo_size_ / 4U);
+    if (fifo == 0U)
+      core_->DIEPTXF0_HNPTXFSIZ = (words << 16U) | offset;
+    else
+      core_->DIEPTXF[fifo - 1U] = (words << 16U) | offset;
+    offset += words;
+  }
 }
 
 USB_OTG_DeviceTypeDef* STM32USBOtgDevice::Device() const
@@ -191,9 +262,9 @@ USB_OTG_DeviceTypeDef* STM32USBOtgDevice::Device() const
 
 USB_OTG_INEndpointTypeDef* STM32USBOtgDevice::InEp(uint8_t num) const
 {
-  return reinterpret_cast<USB_OTG_INEndpointTypeDef*>(
-      reinterpret_cast<uintptr_t>(core_) + USB_OTG_IN_ENDPOINT_BASE +
-      num * USB_OTG_EP_REG_SIZE);
+  return reinterpret_cast<USB_OTG_INEndpointTypeDef*>(reinterpret_cast<uintptr_t>(core_) +
+                                                      USB_OTG_IN_ENDPOINT_BASE +
+                                                      num * USB_OTG_EP_REG_SIZE);
 }
 
 USB_OTG_OUTEndpointTypeDef* STM32USBOtgDevice::OutEp(uint8_t num) const
@@ -205,8 +276,8 @@ USB_OTG_OUTEndpointTypeDef* STM32USBOtgDevice::OutEp(uint8_t num) const
 
 volatile uint32_t& STM32USBOtgDevice::Fifo(uint8_t num) const
 {
-  return *reinterpret_cast<volatile uint32_t*>(reinterpret_cast<uintptr_t>(core_) +
-                                               USB_OTG_FIFO_BASE + num * USB_OTG_FIFO_SIZE);
+  return *reinterpret_cast<volatile uint32_t*>(
+      reinterpret_cast<uintptr_t>(core_) + USB_OTG_FIFO_BASE + num * USB_OTG_FIFO_SIZE);
 }
 
 uint32_t STM32USBOtgDevice::CoreId() const { return core_id_; }
@@ -215,6 +286,25 @@ void STM32USBOtgDevice::Start(bool)
 {
   USB::EndpointPool::HardwareScope hardware(this);
   devices_[index_] = this;
+  connected_ = true;
+  switch (recovery_.load(std::memory_order_acquire))
+  {
+    case Recovery::IDLE:
+      Connect();
+      break;
+    case Recovery::RESET_DONE:
+      FinishRecovery();  // Connects.
+      break;
+    case Recovery::FAILED:
+      BeginRecovery();
+      break;
+    default:
+      break;  // The reset chain runs; its end connects.
+  }
+}
+
+void STM32USBOtgDevice::Connect()
+{
   discard_ = false;
   core_->GINTSTS = 0xBFFFFFFFU;
   uint32_t mask = USB_OTG_GINTMSK_USBRST | USB_OTG_GINTMSK_ENUMDNEM |
@@ -225,7 +315,6 @@ void STM32USBOtgDevice::Start(bool)
   core_->GINTMSK = mask;
   UpdateTick();
   core_->GAHBCFG |= USB_OTG_GAHBCFG_GINT;
-  connected_ = true;
   (void)USB_DevConnect(core_);
 }
 
@@ -234,8 +323,11 @@ void STM32USBOtgDevice::Stop(bool in_isr)
   {
     USB::EndpointPool::HardwareScope hardware(this);
     connected_ = false;
-    (void)USB_DevDisconnect(core_);
-    core_->GAHBCFG &= ~USB_OTG_GAHBCFG_GINT;
+    if (!Recovering())
+    {
+      (void)USB_DevDisconnect(core_);
+      core_->GAHBCFG &= ~USB_OTG_GAHBCFG_GINT;
+    }
     if (devices_[index_] == this) devices_[index_] = nullptr;
   }
   // Off the bus nothing reaches an endpoint any more; confirm every waiting stop.
@@ -244,21 +336,142 @@ void STM32USBOtgDevice::Stop(bool in_isr)
 
 void STM32USBOtgDevice::OnStopTimeout(bool in_isr)
 {
-  // A stop that never confirms leaves the core in an unknown state. The device leaves
-  // the bus and every waiting stop is confirmed; the core is reset and reconnected once
-  // a millisecond delay is available, and stays disconnected until then.
+  // A stop that never confirms leaves the core in an unknown state. The device leaves the
+  // bus, every waiting stop is confirmed and the session ends; then the core is reset on
+  // the millisecond tick and reconnected, and the host enumerates again.
   {
     USB::EndpointPool::HardwareScope hardware(this);
-    connected_ = false;
     (void)USB_DevDisconnect(core_);
+    core_->GAHBCFG &= ~USB_OTG_GAHBCFG_GINT;
   }
   ForceStopAll(in_isr);
+  {
+    USB::EndpointPool::HardwareScope hardware(this);
+    BeginRecovery();
+  }
+  OnDisconnect(in_isr);
+}
+
+void STM32USBOtgDevice::BeginRecovery()
+{
+  // Called with the hardware guard held. Transfers the registers still describe are lost
+  // with the reset.
+  for (uint8_t i = 0; i < endpoint_count_; ++i)
+  {
+    if (in_[i] != nullptr && in_[i]->hw_tag_ != 0U) in_[i]->hw_offline_ = true;
+    if (out_[i] != nullptr && out_[i]->hw_tag_ != 0U) out_[i]->hw_offline_ = true;
+  }
+  recovery_.store(Recovery::AHB_IDLE, std::memory_order_release);
+  if (reset_wait_.Wait(0U, RESET_STEP_TIMEOUT_MS) != ErrorCode::OK)
+    recovery_.store(Recovery::FAILED, std::memory_order_release);
+}
+
+bool STM32USBOtgDevice::RecoveryCheck(void* arg)
+{
+  auto* self = static_cast<STM32USBOtgDevice*>(arg);
+  USB_OTG_GlobalTypeDef* core = self->core_;
+  switch (self->recovery_.load(std::memory_order_acquire))
+  {
+    case Recovery::AHB_IDLE:
+      return (core->GRSTCTL & USB_OTG_GRSTCTL_AHBIDL) != 0U;
+    case Recovery::CORE_RESET:
+      return (core->GRSTCTL & USB_OTG_GRSTCTL_CSRST) == 0U;
+    case Recovery::DEVICE_MODE:
+      return (core->GINTSTS & USB_OTG_GINTSTS_CMOD) == 0U;
+    default:
+      return true;
+  }
+}
+
+void STM32USBOtgDevice::RecoveryDone(void* arg, ErrorCode result)
+{
+  // Millisecond tick context: one short register step per stage.
+  auto* self = static_cast<STM32USBOtgDevice*>(arg);
+  USB_OTG_GlobalTypeDef* core = self->core_;
+  if (result != ErrorCode::OK)
+  {
+    // The transceiver stays powered down: the device remains off the bus.
+    self->recovery_.store(Recovery::FAILED, std::memory_order_release);
+    return;
+  }
+  ErrorCode waited = ErrorCode::OK;
+  switch (self->recovery_.load(std::memory_order_acquire))
+  {
+    case Recovery::AHB_IDLE:
+      // The soft reset clears DCTL.SDIS; with the transceiver powered down the pull-up
+      // stays off until the device registers are restored.
+      core->GCCFG &= ~USB_OTG_GCCFG_PWRDWN;
+      core->GRSTCTL |= USB_OTG_GRSTCTL_CSRST;
+      self->recovery_.store(Recovery::CORE_RESET, std::memory_order_release);
+      waited = self->reset_wait_.Wait(0U, RESET_STEP_TIMEOUT_MS);
+      break;
+    case Recovery::CORE_RESET:
+      // The configuration from initialization, FDMOD included (USB_SetCurrentMode()).
+      core->GUSBCFG = self->gusbcfg_;
+      core->GOTGCTL = (core->GOTGCTL & ~SESSION_OVERRIDE) | self->gotgctl_;
+      core->GAHBCFG = self->gahbcfg_;
+      WriteGdfifocfg(core, self->gdfifocfg_, 0);
+      Pcgcctl(core) = 0U;
+      self->recovery_.store(Recovery::DEVICE_MODE, std::memory_order_release);
+      waited = self->reset_wait_.Wait(MODE_MIN_MS, MODE_TIMEOUT_MS);
+      break;
+    case Recovery::DEVICE_MODE:
+      self->recovery_.store(Recovery::RESET_DONE, std::memory_order_release);
+      NVIC_SetPendingIRQ(self->irq_);  // The interrupt restores the rest and reconnects.
+      break;
+    default:
+      break;
+  }
+  if (waited != ErrorCode::OK)
+    self->recovery_.store(Recovery::FAILED, std::memory_order_release);
+}
+
+void STM32USBOtgDevice::FinishRecovery()
+{
+  // Called in the interrupt or with the hardware guard held. The device registers as
+  // USB_DevInit() leaves them; the reset flushed the FIFOs.
+  core_->GCCFG = gccfg_;
+  Pcgcctl(core_) = 0U;
+  Device()->DCFG = dcfg_;
+  Device()->DCTL |= USB_OTG_DCTL_SDIS;
+  ProgramFifos();
+  Device()->DIEPMSK = 0U;
+  Device()->DOEPMSK = 0U;
+  Device()->DAINTMSK = 0U;
+  Device()->DIEPEMPMSK = 0U;
+  for (uint8_t i = 0; i < endpoint_count_; ++i)
+  {
+    auto* in = InEp(i);
+    if ((in->DIEPCTL & USB_OTG_DIEPCTL_EPENA) == 0U)
+      in->DIEPCTL = 0U;
+    else
+      in->DIEPCTL =
+          i == 0U ? USB_OTG_DIEPCTL_SNAK : USB_OTG_DIEPCTL_EPDIS | USB_OTG_DIEPCTL_SNAK;
+    in->DIEPTSIZ = 0U;
+    in->DIEPINT = 0xFB7FU;
+    auto* out = OutEp(i);
+    if ((out->DOEPCTL & USB_OTG_DOEPCTL_EPENA) == 0U)
+      out->DOEPCTL = 0U;
+    else
+      out->DOEPCTL =
+          i == 0U ? USB_OTG_DOEPCTL_SNAK : USB_OTG_DOEPCTL_EPDIS | USB_OTG_DOEPCTL_SNAK;
+    out->DOEPTSIZ = 0U;
+    out->DOEPINT = 0xFB7FU;
+  }
+  core_->GINTMSK = 0U;
+  core_->GINTSTS = 0xBFFFFFFFU;
+  global_nak_users_ = 0U;
+  flush_pending_ = 0U;
+  flush_active_ = NO_FLUSH;
+  bus_speed_ = hw_.high_speed ? USB::Speed::HIGH : USB::Speed::FULL;
+  recovery_.store(Recovery::IDLE, std::memory_order_release);
+  if (connected_) Connect();
 }
 
 void STM32USBOtgDevice::OnStopsSettled()
 {
   USB::EndpointPool::HardwareScope hardware(this);
-  UpdateTick();
+  if (!Recovering()) UpdateTick();
 }
 
 USB::Speed STM32USBOtgDevice::ReadBusSpeed() const { return bus_speed_; }
@@ -267,19 +480,22 @@ ErrorCode STM32USBOtgDevice::SetAddress(uint8_t address, USB::ControlContext con
 {
   // The core takes the new address before the status stage (RM0090 "Endpoint
   // initialization on SetAddress command").
-  if (context == USB::ControlContext::SETUP_BEFORE_STATUS)
+  if (context == USB::ControlContext::SETUP_BEFORE_STATUS && !Recovering())
   {
     USB::EndpointPool::HardwareScope hardware(this);
-    Device()->DCFG = (Device()->DCFG & ~USB_OTG_DCFG_DAD) |
-                     ((static_cast<uint32_t>(address) << USB_OTG_DCFG_DAD_Pos) &
-                      USB_OTG_DCFG_DAD);
+    Device()->DCFG =
+        (Device()->DCFG & ~USB_OTG_DCFG_DAD) |
+        ((static_cast<uint32_t>(address) << USB_OTG_DCFG_DAD_Pos) & USB_OTG_DCFG_DAD);
   }
   return ErrorCode::OK;
 }
 
 void STM32USBOtgDevice::OnControllerReset() { discard_ = false; }
 
-void STM32USBOtgDevice::OnControlReady() { ArmSetup(); }
+void STM32USBOtgDevice::OnControlReady()
+{
+  if (!Recovering()) ArmSetup();
+}
 
 void STM32USBOtgDevice::ArmSetup()
 {
@@ -287,7 +503,8 @@ void STM32USBOtgDevice::ArmSetup()
   // Newer cores must not be reprogrammed while EP0 OUT is still enabled (as HAL does).
   if (CoreId() > USB_OTG_CORE_ID_300A && (out0->DOEPCTL & USB_OTG_DOEPCTL_EPENA) != 0U)
     return;
-  out0->DOEPTSIZ = USB_OTG_DOEPTSIZ_STUPCNT | (1U << PKTCNT_POS) | (SETUP_COUNT * SETUP_SIZE);
+  out0->DOEPTSIZ =
+      USB_OTG_DOEPTSIZ_STUPCNT | (1U << PKTCNT_POS) | (SETUP_COUNT * SETUP_SIZE);
   if (hw_.dma)
   {
     out0->DOEPDMA = Address(hw_.ep0_dma_buffer.addr_);
@@ -308,12 +525,22 @@ void STM32USBOtgDevice::Dispatch(USB_OTG_GlobalTypeDef* core)
   STM32USBOtgDevice* device = devices_[index];
   if (device == nullptr)
   {
-    // Not constructed yet: keep the line quiet until the driver owns the controller.
+    // Not started: keep the line quiet until the driver owns the controller.
     core->GAHBCFG &= ~USB_OTG_GAHBCFG_GINT;
     return;
   }
   USB::EndpointPool::InterruptScope batch(*device);
-  device->HandleInterrupt();
+  switch (device->recovery_.load(std::memory_order_acquire))
+  {
+    case Recovery::IDLE:
+      device->HandleInterrupt();
+      break;
+    case Recovery::RESET_DONE:
+      device->FinishRecovery();
+      break;
+    default:
+      break;  // The reset chain owns the registers.
+  }
 }
 
 void STM32USBOtgDevice::HandleInterrupt()
@@ -453,9 +680,9 @@ void STM32USBOtgDevice::HandleOutEndpoints()
       // the core); only a data transfer completes the request (as HAL does).
       bool data = !setup;
       if (num == 0U && hw_.dma)
-        data = data && (events & USB_OTG_DOEPINT_OTEPSPR) == 0U &&
-               !(core_id > USB_OTG_CORE_ID_300A &&
-                 (events & USB_OTG_DOEPINT_STPKTRX) != 0U);
+        data =
+            data && (events & USB_OTG_DOEPINT_OTEPSPR) == 0U &&
+            !(core_id > USB_OTG_CORE_ID_300A && (events & USB_OTG_DOEPINT_STPKTRX) != 0U);
       else if (num == 0U)
         data = data && !(core_id == USB_OTG_CORE_ID_310A &&
                          (events & USB_OTG_DOEPINT_STPKTRX) != 0U);
@@ -543,9 +770,11 @@ void STM32USBOtgDevice::HandleSof()
     if (out_[i] != nullptr && out_[i]->stop_stage_ != STM32OtgEndpoint::StopStage::NONE)
       out_[i]->PollStop();
   }
-  const uint32_t position = (Device()->DSTS & USB_OTG_DSTS_FNSOF) >> USB_OTG_DSTS_FNSOF_Pos;
+  const uint32_t position =
+      (Device()->DSTS & USB_OTG_DSTS_FNSOF) >> USB_OTG_DSTS_FNSOF_Pos;
   if (bus_speed_ == USB::Speed::HIGH)
-    OnSof(true, static_cast<uint16_t>(position >> 3U), static_cast<uint8_t>(position & 7U));
+    OnSof(true, static_cast<uint16_t>(position >> 3U),
+          static_cast<uint8_t>(position & 7U));
   else
     OnSof(true, static_cast<uint16_t>(position & 0x7FFU));
 }
@@ -631,10 +860,9 @@ void STM32USBOtgDevice::UpdateTick()
   bool needed = WantsBusTime() || flush_pending_ != 0U || flush_active_ != NO_FLUSH;
   for (uint8_t i = 0; i < endpoint_count_ && !needed; ++i)
   {
-    needed = (in_[i] != nullptr &&
-              in_[i]->stop_stage_ != STM32OtgEndpoint::StopStage::NONE) ||
-             (out_[i] != nullptr &&
-              out_[i]->stop_stage_ != STM32OtgEndpoint::StopStage::NONE);
+    needed =
+        (in_[i] != nullptr && in_[i]->stop_stage_ != STM32OtgEndpoint::StopStage::NONE) ||
+        (out_[i] != nullptr && out_[i]->stop_stage_ != STM32OtgEndpoint::StopStage::NONE);
   }
   if (needed)
     core_->GINTMSK |= USB_OTG_GINTMSK_SOFM;
@@ -647,8 +875,11 @@ void STM32USBOtgDevice::ForceStopAll(bool in_isr)
   {
     USB::EndpointPool::HardwareScope hardware(this);
     global_nak_users_ = 0U;
-    core_->GINTMSK &= ~USB_OTG_GINTMSK_GONAKEFFM;
-    Device()->DCTL |= USB_OTG_DCTL_CGONAK;
+    if (!Recovering())
+    {
+      core_->GINTMSK &= ~USB_OTG_GINTMSK_GONAKEFFM;
+      Device()->DCTL |= USB_OTG_DCTL_CGONAK;
+    }
     flush_pending_ = 0U;
     flush_active_ = NO_FLUSH;
   }
@@ -687,6 +918,8 @@ ErrorCode STM32OtgEndpoint::ConfigureHardware(const Config& cfg, Granted& grante
   UNUSED(granted);
   ResetTransfer();
   stop_stage_ = StopStage::NONE;
+  hw_offline_ = false;
+  if (device_.Recovering()) return ErrorCode::OK;
   const uint8_t num = Num();
   const uint32_t packet = cfg.max_packet_size;
   auto* dev = device_.Device();
@@ -721,7 +954,7 @@ void STM32OtgEndpoint::CloseHardware(bool in_isr)
   ResetTransfer();
   stop_stage_ = StopStage::NONE;
   const uint8_t num = Num();
-  if (num == 0U) return;  // EP0 stays active.
+  if (num == 0U || device_.Recovering()) return;  // EP0 stays active.
   auto* dev = device_.Device();
   if (IsIn())
   {
@@ -762,8 +995,13 @@ ErrorCode STM32OtgEndpoint::StartHardware(const HwRequest& request, bool in_isr)
   hw_capacity_ = request.slot.size_;
   hw_done_ = 0U;
   stopped_actual_ = 0U;
+  // During the reset the request is held until the session ends; nothing is sent or
+  // received.
+  hw_offline_ = device_.Recovering();
+  if (hw_offline_) return ErrorCode::OK;
   const bool odd_frame =
-      (((device_.Device()->DSTS & USB_OTG_DSTS_FNSOF) >> USB_OTG_DSTS_FNSOF_Pos) & 1U) != 0U;
+      (((device_.Device()->DSTS & USB_OTG_DSTS_FNSOF) >> USB_OTG_DSTS_FNSOF_Pos) & 1U) !=
+      0U;
 
   if (IsIn())
   {
@@ -779,7 +1017,8 @@ ErrorCode STM32OtgEndpoint::StartHardware(const HwRequest& request, bool in_isr)
       regs->DIEPDMA = hw_data_ != nullptr ? Address(hw_data_) : Address(device_.setup_);
     }
     if (iso)
-      regs->DIEPCTL |= odd_frame ? USB_OTG_DIEPCTL_SD0PID_SEVNFRM : USB_OTG_DIEPCTL_SODDFRM;
+      regs->DIEPCTL |=
+          odd_frame ? USB_OTG_DIEPCTL_SD0PID_SEVNFRM : USB_OTG_DIEPCTL_SODDFRM;
     regs->DIEPCTL |= USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA;
     if (!Dma() && length != 0U)
     {
@@ -815,7 +1054,8 @@ ErrorCode STM32OtgEndpoint::StartHardware(const HwRequest& request, bool in_isr)
       regs->DOEPDMA = Address(hw_data_);
     }
     if (iso)
-      regs->DOEPCTL |= odd_frame ? USB_OTG_DOEPCTL_SD0PID_SEVNFRM : USB_OTG_DOEPCTL_SODDFRM;
+      regs->DOEPCTL |=
+          odd_frame ? USB_OTG_DOEPCTL_SD0PID_SEVNFRM : USB_OTG_DOEPCTL_SODDFRM;
   }
   regs->DOEPCTL |= USB_OTG_DOEPCTL_CNAK | USB_OTG_DOEPCTL_EPENA;
   return ErrorCode::OK;
@@ -834,7 +1074,8 @@ void STM32OtgEndpoint::FillFifo()
   // Bounded by the free FIFO space; whole packets only.
   while (hw_done_ < hw_length_)
   {
-    const size_t length = LibXR::min(hw_length_ - hw_done_, static_cast<size_t>(Packet()));
+    const size_t length =
+        LibXR::min(hw_length_ - hw_done_, static_cast<size_t>(Packet()));
     const uint32_t words = static_cast<uint32_t>((length + 3U) / 4U);
     if ((regs->DTXFSTS & USB_OTG_DTXFSTS_INEPTFSAV) < words) break;
     const uint8_t* source = hw_data_ + hw_done_;
@@ -906,6 +1147,12 @@ USB::Endpoint::StopResult STM32OtgEndpoint::StopHardware(bool in_isr)
 {
   UNUSED(in_isr);
   const uint8_t num = Num();
+  if (device_.Recovering())
+  {
+    stopped_actual_ = IsIn() || Dma() ? 0U : hw_done_;
+    ResetTransfer();
+    return StopResult::DONE;
+  }
   if (IsIn())
   {
     auto* regs = device_.InEp(num);
@@ -1044,13 +1291,16 @@ size_t STM32OtgEndpoint::ReapProgress(const HwRequest& request, bool& retired)
 {
   retired = false;
   if (!IsIn()) return stopped_actual_;
+  // The registers of a transfer lost with the reset show nothing sent.
+  if (hw_offline_) return 0U;
   auto* regs = device_.InEp(Num());
   // Only a transfer complete not handled yet proves the host took everything.
   retired = (regs->DIEPINT & USB_OTG_DIEPINT_XFRC) != 0U;
   if (retired) return request.length;
   const size_t packet = Packet();
   const size_t remaining = (regs->DIEPTSIZ & USB_OTG_DIEPTSIZ_PKTCNT) >> PKTCNT_POS;
-  const size_t total = request.length == 0U ? 1U : (request.length + packet - 1U) / packet;
+  const size_t total =
+      request.length == 0U ? 1U : (request.length + packet - 1U) / packet;
   // PKTCNT drops when a packet leaves the FIFO; the last one may lack the host's ACK.
   size_t sent = total > remaining ? total - remaining : 0U;
   if (sent != 0U) --sent;
@@ -1060,6 +1310,7 @@ size_t STM32OtgEndpoint::ReapProgress(const HwRequest& request, bool& retired)
 ErrorCode STM32OtgEndpoint::StallHardware(bool in_isr)
 {
   UNUSED(in_isr);
+  if (device_.Recovering()) return ErrorCode::OK;
   const uint8_t num = Num();
   if (IsIn())
   {
@@ -1082,7 +1333,8 @@ ErrorCode STM32OtgEndpoint::ClearStallHardware(bool in_isr)
 {
   UNUSED(in_isr);
   const uint8_t num = Num();
-  if (num == 0U) return ErrorCode::OK;  // The next SETUP clears an EP0 STALL.
+  // The next SETUP clears an EP0 STALL; the reset clears every STALL.
+  if (num == 0U || device_.Recovering()) return ErrorCode::OK;
   const bool data0 =
       GetConfig().type == Type::BULK || GetConfig().type == Type::INTERRUPT;
   if (IsIn())
@@ -1109,7 +1361,8 @@ STM32USBDeviceOtgFS::STM32USBDeviceOtgFS(
     const HardwareConfig& hw, size_t rx_fifo_size,
     const std::initializer_list<RawData> RX_EP_CFGS,
     const std::initializer_list<EPInConfig> TX_EP_CFGS,
-    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
+    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
+    uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS,
@@ -1127,7 +1380,8 @@ STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
     const HardwareConfig& hw, size_t rx_fifo_size,
     const std::initializer_list<RawData> RX_EP_CFGS,
     const std::initializer_list<EPInConfig> TX_EP_CFGS,
-    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid, uint16_t bcd,
+    USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
+    uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS,
@@ -1140,9 +1394,9 @@ STM32USBDeviceOtgHS::STM32USBDeviceOtgHS(
 
 #endif
 
-// Entry from the wrapped HAL_PCD_IRQHandler() (stm32_usb_otg_wrap.cpp). The handle is only
-// a hint: when main() never ran MX_USB_OTG_*_PCD_Init() its Instance is null, so the active
-// exception names the controller instead.
+// Entry from the wrapped HAL_PCD_IRQHandler() (stm32_usb_otg_wrap.cpp). The handle is
+// only a hint: when main() never ran MX_USB_OTG_*_PCD_Init() its Instance is null, so the
+// active exception names the controller instead.
 extern "C" void libxr_stm32_otg_dispatch(PCD_HandleTypeDef* hpcd)
 {
   USB_OTG_GlobalTypeDef* core = hpcd != nullptr ? hpcd->Instance : nullptr;

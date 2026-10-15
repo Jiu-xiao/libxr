@@ -4,6 +4,9 @@
 
 #undef USB
 
+#include <atomic>
+
+#include "driver_async_condition.hpp"
 #include "usb/core/ep.hpp"
 #include "usb/core/ep_pool.hpp"
 #include "usb/device/dev_core.hpp"
@@ -25,19 +28,33 @@ class STM32OtgEndpoint;
  *        STM32 OTG (DWC2) USB device; after initialization the driver programs the
  *        registers directly
  *
- * 不使用 PCD 句柄。构造时用临时句柄调用 CubeMX 生成的 HAL_PCD_MspInit()（时钟、引脚、NVIC），
- * 再用 LL 函数初始化 core；之后中断、端点启停、FIFO、DMA、连接与断开都由驱动完成。CubeMX
+ * 不使用 PCD 句柄。构造时用临时句柄调用 CubeMX 生成的
+ * HAL_PCD_MspInit()（时钟、引脚、NVIC）， 再用 LL 函数初始化
+ * core；之后中断、端点启停、FIFO、DMA、连接与断开都由驱动完成。CubeMX
  * 保持默认设置：链接时包装 HAL_PCD_Init() 和 HAL_PCD_IRQHandler()，main() 里的
  * MX_USB_OTG_*_PCD_Init() 不再初始化控制器，CubeMX 生成的中断函数进入 Dispatch()。CubeMX
  * 不生成中断函数时，由 CodeGenerator 生成的向量函数调用 Dispatch()。
+ *
+ * 端点停止超时时，设备离开总线并在毫秒节拍上复位 core（DriverAsyncCondition：等 AHB
+ * 空闲、
+ * 软复位、强制设备模式并等待生效），然后在自己的中断里恢复配置并重新连接，主机重新枚举。
+ * 复位期间端点操作只改软件状态。复位超时时设备保持断开，下一次 Start() 重新复位。
  *
  * No PCD handle is used. The constructor calls the CubeMX-generated HAL_PCD_MspInit()
  * (clocks, pins, NVIC) through a temporary handle and initializes the core with the LL
  * functions; from then on the driver handles interrupts, endpoint start and stop, the
  * FIFOs, DMA, connect and disconnect. CubeMX keeps its default settings: the link wraps
  * HAL_PCD_Init() and HAL_PCD_IRQHandler(), so MX_USB_OTG_*_PCD_Init() in main() no longer
- * initializes the controller and the CubeMX interrupt handler enters Dispatch(). When CubeMX
- * generates no interrupt handler, the vector function CodeGenerator writes calls Dispatch().
+ * initializes the controller and the CubeMX interrupt handler enters Dispatch(). When
+ * CubeMX generates no interrupt handler, the vector function CodeGenerator writes calls
+ * Dispatch().
+ *
+ * When an endpoint stop times out, the device leaves the bus and resets the core on the
+ * millisecond tick (DriverAsyncCondition: wait for the AHB to idle, soft reset, force
+ * device mode and wait for it to take effect), then restores the configuration in its own
+ * interrupt and reconnects; the host enumerates again. During the reset endpoint
+ * operations change only the software state. When the reset times out the device stays
+ * disconnected and the next Start() resets again.
  */
 class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
 {
@@ -86,8 +103,8 @@ class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*>& lang_list,
-      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>&
-          configs,
+      const std::initializer_list<
+          const std::initializer_list<USB::ConfigDescriptorItem*>>& configs,
       ConstRawData uid);
 
   ErrorCode SetAddress(uint8_t address, USB::ControlContext context) override;
@@ -104,6 +121,18 @@ class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
   static constexpr uint8_t MAX_DEVICES = 2;
   static constexpr uint8_t NO_FLUSH = 0xFF;
   static constexpr uint8_t FLUSH_ALL = 0x10;
+
+  // Core reset after a stop timeout. The stages up to DEVICE_MODE run on the millisecond
+  // tick and own the registers; RESET_DONE waits for the interrupt to restore the rest.
+  enum class Recovery : uint8_t
+  {
+    IDLE,
+    AHB_IDLE,     ///< Waiting for GRSTCTL.AHBIDL before the soft reset.
+    CORE_RESET,   ///< CSRST set; waiting for it to clear.
+    DEVICE_MODE,  ///< FDMOD written; waiting for GINTSTS.CMOD to show device mode.
+    RESET_DONE,   ///< Reset finished; the interrupt restores the device registers.
+    FAILED        ///< A stage timed out; the device stays off the bus.
+  };
 
   // Register blocks of this core.
   USB_OTG_DeviceTypeDef* Device() const;
@@ -135,6 +164,19 @@ class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
   void UpdateTick();
   void ForceStopAll(bool in_isr);
 
+  // Registers belong to the reset chain from AHB_IDLE until the interrupt has restored
+  // them.
+  bool Recovering() const
+  {
+    return recovery_.load(std::memory_order_acquire) != Recovery::IDLE;
+  }
+  void Connect();
+  void ProgramFifos();
+  void BeginRecovery();
+  void FinishRecovery();
+  static bool RecoveryCheck(void* arg);
+  static void RecoveryDone(void* arg, ErrorCode result);
+
   uint8_t index_;
   USB_OTG_GlobalTypeDef* core_;
   uint8_t endpoint_count_;
@@ -144,11 +186,21 @@ class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
   STM32OtgEndpoint* out_[MAX_ENDPOINTS] = {};
   alignas(4) uint8_t setup_[8] = {};  // Non-DMA SETUP packet.
   USB::Speed bus_speed_ = USB::Speed::FULL;
-  bool connected_ = false;
-  bool discard_ = false;  // Bus reset seen, the owner has not applied it yet.
+  bool connected_ = false;  // Start() and Stop(): whether the device belongs on the bus.
+  bool discard_ = false;    // Bus reset seen, the owner has not applied it yet.
   uint8_t global_nak_users_ = 0;
   uint32_t flush_pending_ = 0;  // Bit n: TX FIFO n; bit 16: every TX FIFO.
   uint8_t flush_active_ = NO_FLUSH;
+  IRQn_Type irq_;
+  // Configuration the soft reset may clear, saved after initialization.
+  uint32_t gotgctl_ = 0;  // Session valid override bits only.
+  uint32_t gahbcfg_ = 0;  // Without GINT.
+  uint32_t gusbcfg_ = 0;
+  uint32_t gccfg_ = 0;
+  uint32_t gdfifocfg_ = 0;  // Cores with GDFIFOCFG only.
+  uint32_t dcfg_ = 0;
+  std::atomic<Recovery> recovery_{Recovery::IDLE};
+  DriverAsyncCondition reset_wait_;
 
   static inline STM32USBOtgDevice* devices_[MAX_DEVICES] = {};
 };
@@ -156,10 +208,10 @@ class STM32USBOtgDevice : public USB::EndpointPool, public STM32USBDeviceCore
 /**
  * @brief STM32 OTG 端点 / STM32 OTG endpoint
  *
- * 非 DMA 时 IN 由 CPU 写 TX FIFO（启动时写第一个包，其余在 TXFE 中断里按 FIFO 空间写），OUT
- * 由 RXFLVL 中断读进槽；DMA 时 core 直接读写槽，EP0 OUT 例外，始终收进设备的 EP0 缓冲区再
- * 拷进槽。停止由硬件事件推进：IN 为 SNAK → INEPNE → EPDIS → EPDISD → 清 TX FIFO；OUT 为全局
- * OUT NAK → EPDIS → EPDISD。
+ * 非 DMA 时 IN 由 CPU 写 TX FIFO（启动时写第一个包，其余在 TXFE 中断里按 FIFO
+ * 空间写），OUT 由 RXFLVL 中断读进槽；DMA 时 core 直接读写槽，EP0 OUT
+ * 例外，始终收进设备的 EP0 缓冲区再 拷进槽。停止由硬件事件推进：IN 为 SNAK → INEPNE →
+ * EPDIS → EPDISD → 清 TX FIFO；OUT 为全局 OUT NAK → EPDIS → EPDISD。
  *
  * Without DMA the CPU writes IN data to the TX FIFO (the first packet at start, the rest
  * in TXFE interrupts as FIFO space allows) and reads OUT data into the slot on RXFLVL;
@@ -224,6 +276,9 @@ class STM32OtgEndpoint : public USB::Endpoint
   size_t hw_capacity_ = 0;    // Bytes the slot can take (OUT).
   size_t hw_done_ = 0;        // IN: bytes written to the FIFO; OUT: bytes received.
   size_t stopped_actual_ = 0;
+  // The transfer was in hardware when the core was reset, or started during the reset;
+  // the registers no longer describe it and none of it counts as sent.
+  bool hw_offline_ = false;
   StopStage stop_stage_ = StopStage::NONE;
 };
 
