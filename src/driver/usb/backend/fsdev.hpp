@@ -230,11 +230,11 @@ class FSDevDevice : public EndpointPool, public DeviceCore<FullSpeedCapabilities
     const size_t limit = pma_limit != 0U ? pma_limit : HW::kPmaSize;
 
     SetHardwareGuard(
-        this,
-        [](void*) -> uintptr_t { return HW::EnterGuard(); },
+        this, [](void*) -> uintptr_t { return HW::EnterGuard(); },
         [](void*, uintptr_t saved) { HW::ExitGuard(saved); });
 
-    ASSERT(self_ == nullptr);
+    // 同一 HW 类型只允许一个设备实例：self_ 是 Dispatch 的静态入口。
+    REQUIRE(self_ == nullptr);
     self_ = this;
 
     HW::MspInit();
@@ -257,24 +257,30 @@ class FSDevDevice : public EndpointPool, public DeviceCore<FullSpeedCapabilities
         rx_ep_cfgs.size() > tx_ep_cfgs.size() ? rx_ep_cfgs.size() : tx_ep_cfgs.size());
 
     size_t offset = static_cast<size_t>(endpoint_count_) * 8U;
+    // BTABLE 段每端点 8 B 天然对齐；各缓冲起点必须落在对齐边界上（经典型
+    // RX/TX 地址写 ADDR 字段按偶数截断，DRD 按 4 字节截断），否则会静默截断、
+    // 后一个缓冲与前面重叠。
+    REQUIRE((offset % HW::kPmaAlign) == 0U);
     for (size_t i = 0; i < rx_ep_cfgs.size(); ++i)
     {
+      REQUIRE((rx[i].pma_size % HW::kPmaAlign) == 0U);
       addr_out[i] = static_cast<uint16_t>(offset);
       offset += rx[i].pma_size;
     }
     for (size_t i = 0; i < tx_ep_cfgs.size(); ++i)
     {
+      REQUIRE((tx[i].pma_size % HW::kPmaAlign) == 0U);
       addr_in[i] = static_cast<uint16_t>(offset);
       offset += tx[i].pma_size;
     }
     REQUIRE(offset <= limit);
 
-    auto* ep0_out = new FSDevEndpoint<HW>(*this, Endpoint::EPNumber::EP0,
-                                          Endpoint::Direction::OUT, rx[0].buffer,
-                                          addr_out[0], rx[0].pma_size, slot_count);
-    auto* ep0_in = new FSDevEndpoint<HW>(*this, Endpoint::EPNumber::EP0,
-                                         Endpoint::Direction::IN, tx[0].buffer,
-                                         addr_in[0], tx[0].pma_size, slot_count);
+    auto* ep0_out =
+        new FSDevEndpoint<HW>(*this, Endpoint::EPNumber::EP0, Endpoint::Direction::OUT,
+                              rx[0].buffer, addr_out[0], rx[0].pma_size, slot_count);
+    auto* ep0_in =
+        new FSDevEndpoint<HW>(*this, Endpoint::EPNumber::EP0, Endpoint::Direction::IN,
+                              tx[0].buffer, addr_in[0], tx[0].pma_size, slot_count);
     SetEndpoint0(ep0_in, ep0_out);
 
     for (size_t i = 1; i < rx_ep_cfgs.size(); ++i)
@@ -300,7 +306,8 @@ class FSDevDevice : public EndpointPool, public DeviceCore<FullSpeedCapabilities
     }
 
     // 中断源保持关闭，Start() 才打开；上拉在 Start() 最后接通。
-    HW::WriteCntr(static_cast<uint16_t>(HW::ReadCntr() & ~(HW::kCntrRunMask | HW::kCntrSofm)));
+    HW::WriteCntr(
+        static_cast<uint16_t>(HW::ReadCntr() & ~(HW::kCntrRunMask | HW::kCntrSofm)));
   }
 
   void Init(bool in_isr) override { DeviceCore<FullSpeedCapabilities>::Init(in_isr); }
@@ -365,10 +372,18 @@ class FSDevDevice : public EndpointPool, public DeviceCore<FullSpeedCapabilities
   void OnStopsSettled() override
   {
     EndpointPool::HardwareScope hardware(this);
-    if (!WantsBusTime())
+    // 配置切换后重估 SOFM（与 OTG 的 UpdateTick 对齐）：WantsBusTime() 为真时开，
+    // 否则关。SOFM 只是中断使能，设备未 Start 时写它无副作用。
+    uint16_t cntr = HW::ReadCntr();
+    if (WantsBusTime())
     {
-      HW::WriteCntr(static_cast<uint16_t>(HW::ReadCntr() & ~HW::kCntrSofm));
+      cntr |= HW::kCntrSofm;
     }
+    else
+    {
+      cntr &= static_cast<uint16_t>(~HW::kCntrSofm);
+    }
+    HW::WriteCntr(cntr);
   }
 
   Speed ReadBusSpeed() const override { return Speed::FULL; }
@@ -418,10 +433,23 @@ void FSDevEndpoint<HW>::SetStat(bool in, uint32_t target)
 {
   const uint8_t num = Num();
   const uint32_t stat_mask = in ? HW::kEpStatTx : HW::kEpStatRx;
-  const uint32_t cur = HW::ReadEp(num);
-  // 写 1 翻转：只写到达目标的增量；其余 STAT/DTOG 位写 0 保持不变。
-  const uint32_t value = (cur & HW::kEpKeepMask) | ((cur ^ target) & stat_mask);
-  HW::WriteEp(num, value);
+  // 写 1 翻转：只写到达目标的增量。读与写之间硬件可能自己完成一次事务
+  // （结束 IN/OUT 并自行把 STAT 改回 NAK、锁存 CTR），按读到的旧值算增量会把
+  // STAT 翻错（如 NAK 想写 VALID、NAK^VALID 翻回 NAK 反而写出了 VALID）。
+  // 所以写后回读核对，STAT 不等于目标就按新值重算再写，有界重试。
+  // CTR/ERR 是 rc_w0：这些写永远写 1 保持，窗口里锁存的 CTR 不能被抹掉。
+  constexpr uint32_t kNoClear = HW::kEpCtrRx | HW::kEpCtrTx | HW::kEpErrRx | HW::kEpErrTx;
+  for (unsigned attempt = 0U; attempt < 3U; ++attempt)
+  {
+    const uint32_t cur = HW::ReadEp(num);
+    const uint32_t value =
+        (cur & HW::kEpKeepMask) | ((cur ^ target) & stat_mask) | kNoClear;
+    HW::WriteEp(num, value);
+    if ((HW::ReadEp(num) & stat_mask) == target)
+    {
+      return;
+    }
+  }
 }
 
 template <typename HW>
@@ -429,10 +457,11 @@ void FSDevEndpoint<HW>::WriteType(uint32_t bits)
 {
   const uint8_t num = Num();
   const uint32_t cur = HW::ReadEp(num);
-  // TYPE/EA 在保持掩码内：先抹掉旧值再写新的。
+  // TYPE/EA 在保持掩码内：先抹掉旧值再写新的。CTR/ERR 写 1 保持（同 SetStat）。
+  constexpr uint32_t kNoClear = HW::kEpCtrRx | HW::kEpCtrTx | HW::kEpErrRx | HW::kEpErrTx;
   const uint32_t value =
       (cur & HW::kEpKeepMask & ~(HW::kEpType | HW::kEpKind | HW::kEpAddr)) | bits |
-      Num();
+      Num() | kNoClear;
   HW::WriteEp(num, value);
 }
 
@@ -441,10 +470,12 @@ void FSDevEndpoint<HW>::ClearDataToggle(bool in)
 {
   const uint8_t num = Num();
   const uint32_t dtog = in ? HW::kEpDtogTx : HW::kEpDtogRx;
+  // CTR/ERR 写 1 保持（同 SetStat）。
+  constexpr uint32_t kNoClear = HW::kEpCtrRx | HW::kEpCtrTx | HW::kEpErrRx | HW::kEpErrTx;
   const uint32_t cur = HW::ReadEp(num);
   if ((cur & dtog) != 0U)
   {
-    HW::WriteEp(num, (cur & HW::kEpKeepMask) | dtog);
+    HW::WriteEp(num, (cur & HW::kEpKeepMask) | dtog | kNoClear);
   }
 }
 
@@ -570,8 +601,15 @@ Endpoint::StopResult FSDevEndpoint<HW>::StopHardware(bool in_isr)
           LibXR::min(static_cast<size_t>(MaxPacketSize()), hw_length_ - hw_progress_);
       FsDevClearCtrTx<HW>(num);
     }
-    stopped_actual_ = hw_progress_;
     SetStat(true, kFsDevStatTxNak);
+    // SetStat 的读改写窗口里硬件可能又 ACK 完一包（CTR 已锁存）：补计一次。
+    if ((HW::ReadEp(num) & HW::kEpCtrTx) != 0U)
+    {
+      hw_progress_ +=
+          LibXR::min(static_cast<size_t>(MaxPacketSize()), hw_length_ - hw_progress_);
+      FsDevClearCtrTx<HW>(num);
+    }
+    stopped_actual_ = hw_progress_;
   }
   else
   {
@@ -588,8 +626,21 @@ Endpoint::StopResult FSDevEndpoint<HW>::StopHardware(bool in_isr)
       hw_progress_ += take;
       FsDevClearCtrRx<HW>(num);
     }
-    stopped_actual_ = hw_progress_;
     SetStat(false, kFsDevStatRxNak);
+    // SetStat 的读改写窗口里硬件可能又收完一包（CTR 已锁存）：补收补计一次。
+    if ((HW::ReadEp(num) & HW::kEpCtrRx) != 0U)
+    {
+      const size_t bytes = HW::GetRxCount(num);
+      const size_t room = hw_length_ > hw_progress_ ? hw_length_ - hw_progress_ : 0U;
+      const size_t take = LibXR::min(bytes, room);
+      if (take != 0U)
+      {
+        HW::PmaRead(const_cast<uint8_t*>(hw_data_) + hw_progress_, pma_addr_, take);
+      }
+      hw_progress_ += take;
+      FsDevClearCtrRx<HW>(num);
+    }
+    stopped_actual_ = hw_progress_;
   }
   hw_tag_ = 0U;
   return StopResult::DONE;

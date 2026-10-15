@@ -53,6 +53,8 @@ struct Ch32DevFsHw
 
   static constexpr uint8_t kEndpoints = 8U;
   static constexpr size_t kPmaSize = 512U;
+  // 经典型布局：ADDR 字段按偶数截断，缓冲地址必须偶数对齐。
+  static constexpr size_t kPmaAlign = 2U;
 
   static constexpr uintptr_t kRegBase =
 #if defined(USB_BASE)
@@ -186,7 +188,8 @@ struct Ch32DevFsHw
   {
     WriteCntr(0x0001U);  // FRES：强复位并顺带清 PDWN / Force reset, clears PDWN too
     WriteCntr(0U);
-    ClearIstr(0U);
+    // 直接写 0 清全部挂起标志；ClearIstr(0) 是写 0xFFFF（保持），语义不同。
+    *Istr() = 0U;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     *reinterpret_cast<volatile uint16_t*>(kRegBase + 0x50U) = 0U;  // BTABLE = 0
   }

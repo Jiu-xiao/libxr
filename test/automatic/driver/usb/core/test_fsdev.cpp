@@ -5,10 +5,14 @@
 // enumeration, control read/write, multi-packet bulk, stops and bus resets through the
 // real dispatch/owner machinery of FSDevDevice.
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <vector>
 
 #include "cdc_uart.hpp"
@@ -40,6 +44,7 @@ struct FakeHw
 
   static constexpr uint8_t kEndpoints = 8U;
   static constexpr size_t kPmaSize = 512U;
+  static constexpr size_t kPmaAlign = 2U;
 
   static constexpr uint32_t kEpCtrRx = 0x8000U;
   static constexpr uint32_t kEpDtogRx = 0x4000U;
@@ -101,8 +106,18 @@ struct FakeHw
   }
 
   static uint32_t ReadEp(uint8_t num) { return ep[num]; }
+  /// 一次性竞态钩子：在下一次 WriteEp 生效前注入一次硬件事务，复现 SetStat 的
+  /// 读改写窗口 / One-shot race hook: injects a hardware transaction right before
+  /// the next WriteEp lands, reproducing the SetStat read-modify-write window.
+  static inline std::function<void()> on_write;
   static void WriteEp(uint8_t num, uint32_t value)
   {
+    if (on_write)
+    {
+      std::function<void()> action = std::move(on_write);
+      on_write = nullptr;
+      action();
+    }
     // CTR/ERR 写 0 清除、写 1 保持；STAT/DTOG 写 1 翻转；TYPE/KIND/EA 直接写入；
     // SETUP 由硬件管理，软件写无效。
     // CTR/ERR: write 0 clears, write 1 keeps. STAT/DTOG: write 1 toggles.
@@ -808,6 +823,96 @@ void TestCdcEcho()
   TEST_ASSERT(wire == Bytes(22, 0x66 + 128));
 }
 
+/// SetStat 的读改写窗口里硬件自己完成一次事务：旧实现按旧值算翻转增量会把
+/// STAT 翻回 VALID，包被静默丢弃且不计进度；写后回读必须兜住。
+/// The hardware completes a transaction inside SetStat's read-modify-write
+/// window: computing the toggle delta from the stale value flipped STAT back to
+/// VALID (packets silently dropped, progress lost). The read-back must catch it.
+void TestStopRaceWithTransaction()
+{
+  // OUT：停止时硬件收走一包 / OUT: the hardware takes a packet during the stop
+  {
+    Fixture f(1);
+    Endpoint* out = nullptr;
+    TEST_ASSERT(f.device.Get(out, Endpoint::Direction::OUT, Endpoint::EPNumber::EP1) ==
+                ErrorCode::OK);
+    Done done;
+    out->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, 64}, false);
+    out->SetOnComplete(done.CallbackFor());
+    TEST_ASSERT(out->Receive(128, false) == ErrorCode::OK);
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatRx) == 0x3000U);  // VALID
+
+    const auto late = Bytes(64, 7);
+    FakeHw::on_write = [&late] { FakeHw::RxPacket(1, late.data(), late.size(), false); };
+    out->Flush(false);
+    Pump();
+    // NAK 而不是 VALID / NAK, not VALID
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatRx) == 0x2000U);
+    TEST_ASSERT(done.count == 1 && done.result == ErrorCode::ABORTED &&
+                done.actual == 64);
+    // 停止后再来的包不再被收下（端点保持 NAK）/ A later packet is not taken
+    FakeHw::RxPacket(1, Bytes(64, 8).data(), 64U, false);
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatRx) == 0x2000U);
+    TEST_ASSERT(done.count == 1 && done.actual == 64);
+  }
+
+  // IN：停止时主机 ACK 走最后一包 / IN: the host ACKs the last packet during the stop
+  {
+    Fixture f(1);
+    Endpoint* in = nullptr;
+    TEST_ASSERT(f.device.Get(in, Endpoint::Direction::IN, Endpoint::EPNumber::EP1) ==
+                ErrorCode::OK);
+    Done done;
+    in->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, 64}, false);
+    in->SetOnComplete(done.CallbackFor());
+    const auto bytes = Bytes(64, 9);
+    TEST_ASSERT(in->Write({bytes.data(), bytes.size()}, false, false) == ErrorCode::OK);
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatTx) == 0x0030U);  // VALID
+
+    FakeHw::on_write = [] { FakeHw::AckIn(1); };
+    in->Flush(false);
+    Pump();
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatTx) == 0x0020U);  // NAK
+    TEST_ASSERT(done.count == 1 && done.result == ErrorCode::ABORTED &&
+                done.actual == 64);
+  }
+}
+
+/// 构造期 PMA 检查：缓冲不对齐 / 超出 pma_limit 必须在构造时 REQUIRE 失败，
+/// 而不是静默截断地址让缓冲重叠。REQUIRE 走 libxr_fatal_error → abort，所以
+/// 在 fork 出的子进程里构造，父进程检查异常退出。
+/// Construction-time PMA checks: a misaligned buffer or a layout past pma_limit
+/// must REQUIRE-fail at construction instead of silently truncating addresses and
+/// overlapping buffers. REQUIRE aborts via libxr_fatal_error, so construct in a
+/// forked child and expect it to die.
+void TestPmaLayoutChecks()
+{
+  auto expect_fatal = [](bool odd_size, bool tiny_limit)
+  {
+    pid_t pid = fork();
+    TEST_ASSERT(pid >= 0);
+    if (pid == 0)
+    {
+      // 子进程：坏配置直接 abort / the child aborts on the bad config
+      Block<64> ep0_out, ep0_in, ep1_out, ep1_in;
+      ControlClass klass;
+      const uint16_t data_size = odd_size ? 63U : 64U;
+      const size_t limit = tiny_limit ? 24U : 0U;
+      Device bad_device({{ep0_out.Raw(), 64}, {ep1_out.Raw(), data_size}},
+                        {{ep0_in.Raw(), 64}, {ep1_in.Raw(), 64}},
+                        DeviceDescriptor::PacketSize0::SIZE_64, 0x1209, 0x4321, 0x0100,
+                        {&TEST_LANGUAGE}, {{&klass}}, {}, limit, 0);
+      bad_device.Init(false);
+      _exit(0);  // 构造成功 = 检查缺失 / construction succeeded = check missing
+    }
+    int status = 0;
+    TEST_ASSERT(waitpid(pid, &status, 0) == pid);
+    TEST_ASSERT(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+  };
+  expect_fatal(true, false);  // 奇数 pma_size：地址静默截断 / odd size
+  expect_fatal(false, true);  // 布局超出 pma_limit / layout past the limit
+}
+
 }  // namespace
 
 int main()
@@ -817,6 +922,8 @@ int main()
   TestBulkInMultiPacket();
   TestBulkOutMultiPacket();
   TestStopCountsLatePacket();
+  TestStopRaceWithTransaction();
+  TestPmaLayoutChecks();
   TestBusResetEndsTransfers();
   TestSuspendResume();
   TestIsochronousRejected();

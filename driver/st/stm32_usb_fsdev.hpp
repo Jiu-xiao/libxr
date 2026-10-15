@@ -158,6 +158,8 @@ struct Stm32FsDevClassicHw
 
   static constexpr uint8_t kEndpoints = 8U;
   static constexpr size_t kPmaSize = LIBXR_STM32_USB_PMA_SIZE;
+  // 经典型 ADDR 字段按偶数截断（& 0xFFFE），布局必须保证缓冲地址偶数对齐。
+  static constexpr size_t kPmaAlign = 2U;
 
   static USB_TypeDef* Regs() { return reinterpret_cast<USB_TypeDef*>(USB_BASE); }
 
@@ -378,6 +380,8 @@ struct Stm32FsDevDrdHw
 
   static constexpr uint8_t kEndpoints = 8U;
   static constexpr size_t kPmaSize = LIBXR_STM32_USB_PMA_SIZE;
+  // DRD 的 TXBD/RXBD 地址字段按 4 字节截断（& 0xFFFC），布局必须 4 字节对齐。
+  static constexpr size_t kPmaAlign = 4U;
 
   static USB_DRD_TypeDef* Regs()
   {
