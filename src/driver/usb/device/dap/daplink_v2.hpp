@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -13,6 +14,7 @@
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "timebase.hpp"
+#include "timer.hpp"
 #include "usb/core/desc_cfg.hpp"
 #include "winusb_msos20.hpp"
 
@@ -86,6 +88,24 @@ class DapLinkV2Class : public DeviceClass
 
     // Init WinUSB descriptor templates (constant parts)
     InitWinUsbDescriptors();
+
+    // §10.3-a：延时命令由线程上下文的 Timer 路径续做；这个 1 ms 周期任务只按门铃
+    // （有被延时命令时请求类服务），自己不执行延时、不忙等。
+    // §10.3-a: delayed commands resume through the Timer path in thread context; this
+    // 1 ms periodic task only rings the class service while a deferred command is
+    // pending, it never executes the delay itself and never busy-waits.
+    delay_timer_ = Timer::CreateTask(
+        +[](DapLinkV2Class* self)
+        {
+          if (self->pending_action_.load(std::memory_order_acquire) !=
+              static_cast<uint8_t>(PendingAction::NONE))
+          {
+            self->RequestClassService(false);
+          }
+        },
+        this, 1U);
+    Timer::Start(delay_timer_);
+    Timer::Add(delay_timer_);
   }
 
   /**
@@ -139,7 +159,7 @@ class DapLinkV2Class : public DeviceClass
   bool IsInited() const { return inited_; }
 
   /**
-   * @brief Whether IN endpoint is busy
+   * @brief Whether IN endpoint is busy (a copy-mode Write is in flight)
    *
    * @return true
    * @return false
@@ -147,11 +167,12 @@ class DapLinkV2Class : public DeviceClass
   bool EpInBusy()
   {
     auto ep = ep_data_in_;
-    return ep->GetState() != Endpoint::State::IDLE;
+    return (ep != nullptr && ep->GetState() != Endpoint::State::IDLE) ||
+           response_write_active_;
   }
 
   /**
-   * @brief Whether OUT endpoint is busy
+   * @brief Whether OUT endpoint is busy (a copy-mode Read is in flight)
    *
    * @return true
    * @return false
@@ -159,7 +180,8 @@ class DapLinkV2Class : public DeviceClass
   bool EpOutBusy()
   {
     auto ep = ep_data_out_;
-    return ep->GetState() != Endpoint::State::IDLE;
+    return (ep != nullptr && ep->GetState() != Endpoint::State::IDLE) ||
+           command_read_active_;
   }
 
  protected:
@@ -169,7 +191,8 @@ class DapLinkV2Class : public DeviceClass
    * @param start_itf_num Start interface number
    * @param in_isr Whether called from ISR context
    */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                     bool in_isr) override
   {
     inited_ = false;
 
@@ -186,18 +209,21 @@ class DapLinkV2Class : public DeviceClass
     ans = endpoint_pool.Get(ep_data_in_, Endpoint::Direction::IN, data_in_ep_num_);
     ASSERT(ans == ErrorCode::OK);
 
-    // Configure endpoints
-    // - Use upper bound; core will choose a valid max packet size <= this limit.
-    // Logical command storage is independent from the wire packet size.
-    ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX,
-                             MAX_DAP_PACKET_SIZE});
-    ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, MAX_DAP_PACKET_SIZE});
+    // Configure endpoints with the largest packet size the slots and the controller
+    // hold at the current speed (0 when there is none). A failed Configure leaves the
+    // endpoint in ERROR and the composition rejects the configuration. Commands and
+    // responses move in copy mode (Read/Write), so the wire packet size may be smaller
+    // than a DAP packet and the logical command storage stays independent from it.
+    const uint16_t out_packet = ep_data_out_->LargestPacketSize(Endpoint::Type::BULK);
+    const uint16_t in_packet = ep_data_in_->LargestPacketSize(Endpoint::Type::BULK);
+    (void)ep_data_out_->Configure(
+        {Endpoint::Direction::OUT, Endpoint::Type::BULK, out_packet}, in_isr);
+    (void)ep_data_in_->Configure(
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, in_packet}, in_isr);
 
-    // Hook callbacks
-    ep_data_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
-    ep_data_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
-    ep_data_in_->SetOnTxFill(fill_response_cb_);
+    // Hook completion callbacks (they run in the owner and must stay shallow).
+    ep_data_out_->SetOnComplete(on_data_out_cb_);
+    ep_data_in_->SetOnComplete(on_data_in_cb_);
 
     // Interface descriptor (vendor specific, 2 endpoints)
     desc_block_.intf = {9,
@@ -249,10 +275,14 @@ class DapLinkV2Class : public DeviceClass
     ResetResponseQueue();
     ResetQueuedCommandState();
     ResetJtagChainState();
-    ep_data_in_->SetActiveLength(0);
+    cmd_pending_ = false;
+    cmd_len_ = 0u;
+    command_read_active_ = false;
+    response_write_active_ = false;
+    CancelPendingAction();
 
     inited_ = true;
-    ArmOutTransferIfIdle();
+    ArmOutTransferIfIdle(in_isr);
   }
 
   /**
@@ -260,7 +290,7 @@ class DapLinkV2Class : public DeviceClass
    * @param endpoint_pool Endpoint pool
    * @param in_isr Whether called from ISR context
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
     inited_ = false;
     ResetResponseQueue();
@@ -269,18 +299,27 @@ class DapLinkV2Class : public DeviceClass
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
     dap_state_.transfer_abort = false;
 
+    // 借出的槽由解绑作废；在途拷贝传输的 ABORTED 完成在 Close 里同步送达，
+    // 此时 inited_ 已为 false，回调入口直接忽略。
+    // Lent slots are voided by the unbind; the ABORTED completions of the in-flight
+    // copy transfers arrive synchronously inside Close, where the callback entry
+    // ignores them because inited_ is already false.
+    cmd_pending_ = false;
+    cmd_len_ = 0u;
+    command_read_active_ = false;
+    response_write_active_ = false;
+    CancelPendingAction();
+
     if (ep_data_in_)
     {
-      ep_data_in_->Close();
-      ep_data_in_->SetActiveLength(0);
+      ep_data_in_->Close(in_isr);
       endpoint_pool.Release(ep_data_in_);
       ep_data_in_ = nullptr;
     }
 
     if (ep_data_out_)
     {
-      ep_data_out_->Close();
-      ep_data_out_->SetActiveLength(0);
+      ep_data_out_->Close(in_isr);
       endpoint_pool.Release(ep_data_out_);
       ep_data_out_ = nullptr;
     }
@@ -361,6 +400,38 @@ class DapLinkV2Class : public DeviceClass
       return &winusb_msos20_cap_;
     }
     return nullptr;
+  }
+
+  /**
+   * @brief 类服务（owner 上下文）：处理已收到的命令，或续做被延时命令（§10.3-a）。
+   *        Class service (owner context): process the received command, or resume a
+   *        delayed one (§10.3-a).
+   */
+  void OnService(bool in_isr) override
+  {
+    if (!inited_)
+    {
+      return;
+    }
+    if (pending_action_.load(std::memory_order_acquire) !=
+        static_cast<uint8_t>(PendingAction::NONE))
+    {
+      ServicePendingAction(in_isr);
+      if (pending_action_.load(std::memory_order_acquire) !=
+          static_cast<uint8_t>(PendingAction::NONE))
+      {
+        return;
+      }
+      // 延时动作刚完成；同一次服务里继续处理已在等待的命令。
+      // The deferred action just completed; a command already received continues
+      // within the same service call.
+    }
+    if (!cmd_pending_)
+    {
+      return;
+    }
+    cmd_pending_ = false;
+    ProcessReceivedCommand(in_isr);
   }
 
  private:
@@ -493,15 +564,25 @@ class DapLinkV2Class : public DeviceClass
   // USB callbacks
   // ============================================================================
 
+  /// 被延时命令的续做动作（§10.3-a）/ Deferred action of a delayed command (§10.3-a)
+  enum class PendingAction : uint8_t
+  {
+    NONE = 0,
+    DELAY,       ///< DAP_Delay 到期待完成 / DAP_Delay awaiting its deadline
+    RESET_LOW,   ///< nRESET 拉低后的 1 ms / 1 ms after asserting nRESET
+    RESET_HIGH,  ///< nRESET 释放后的 1 ms / 1 ms after releasing nRESET
+    SWJ_PINS     ///< PinWait 到匹配或超时 / PinWait until a match or the timeout
+  };
+
   /**
    * @brief OUT complete callback static entry
    */
   static void OnDataOutCompleteStatic(bool in_isr, DapLinkV2Class* self,
-                                      LibXR::ConstRawData& data)
+                                      const Endpoint::Completion& completion)
   {
     if (self && self->inited_)
     {
-      self->OnDataOutComplete(in_isr, data);
+      self->OnDataOutComplete(in_isr, completion);
     }
   }
 
@@ -509,41 +590,166 @@ class DapLinkV2Class : public DeviceClass
    * @brief IN complete callback static entry
    */
   static void OnDataInCompleteStatic(bool in_isr, DapLinkV2Class* self,
-                                     LibXR::ConstRawData& data)
+                                     const Endpoint::Completion& completion)
   {
     if (self && self->inited_)
     {
-      self->OnDataInComplete(in_isr, data);
+      self->OnDataInComplete(in_isr, completion);
     }
   }
 
   /**
-   * @brief OUT complete callback instance method
+   * @brief OUT 完成回调：浅操作。一条命令已完整落进 command_buffer_，登记后
+   *        请求类服务执行；命令处理不在回调里做。
+   *        OUT completion: shallow. One whole command has landed in command_buffer_;
+   *        record it and ask the class service to run it. Commands never execute
+   *        inside the completion callback.
    */
-  void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
+  void OnDataOutComplete(bool in_isr, const Endpoint::Completion& completion)
   {
     if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
-    // Every authorized OUT already reserved response capacity. Process once;
-    // never retry a side-effecting command after an enqueue/start failure.
-    REQUIRE(!IsResponseQueueFull());
-    auto& response = resp_q_[resp_q_tail_];
-    uint16_t size = 0;
-    const auto result = ProcessOneCommand(in_isr, static_cast<const uint8_t*>(data.addr_),
-                                          static_cast<uint16_t>(data.size_),
-                                          response.payload, RESP_SLOT_SIZE, size);
-    UNUSED(result);
-    REQUIRE(size != 0U && size <= RESP_SLOT_SIZE);
-    response.len = size;
-    resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
-    ++resp_q_count_;
-    ep_data_in_->RequestTx(in_isr);
-    ArmOutTransferIfIdle();
+    command_read_active_ = false;
+    if (completion.result != ErrorCode::OK)
+    {
+      // ABORTED 只在解绑时出现（回调入口已按 inited_ 拦截）；SIZE_ERR 表示主机
+      // 超过 DAP 包长超发、命令流不完整，丢弃这一段并重新挂接收。
+      // ABORTED only appears while unbinding (the entry guard filtered it through
+      // inited_); SIZE_ERR means the host overran the DAP packet size and the
+      // command stream is incomplete: drop the fragment and re-arm the receive.
+      ArmOutTransferIfIdle(in_isr);
+      return;
+    }
+    cmd_pending_ = true;
+    cmd_len_ = static_cast<uint16_t>(completion.actual);
+    RequestClassService(in_isr);
   }
 
   /**
-   * @brief IN complete callback instance method
+   * @brief IN 完成回调：退役已发出的响应（Write 借用的队头），继续发下一条，
+   *        并按并发深度补挂 OUT 接收。
+   *        IN completion: retire the sent response (the queue head borrowed by the
+   *        Write), send the next one, and re-arm OUT while the response depth allows.
    */
-  void OnDataInComplete(bool, LibXR::ConstRawData&) { ArmOutTransferIfIdle(); }
+  void OnDataInComplete(bool in_isr, const Endpoint::Completion& completion)
+  {
+    UNUSED(completion);
+    if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
+    response_write_active_ = false;
+    REQUIRE(!IsResponseQueueEmpty());
+    resp_q_head_ = NextRespQueueIndex(resp_q_head_);
+    --resp_q_count_;
+    KickResponse(in_isr);
+    ArmOutTransferIfIdle(in_isr);
+  }
+
+  /// 处理 command_buffer_ 里的一条完整命令；响应入队并尝试发送。延时命令把
+  /// 队尾响应槽保留下来（size 为 0），由 Timer 路径续做后入队。
+  /// Process one whole command from command_buffer_; queue its response and try to
+  /// send it. A delayed command reserves the tail response slot instead (size 0) and
+  /// the Timer path queues it after the delay.
+  void ProcessReceivedCommand(bool in_isr)
+  {
+    REQUIRE(!IsResponseQueueFull());
+    auto& response = resp_q_[resp_q_tail_];
+    uint16_t size = 0;
+    const auto result = ProcessOneCommand(in_isr, command_buffer_, cmd_len_,
+                                          response.payload, RESP_SLOT_SIZE, size);
+    UNUSED(result);
+    if (size == 0u)
+    {
+      // §10.3-a：延时命令的响应未就绪；槽已保留，pending_action_ 已登记。
+      // §10.3-a: the delayed command's response is not ready; the slot is reserved
+      // and the pending action is registered.
+      REQUIRE(pending_action_.load(std::memory_order_acquire) !=
+              static_cast<uint8_t>(PendingAction::NONE));
+      return;
+    }
+    REQUIRE(size <= RESP_SLOT_SIZE);
+    CompleteResponse(size, in_isr);
+  }
+
+  /// 把队尾响应槽投入队列并尝试发送；延时的响应在续做完成后也从这里入队。
+  /// Queue the tail response slot and try to send it; a deferred response joins the
+  /// queue here once its continuation completes.
+  void CompleteResponse(uint16_t size, bool in_isr)
+  {
+    auto& response = resp_q_[resp_q_tail_];
+    response.len = size;
+    resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
+    ++resp_q_count_;
+    KickResponse(in_isr);
+    ArmOutTransferIfIdle(in_isr);
+  }
+
+  /// 保留队尾响应槽并登记延时动作；deadline 从现在起算（ms）。
+  /// Reserve the tail response slot and register the deferred action; the deadline
+  /// counts from now (ms).
+  void BeginDeferredAction(PendingAction action, uint32_t delay_ms, uint8_t* resp,
+                           uint16_t resp_cap)
+  {
+    deferred_resp_ = resp;
+    deferred_resp_cap_ = resp_cap;
+    action_deadline_ms_ =
+        static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) + delay_ms;
+    pending_action_.store(static_cast<uint8_t>(action), std::memory_order_release);
+  }
+
+  void CancelPendingAction()
+  {
+    pending_action_.store(static_cast<uint8_t>(PendingAction::NONE),
+                          std::memory_order_release);
+    deferred_resp_ = nullptr;
+    deferred_resp_cap_ = 0u;
+  }
+
+  /// 延时命令的续做点（owner 里执行）：到点后完成被延时的响应。
+  /// Resume point of a delayed command (runs in the owner): finish the deferred
+  /// response once the delay has elapsed.
+  void ServicePendingAction(bool in_isr)
+  {
+    const uint32_t now = static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds());
+    const auto action =
+        static_cast<PendingAction>(pending_action_.load(std::memory_order_acquire));
+    if (action == PendingAction::RESET_LOW)
+    {
+      if (static_cast<int32_t>(now - action_deadline_ms_) < 0) return;
+      DriveReset(true);
+      BeginDeferredAction(PendingAction::RESET_HIGH, 1u, deferred_resp_,
+                          deferred_resp_cap_);
+      return;
+    }
+    if (action == PendingAction::SWJ_PINS)
+    {
+      // PinWait：每拍采样一次，匹配或超时即完成（§10.3-a 的 Timer 路径轮询）。
+      // PinWait: sample once per tick; finish on a match or at the timeout (the
+      // Timer-path polling of §10.3-a).
+      const uint8_t pin_in = ReadSwjPins();
+      const bool matched =
+          swj_pin_sel_ != 0u && (pin_in & swj_pin_sel_) == swj_pin_expect_;
+      if (!matched && static_cast<int32_t>(now - action_deadline_ms_) < 0) return;
+      deferred_resp_[1] = pin_in;
+      FinishDeferredResponse(2u, in_isr);
+      return;
+    }
+    if (static_cast<int32_t>(now - action_deadline_ms_) < 0) return;
+    if (action == PendingAction::RESET_HIGH)
+    {
+      deferred_resp_[1] = DAP_OK;
+      deferred_resp_[2] = 1u;
+      FinishDeferredResponse(3u, in_isr);
+      return;
+    }
+    deferred_resp_[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
+    FinishDeferredResponse(2u, in_isr);
+  }
+
+  void FinishDeferredResponse(uint16_t size, bool in_isr)
+  {
+    pending_action_.store(static_cast<uint8_t>(PendingAction::NONE),
+                          std::memory_order_release);
+    REQUIRE(size != 0U && size <= deferred_resp_cap_);
+    CompleteResponse(size, in_isr);
+  }
 
  private:
   /**
@@ -849,24 +1055,50 @@ class DapLinkV2Class : public DeviceClass
 
   uint8_t OutstandingResponseCount() const
   {
-    const uint8_t active =
-        ep_data_in_ && ep_data_in_->GetState() == Endpoint::State::BUSY ? 1U : 0U;
-    const uint8_t prepared =
-        ep_data_in_ && ep_data_in_->GetActiveLength() != 0U ? 1U : 0U;
-    return static_cast<uint8_t>(resp_q_count_ + active + prepared);
+    // 已排队未发送 + 正由拷贝 Write 发送的 + 延时命令保留的响应槽；
+    // 三者合起来就是主机侧在途响应深度（§10.7-a 保持原有并发深度）。
+    // Queued unsent + the one sent by the copy Write + the slot reserved by a
+    // deferred delayed command: together they are the host-visible outstanding
+    // response depth (§10.7-a keeps the original concurrency depth).
+    const uint8_t sending = response_write_active_ ? 1U : 0U;
+    const uint8_t deferred =
+        pending_action_.load(std::memory_order_acquire) ==
+                static_cast<uint8_t>(PendingAction::NONE)
+            ? 0U
+            : 1U;
+    return static_cast<uint8_t>(resp_q_count_ + sending + deferred);
   }
 
-  void ArmOutTransferIfIdle()
+  void ArmOutTransferIfIdle(bool in_isr)
   {
-    if (!inited_ || !ep_data_out_ || !ep_data_in_ || IsResponseQueueFull() ||
+    if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_ ||
+        IsResponseQueueFull() ||
         OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
       return;
-    if (ep_data_out_->GetState() != Endpoint::State::IDLE &&
-        !ep_data_out_->HasReceiveResult())
+    // 拷贝模式 Read：一条命令一次接收，短包或收满（DAP 包长）即完成。
+    // Copy-mode Read: one command per receive; a short packet or a full buffer (the
+    // DAP packet size) ends it.
+    if (ep_data_out_->Read({command_buffer_, GetDapPacketSize()}, in_isr) ==
+        ErrorCode::OK)
+    {
+      command_read_active_ = true;
+    }
+  }
+
+  /// 把队头响应交给拷贝模式 Write 发送；无响应或已在发送时不动作。
+  /// Hand the head response to a copy-mode Write; no-op when empty or already
+  /// sending. A 512 B response spans multiple wire packets on full speed.
+  void KickResponse(bool in_isr)
+  {
+    if (!inited_ || !ep_data_in_ || response_write_active_ || IsResponseQueueEmpty())
       return;
-    const size_t length = GetDapPacketSize();
-    REQUIRE(length != 0U && length <= ep_data_out_->MaxTransferSize());
-    (void)ep_data_out_->ArmReceive(length);
+    const auto& response = resp_q_[resp_q_head_];
+    REQUIRE(response.len != 0U);
+    if (ep_data_in_->Write({response.payload, response.len}, false, in_isr) ==
+        ErrorCode::OK)
+    {
+      response_write_active_ = true;
+    }
   }
 
  private:
@@ -1383,15 +1615,27 @@ class DapLinkV2Class : public DeviceClass
     uint16_t us = 0u;
     Memory::FastCopy(&us, &req[1], sizeof(us));
 
-    LibXR::Timebase::DelayMicroseconds(us);
+    if (us == 0u)
+    {
+      resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
+      out_len = 2u;
+      return ErrorCode::OK;
+    }
 
-    resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
-    out_len = 2u;
+    // §10.3-a：延时命令不在回调/owner 上下文忙等；响应槽保留给线程上下文的
+    // Timer 路径，到期（向上取整到 1 ms）后续做并入队。
+    // §10.3-a: a delayed command never busy-waits in the callback/owner context;
+    // its response slot is reserved for the Timer path in thread context, which
+    // completes and queues the response once the delay elapses (rounded up to 1 ms).
+    BeginDeferredAction(PendingAction::DELAY,
+                        (static_cast<uint32_t>(us) + 999u) / 1000u, resp, resp_cap);
+    out_len = 0u;
     return ErrorCode::OK;
   }
 
-  ErrorCode HandleResetTarget(bool in_isr, const uint8_t* /*req*/, uint16_t /*req_len*/,
-                              uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
+  ErrorCode HandleResetTarget(bool /*in_isr*/, const uint8_t* /*req*/,
+                              uint16_t /*req_len*/, uint8_t* resp, uint16_t resp_cap,
+                              uint16_t& out_len)
   {
     if (!resp || resp_cap < 3u)
     {
@@ -1401,20 +1645,20 @@ class DapLinkV2Class : public DeviceClass
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::RESET_TARGET);
 
-    uint8_t execute = 0u;
-
     if (nreset_gpio_ != nullptr)
     {
       DriveReset(false);
-      DelayUsIfAllowed(in_isr, 1000u);
-      DriveReset(true);
-      DelayUsIfAllowed(in_isr, 1000u);
-      execute = 1u;
+      // 拉低与释放之间的两段 1 ms 延时同样走 §10.3-a 的 Timer 路径。
+      // Both 1 ms delays between asserting and releasing nRESET use the §10.3-a
+      // Timer path as well.
+      BeginDeferredAction(PendingAction::RESET_LOW, 1u, resp, resp_cap);
+      out_len = 0u;
+      return ErrorCode::OK;
     }
 
     // Always return DAP_OK; if reset is not implemented, Execute=0.
     resp[1] = DAP_OK;
-    resp[2] = execute;
+    resp[2] = 0u;
     out_len = 3u;
     return ErrorCode::OK;
   }
@@ -1462,55 +1706,52 @@ class DapLinkV2Class : public DeviceClass
       DriveReset(LEVEL_HIGH);
     }
 
-    // Read helper: start from shadow; override nRESET with physical level if wired.
-    auto read_pins = [&]() -> uint8_t
+    // 2) PinWait：等 (PinInput & PinSelect) 匹配 (PinOut & PinSelect) 或超时。
+    //    不在回调/owner 里忙等：先采样一次；已经匹配（shadow-only 引脚总是如此）
+    //    或无需等待就立即返回，否则按 §10.3-a 交给 Timer 路径每拍（1 ms）复查，
+    //    直到匹配或超时。
+    //    PinWait: wait until (PinInput & PinSelect) matches (PinOut & PinSelect), or
+    //    the timeout. Never busy-wait in the callback/owner: sample once here and
+    //    return at once when it already matches (shadow-only pins always do) or no
+    //    wait was requested; otherwise the §10.3-a Timer path re-samples every tick
+    //    (1 ms) until a match or the timeout.
+    swj_pin_sel_ = PIN_SEL;
+    swj_pin_expect_ = static_cast<uint8_t>(PIN_OUT & PIN_SEL);
+    const uint8_t pin_in = ReadSwjPins();
+    if (wait_us == 0u || PIN_SEL == 0u || (pin_in & PIN_SEL) == swj_pin_expect_)
     {
-      uint8_t pin_in = swj_shadow_;
-
-      if (nreset_gpio_ != nullptr)
-      {
-        if (nreset_gpio_->Read())
-        {
-          pin_in |= LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET;
-        }
-        else
-        {
-          pin_in = static_cast<uint8_t>(
-              pin_in & static_cast<uint8_t>(~LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET));
-        }
-      }
-
-      return pin_in;
-    };
-
-    // 2) PinWait: wait until (PinInput & PinSelect) matches (PinOut & PinSelect), or
-    // timeout. Since SWCLK/SWDIO are shadow-only now, their selected bits will already
-    // match immediately.
-    uint8_t pin_in = 0u;
-
-    if (wait_us == 0u || PIN_SEL == 0u)
-    {
-      pin_in = read_pins();
-    }
-    else
-    {
-      const uint64_t START = LibXR::Timebase::GetMicroseconds();
-      const uint8_t EXPECT = static_cast<uint8_t>(PIN_OUT & PIN_SEL);
-
-      do
-      {
-        pin_in = read_pins();
-        if ((pin_in & PIN_SEL) == EXPECT)
-        {
-          break;
-        }
-      } while ((static_cast<uint64_t>(LibXR::Timebase::GetMicroseconds()) - START) <
-               wait_us);
+      resp[1] = pin_in;
+      out_len = 2u;
+      return ErrorCode::OK;
     }
 
-    resp[1] = pin_in;
-    out_len = 2u;
+    BeginDeferredAction(PendingAction::SWJ_PINS, (wait_us + 999u) / 1000u, resp,
+                        resp_cap);
+    out_len = 0u;
     return ErrorCode::OK;
+  }
+
+  /// 读回 SWJ 引脚电平：从 shadow 出发，nRESET 若接了 GPIO 则用实际电平覆盖。
+  /// Sample the SWJ pins: start from the shadow and override nRESET with the wired
+  /// GPIO level when present.
+  uint8_t ReadSwjPins() const
+  {
+    uint8_t pin_in = swj_shadow_;
+
+    if (nreset_gpio_ != nullptr)
+    {
+      if (nreset_gpio_->Read())
+      {
+        pin_in |= LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET;
+      }
+      else
+      {
+        pin_in = static_cast<uint8_t>(
+            pin_in & static_cast<uint8_t>(~LibXR::USB::DapLinkV2Def::DAP_SWJ_NRESET));
+      }
+    }
+
+    return pin_in;
   }
 
   ErrorCode HandleSWJClock(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
@@ -3822,11 +4063,6 @@ class DapLinkV2Class : public DeviceClass
     }
   }
 
-  void DelayUsIfAllowed(bool /*in_isr*/, uint32_t us)
-  {
-    LibXR::Timebase::DelayMicroseconds(us);
-  }
-
  private:
   static constexpr uint16_t DEFAULT_DAP_PACKET_SIZE = DefaultDapPacketSize;
   static constexpr uint8_t PACKET_COUNT_ADVERTISED = AdvertisedPacketCount;
@@ -3884,6 +4120,33 @@ class DapLinkV2Class : public DeviceClass
   uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
   uint16_t queued_request_length_ = 0u;
   uint16_t queued_command_count_ = 0u;
+
+  // ---------------------------------------------------------------------------
+  // Copy-mode transfer state / 拷贝模式传输状态
+  // ---------------------------------------------------------------------------
+
+  /// 命令缓冲：拷贝模式 Read 的目标，一次收一条完整命令。
+  /// Command buffer: the copy-mode Read target, one whole command at a time.
+  uint8_t command_buffer_[MAX_DAP_PACKET_SIZE] = {};
+  bool command_read_active_ = false;    ///< OUT 拷贝 Read 在途 / OUT copy Read in flight
+  bool response_write_active_ = false;  ///< IN 拷贝 Write 在途 / IN copy Write in flight
+  bool cmd_pending_ = false;  ///< 已收到待处理命令 / A received command awaits service
+  uint16_t cmd_len_ = 0u;     ///< 已收命令长度 / Received command length
+
+  // §10.3-a：延时命令状态。pending_action_ 由 owner 写、Timer 线程读（只读它来
+  // 按门铃）；deadline 与响应 stash 在 store（release）之前写好，owner 续做时在
+  // load（acquire）之后读回。
+  // §10.3-a: delayed-command state. The owner writes pending_action_ and the Timer
+  // thread only reads it to ring the service; the deadline and the response stash
+  // are written before the store (release) and read back after the load (acquire)
+  // when the owner resumes.
+  std::atomic<uint8_t> pending_action_{static_cast<uint8_t>(PendingAction::NONE)};
+  uint32_t action_deadline_ms_ = 0u;  ///< 续做时刻（ms） / Resume deadline (ms)
+  uint8_t* deferred_resp_ = nullptr;  ///< 保留的响应缓冲 / Reserved response buffer
+  uint16_t deferred_resp_cap_ = 0u;   ///< 保留的响应容量 / Reserved response capacity
+  uint8_t swj_pin_sel_ = 0u;          ///< PinWait 引脚选择 / PinWait pin select
+  uint8_t swj_pin_expect_ = 0u;       ///< PinWait 期望电平 / PinWait expected level
+  Timer::TimerHandle delay_timer_ = nullptr;  ///< 1 ms 门铃任务 / 1 ms doorbell task
 
   LIBXR_PACKED_BEGIN
   /**
@@ -3963,31 +4226,18 @@ class DapLinkV2Class : public DeviceClass
 
   uint32_t match_mask_ = 0xFFFFFFFFu;  ///< Match mask
 
-  LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
+  // 完成回调在 owner 里执行，必须保持浅操作；命令处理走 RequestClassService +
+  // OnService，响应发送走拷贝模式 Write。
+  // Completion callbacks run in the owner and must stay shallow; command processing
+  // goes through RequestClassService + OnService and responses through the copy-mode
+  // Write.
+  LibXR::Callback<const Endpoint::Completion&> on_data_out_cb_ =
+      LibXR::Callback<const Endpoint::Completion&>::Create(OnDataOutCompleteStatic,
+                                                           this);
 
-  void FillResponse(bool, Endpoint::TxFill& fill)
-  {
-    if (!inited_) return;
-    if (IsResponseQueueEmpty())
-    {
-      ArmOutTransferIfIdle();
-      return;
-    }
-    const auto& response = resp_q_[resp_q_head_];
-    REQUIRE(response.len != 0U && response.len <= fill.Buffer().size_);
-    Memory::FastCopy(fill.Buffer().addr_, response.payload, response.len);
-    fill.SetSize(response.len);
-    resp_q_head_ = NextRespQueueIndex(resp_q_head_);
-    --resp_q_count_;
-    ArmOutTransferIfIdle();
-  }
-  Callback<Endpoint::TxFill&> fill_response_cb_ = Callback<Endpoint::TxFill&>::Create(
-      [](bool context, DapLinkV2Class* self, Endpoint::TxFill& fill)
-      { self->FillResponse(context, fill); }, this);
-
-  LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
+  LibXR::Callback<const Endpoint::Completion&> on_data_in_cb_ =
+      LibXR::Callback<const Endpoint::Completion&>::Create(OnDataInCompleteStatic,
+                                                           this);
 };
 
 }  // namespace LibXR::USB
