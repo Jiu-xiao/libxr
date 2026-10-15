@@ -53,7 +53,7 @@ static bool CompleteEp0InBeforeSetup(OtgHsEndpointMap& map, uint8_t int_flag,
 
   auto* in0 = map[0][IN_IDX];
   DEV_ASSERT_FROM_CALLBACK(in0 != nullptr, true);
-  if (in0->GetState() != LibXR::USB::Endpoint::State::BUSY)
+  if (!in0->transfer_active_)
   {
     return false;
   }
@@ -76,8 +76,6 @@ static void PrepareEp0ForSetup(OtgHsEndpointMap& map)
 
   // 新的 SETUP 会中断前一笔控制传输，因此在分发 setup 包之前，
   // 必须先把 EP0 恢复成默认控制端点形态。
-  // A fresh SETUP cancels the previous control transfer, so EP0 must be re-armed
-  // to the default control endpoint shape before the setup packet is dispatched.
   out0->tog0_ = true;
   out0->tog1_ = false;
   in0->tog0_ = true;
@@ -94,7 +92,7 @@ static void HandleTransferOut(CH32EndpointOtgHs* ep_out, uint8_t ep_num, uint8_t
   }
 
   const bool is_nak = ((int_st & USBHS_UIS_IS_NAK) != 0u);
-  const bool busy = (ep_out->GetState() == LibXR::USB::Endpoint::State::BUSY);
+  const bool busy = ep_out->transfer_active_;
   const uint16_t rx_len = USBHSD->RX_LEN;
 
   if (ep_num == 0u)
@@ -116,10 +114,10 @@ static void HandleTransferOut(CH32EndpointOtgHs* ep_out, uint8_t ep_num, uint8_t
     return;
   }
 
-  // 部分 non-EP0 OUT 路径在端点仍处于 BUSY 时，仍可能给出可用的晚到长度快照；
+  // 部分 non-EP0 OUT 路径在端点仍有在途请求时，仍可能给出可用的晚到长度快照；
   // 这里只保留这条窄恢复路径。
-  // Some non-EP0 OUT paths may still expose a usable late length snapshot while the
-  // endpoint stays BUSY. Keep that narrow recovery path here.
+  // Some non-EP0 OUT paths may still expose a usable late length snapshot while a
+  // request is in flight. Keep that narrow recovery path here.
   ep_out->TransferComplete(rx_len);
 }
 
@@ -137,7 +135,7 @@ static void HandleTransferIn(CH32EndpointOtgHs* ep_in, uint8_t ep_num, uint8_t i
     return;
   }
 
-  const bool busy = (ep_in->GetState() == LibXR::USB::Endpoint::State::BUSY);
+  const bool busy = ep_in->transfer_active_;
   const bool ep0_data_in_complete =
       (ep_num == 0u) && busy && (ep_in->last_transfer_size_ > 0u);
   if (!ep0_data_in_complete)
@@ -147,8 +145,6 @@ static void HandleTransferIn(CH32EndpointOtgHs* ep_in, uint8_t ep_num, uint8_t i
 
   // EP0 的数据 IN 在 setup 仲裁后也可能没有可见 ACK 就结束；
   // 但 status ZLP 仍然必须保持严格，因此这里只允许非零数据阶段走这条路径。
-  // EP0 data IN may complete after setup arbitration without a visible ACK.
-  // Status ZLP must still stay strict, so only non-zero data stages use this path.
   ep_in->TransferComplete(0u);
 }
 
@@ -164,8 +160,6 @@ static void HandleTransferToken(OtgHsEndpointMap& map, uint8_t int_st)
     {
       // CH32V30x USBHS 通过 SETUP_ACT 上报 SETUP，因此这里的 TOKEN_SETUP
       // 只是信息位，不能再次重复执行 setup 路径。
-      // CH32V30x USBHS reports SETUP through SETUP_ACT, so TOKEN_SETUP is
-      // informational only here and must not re-run the setup path.
       break;
     }
 
@@ -197,9 +191,6 @@ static void ClearPendingOtgHsInterrupts()
 
     // 这个循环只清理 INT_FG 里已经锁存的位；如果之后又出现新的总线事件，
     // 硬件会重新触发 IRQ，由下一次进入 handler 时再清。
-    // This loop drains only the bits already latched in INT_FG. If hardware
-    // observes another bus event later, it will assert a new IRQ and the next
-    // handler entry will clear it.
   }
 }
 
@@ -267,8 +258,6 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
 
     // 2) Setup 仲裁：在新 setup 重置控制传输状态之前，
     // 先消费上一笔 EP0 IN 完成。
-    // 2) Setup arbitration: consume the previous EP0 IN completion before the
-    // new setup resets the control-transfer state.
     if (CompleteEp0InBeforeSetup(map, INTFLAG, INTST))
     {
       clear_mask |= USBHS_UIF_TRANSFER;
@@ -281,13 +270,12 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
       auto* out0 = map[0][OUT_IDX];
       DEV_ASSERT_FROM_CALLBACK(out0 != nullptr, true);
       const auto* setup =
-          reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->GetBuffer().addr_);
+          reinterpret_cast<const LibXR::USB::SetupPacket*>(out0->SlotMemory().addr_);
       usb->OnSetupPacket(true, setup);
       clear_mask |= USBHS_UIF_SETUP_ACT;
     }
 
     // 3) 普通 token 完成：非 setup 传输统一在这里分发。
-    // 3) Ordinary token completion: non-setup transfers arrive here.
     if ((INTFLAG & USBHS_UIF_TRANSFER) && ((clear_mask & USBHS_UIF_TRANSFER) == 0u))
     {
       HandleTransferToken(map, INTST);
@@ -300,57 +288,76 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
 }
 
 CH32USBOtgHS::CH32USBOtgHS(
-    const std::initializer_list<CH32USBOtgHS::EPConfig> EP_CFGS, uint16_t vid,
-    uint16_t pid, uint16_t bcd,
+    const std::initializer_list<RawData> RX_EP_CFGS,
+    const std::initializer_list<RawData> TX_EP_CFGS, uint16_t vid, uint16_t pid,
+    uint16_t bcd,
     const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
     const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
         CONFIGS,
     ConstRawData uid)
-    : USB::EndpointPool(EP_CFGS.size() * 2),
+    : USB::EndpointPool((RX_EP_CFGS.size() > TX_EP_CFGS.size() ? RX_EP_CFGS.size()
+                                                               : TX_EP_CFGS.size()) *
+                        2),
       USB::DeviceCore<USB::HighSpeedCapabilities>(
           *this, USB::USBSpec::USB_2_1, USB::Speed::HIGH,
           USB::DeviceDescriptor::PacketSize0::SIZE_64, vid, pid, bcd, LANG_LIST, CONFIGS,
           uid)
 {
   ConfigureCH32USBGuard(*this);
-  ASSERT(EP_CFGS.size() > 0 && EP_CFGS.size() <= CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
 
-  auto cfgs_itr = EP_CFGS.begin();
+  const size_t ep_count =
+      RX_EP_CFGS.size() > TX_EP_CFGS.size() ? RX_EP_CFGS.size() : TX_EP_CFGS.size();
+  ASSERT(ep_count > 0 && ep_count <= CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
 
-  ASSERT(cfgs_itr->buffer_tx.size_ >= 64 && cfgs_itr->buffer_rx.size_ >= 64 &&
-         cfgs_itr->double_buffer == false);
+  RawData rx[CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE] = {};
+  RawData tx[CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE] = {};
+  size_t idx = 0;
+  for (const auto& cfg : RX_EP_CFGS)
+  {
+    ASSERT(idx < CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
+    rx[idx++] = cfg;
+  }
+  idx = 0;
+  for (const auto& cfg : TX_EP_CFGS)
+  {
+    ASSERT(idx < CH32EndpointOtgHs::EP_OTG_HS_MAX_SIZE);
+    tx[idx++] = cfg;
+  }
 
-  auto ep0_out =
-      new CH32EndpointOtgHs(USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::OUT,
-                            cfgs_itr->buffer_rx, false);
-  auto ep0_in =
-      new CH32EndpointOtgHs(USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::IN,
-                            cfgs_itr->buffer_tx, false);
+  // EP0：收发共用一个 DMA 地址 → 必须是同一块（各 ≥64 B）。
+  ASSERT(rx[0].addr_ != nullptr && rx[0].addr_ == tx[0].addr_ && rx[0].size_ >= 64U);
+
+  auto* ep0_out = new CH32EndpointOtgHs(USB::Endpoint::EPNumber::EP0,
+                                        USB::Endpoint::Direction::OUT, rx[0]);
+  auto* ep0_in = new CH32EndpointOtgHs(USB::Endpoint::EPNumber::EP0,
+                                       USB::Endpoint::Direction::IN, rx[0]);
 
   USB::EndpointPool::SetEndpoint0(ep0_in, ep0_out);
 
   USB::Endpoint::EPNumber ep_index = USB::Endpoint::EPNumber::EP1;
-
-  for (++cfgs_itr, ep_index = USB::Endpoint::EPNumber::EP1; cfgs_itr != EP_CFGS.end();
-       ++cfgs_itr, ep_index = USB::Endpoint::NextEPNumber(ep_index))
+  for (size_t i = 1; i < ep_count; ++i, ep_index = USB::Endpoint::NextEPNumber(ep_index))
   {
-    if (!cfgs_itr->double_buffer)
+    if (rx[i].addr_ != nullptr && tx[i].addr_ != nullptr)
     {
-      auto ep_out = new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::OUT,
-                                          cfgs_itr->buffer_rx, false);
-      USB::EndpointPool::Put(ep_out);
-
-      auto ep_in = new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::IN,
-                                         cfgs_itr->buffer_tx, false);
-      USB::EndpointPool::Put(ep_in);
+      // 双向：HS 的 EP1-15 收发 DMA 寄存器分立，两块无相邻要求，各 ≥64 B
+      // （手册 p.340/p.344）；默认两槽由软件切换 DMA 指针。
+      ASSERT(rx[i].size_ >= 64U && tx[i].size_ >= 64U);
+      USB::EndpointPool::Put(
+          new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::OUT, rx[i]));
+      USB::EndpointPool::Put(
+          new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::IN, tx[i]));
     }
-    else
+    else if (rx[i].addr_ != nullptr)
     {
-      auto ep = new CH32EndpointOtgHs(
-          ep_index,
-          cfgs_itr->is_in ? USB::Endpoint::Direction::IN : USB::Endpoint::Direction::OUT,
-          cfgs_itr->buffer_tx, true);
-      USB::EndpointPool::Put(ep);
+      ASSERT(rx[i].size_ >= 64U);
+      USB::EndpointPool::Put(
+          new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::OUT, rx[i]));
+    }
+    else if (tx[i].addr_ != nullptr)
+    {
+      ASSERT(tx[i].size_ >= 64U);
+      USB::EndpointPool::Put(
+          new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::IN, tx[i]));
     }
   }
 }
@@ -373,7 +380,6 @@ void CH32USBOtgHS::OnControlReady()
 void CH32USBOtgHS::Start(bool)
 {
   // OTGHS 先选择共享 48 MHz 时钟源，再打开 USBHS 自己的总线时钟。
-  // OTGHS selects the shared 48 MHz source first, then enables its own bus clock.
   LibXR::CH32UsbRcc::ConfigureUsb48M();
 #if defined(RCC_AHBPeriph_USBHS)
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);

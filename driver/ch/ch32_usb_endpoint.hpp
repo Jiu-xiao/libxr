@@ -19,13 +19,16 @@ class CH32EndpointOtgFs : public USB::Endpoint
   CH32EndpointOtgFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
                     bool single_direction);
 
-  void ConfigureHardware(const Config& cfg) override;
-  void CloseHardware() override;
-  ErrorCode StartHardware(RawData buffer, size_t size) override;
+  ErrorCode ConfigureHardware(const Config& cfg, Granted& granted) override;
+  void CloseHardware(bool in_isr) override;
+  ErrorCode StartHardware(const HwRequest& request, bool in_isr) override;
+  StopResult StopHardware(bool in_isr) override;
+  size_t ReapProgress(const HwRequest& request, bool& retired) override;
 
   void TransferComplete(size_t size);
-  ErrorCode StallHardware() override;
-  ErrorCode ClearStallHardware() override;
+  ErrorCode StallHardware(bool in_isr) override;
+  ErrorCode ClearStallHardware(bool in_isr) override;
+  size_t MaxPacketSizeLimit(Type type) const override;
 
   bool tog_ = false;
   bool is_isochronous_ = false;
@@ -34,6 +37,12 @@ class CH32EndpointOtgFs : public USB::Endpoint
   size_t last_transfer_size_ = 0;
   RawData dma_buffer_;
   RawData transfer_dma_{nullptr, 0};
+
+  uint32_t transfer_tag_ = 0;
+  bool transfer_active_ = false;
+  size_t transfer_requested_ = 0;
+  size_t transfer_accumulated_ = 0;
+  uint8_t* transfer_cursor_ = nullptr;
 
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
   static inline CH32EndpointOtgFs* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
@@ -52,16 +61,36 @@ class CH32EndpointDevFs : public USB::Endpoint
   CH32EndpointDevFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
                     bool is_isochronous);
 
-  void ConfigureHardware(const Config& cfg) override;
-  void CloseHardware() override;
-  ErrorCode StartHardware(RawData buffer, size_t size) override;
+  // DevFS 属第 4 步（共用 FSDEV 运行期），本分支不迁移：仅做最小编译适配（新
+  // 签名 + 占位实现），V307 的库构建会编译本文件；V203 的 USB 功能不可用是
+  // 预期状态，功能迁移由第 4 步交付。
+  // DevFS belongs to step 4 (shared FSDEV runtime) and is NOT migrated on this
+  // branch: only a minimal compile adaptation (new signatures + placeholder
+  // implementations) so the V307 library build compiles this file. V203 USB
+  // functionality staying unavailable is expected; the real migration ships with
+  // step 4.
+  ErrorCode ConfigureHardware(const Config& cfg, Granted& granted) override;
+  void CloseHardware(bool in_isr) override;
+  ErrorCode StartHardware(const HwRequest& request, bool in_isr) override;
+  USB::Endpoint::StopResult StopHardware(bool) override { return StopResult::DONE; }
+  size_t ReapProgress(const HwRequest&, bool& retired) override
+  {
+    retired = true;
+    return 0;
+  }
+  size_t MaxPacketSizeLimit(Type) const override { return 64U; }
 
   void TransferComplete(size_t size);
 
   void CopyRxDataToBuffer(size_t size);
 
-  ErrorCode StallHardware() override;
-  ErrorCode ClearStallHardware() override;
+  ErrorCode StallHardware(bool in_isr) override;
+  ErrorCode ClearStallHardware(bool in_isr) override;
+
+  // FSDEV 设备层（ch32_usb_devfs.cpp）需要从类外读取 EP0 槽内存来取 setup 包。
+  // The FSDEV device layer (ch32_usb_devfs.cpp) reads the EP0 slot memory from
+  // outside the class to fetch the setup packet.
+  using USB::Endpoint::SlotMemory;
 
   static void ResetPMAAllocator();
   static void SetEpTxStatus(uint8_t ep, uint16_t status);
@@ -90,16 +119,18 @@ class CH32EndpointDevFs : public USB::Endpoint
 class CH32EndpointOtgHs : public USB::Endpoint
 {
  public:
-  CH32EndpointOtgHs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
-                    bool double_buffer);
+  CH32EndpointOtgHs(EPNumber ep_num, Direction dir, LibXR::RawData buffer);
 
-  void ConfigureHardware(const Config& cfg) override;
-  void CloseHardware() override;
-  ErrorCode StartHardware(RawData buffer, size_t size) override;
+  ErrorCode ConfigureHardware(const Config& cfg, Granted& granted) override;
+  void CloseHardware(bool in_isr) override;
+  ErrorCode StartHardware(const HwRequest& request, bool in_isr) override;
+  StopResult StopHardware(bool in_isr) override;
+  size_t ReapProgress(const HwRequest& request, bool& retired) override;
 
   void TransferComplete(size_t size);
-  ErrorCode StallHardware() override;
-  ErrorCode ClearStallHardware() override;
+  ErrorCode StallHardware(bool in_isr) override;
+  ErrorCode ClearStallHardware(bool in_isr) override;
+  size_t MaxPacketSizeLimit(Type type) const override;
 
   uint8_t dev_id_;
   bool tog0_ = false;
@@ -108,6 +139,12 @@ class CH32EndpointOtgHs : public USB::Endpoint
   size_t last_transfer_size_ = 0;
   RawData dma_buffer_;
   RawData transfer_dma_{nullptr, 0};
+
+  uint32_t transfer_tag_ = 0;
+  bool transfer_active_ = false;
+  size_t transfer_requested_ = 0;
+  size_t transfer_accumulated_ = 0;
+  uint8_t* transfer_cursor_ = nullptr;
 
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
   static inline CH32EndpointOtgHs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};

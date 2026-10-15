@@ -308,13 +308,10 @@ CH32EndpointDevFs::CH32EndpointDevFs(EPNumber ep_num, Direction dir,
   map_dev_fs_[EP_I][static_cast<uint8_t>(dir)] = this;
 }
 
-void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
+ErrorCode CH32EndpointDevFs::ConfigureHardware(const Config& cfg, Granted& /*granted*/)
 {
   ASSERT(cfg.direction == Direction::IN || cfg.direction == Direction::OUT);
   ASSERT(cfg.direction == GetDirection());
-
-  auto& ep_cfg = GetConfig();
-  ep_cfg = cfg;
 
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
 
@@ -324,7 +321,7 @@ void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
     packet_size_limit = 1023;
   }
 
-  const auto BUF = HardwareBuffer();
+  const auto BUF = SlotMemory();
   if (packet_size_limit > BUF.size_)
   {
     packet_size_limit = BUF.size_;
@@ -344,7 +341,7 @@ void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
     max_packet_size = BUF.size_;
   }
 
-  ep_cfg.max_packet_size = static_cast<uint16_t>(max_packet_size);
+  const uint16_t effective_mps = static_cast<uint16_t>(max_packet_size);
 
   if (pma_addr_ == 0 || pma_addr_ < PMA_ALLOC_BASE)
   {
@@ -355,8 +352,7 @@ void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
 
   if (IsPlanning())
   {
-    SetState(State::IDLE);
-    return;
+    return ErrorCode::OK;
   }
 
   volatile BTableEntry* bt = btable_entries();
@@ -369,7 +365,7 @@ void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
   else
   {
     bt[EP_I].addr_rx = pma_addr_;
-    bt[EP_I].count_rx = encode_rx_count(ep_cfg.max_packet_size);
+    bt[EP_I].count_rx = encode_rx_count(effective_mps);
   }
 
   uint16_t epr = static_cast<uint16_t>((*ep_reg(EP_I)) & USB_EPREG_MASK);
@@ -377,7 +373,7 @@ void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
   epr = static_cast<uint16_t>((epr & ~USB_EPADDR_FIELD) | (EP_I & 0x0FU));
   epr = static_cast<uint16_t>(epr & ~USB_EP_T_FIELD);
 
-  switch (ep_cfg.type)
+  switch (cfg.type)
   {
     case Type::CONTROL:
       epr |= USB_EP_CONTROL;
@@ -407,10 +403,10 @@ void CH32EndpointDevFs::ConfigureHardware(const Config& cfg)
     set_rx_status(EP_I, USB_EP_RX_NAK);
   }
 
-  SetState(State::IDLE);
+  return ErrorCode::OK;
 }
 
-void CH32EndpointDevFs::CloseHardware()
+void CH32EndpointDevFs::CloseHardware(bool /*in_isr*/)
 {
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
   if (GetDirection() == Direction::IN)
@@ -423,8 +419,10 @@ void CH32EndpointDevFs::CloseHardware()
   }
 }
 
-ErrorCode CH32EndpointDevFs::StartHardware(RawData buffer, size_t size)
+ErrorCode CH32EndpointDevFs::StartHardware(const HwRequest& request, bool /*in_isr*/)
 {
+  const auto buffer = request.slot;
+  const size_t size = request.length;
   ASSERT(size <= MaxPacketSize() && size <= buffer.size_);
   const uint8_t ep = EPNumberToInt8(GetNumber());
   last_transfer_size_ = size;
@@ -445,11 +443,11 @@ ErrorCode CH32EndpointDevFs::StartHardware(RawData buffer, size_t size)
 
 void CH32EndpointDevFs::CopyRxDataToBuffer(size_t size)
 {
-  if (size > GetBuffer().size_)
+  if (size > SlotMemory().size_)
   {
-    size = GetBuffer().size_;
+    size = SlotMemory().size_;
   }
-  pma_read(GetBuffer().addr_, pma_addr_, size);
+  pma_read(SlotMemory().addr_, pma_addr_, size);
 }
 
 void CH32EndpointDevFs::TransferComplete(size_t size)
@@ -459,10 +457,10 @@ void CH32EndpointDevFs::TransferComplete(size_t size)
   {
     set_rx_status(ep, USB_EP_RX_NAK);
     size = get_rx_count_from_btable(ep);
-    const auto destination = TransferBuffer();
+    const auto destination = SlotMemory();
     if (size > destination.size_)
     {
-      OnTransferCompleteCallback(true, size, ErrorCode::OUT_OF_RANGE);
+      OnHardwareComplete(true, 0, size, ErrorCode::OUT_OF_RANGE);
       return;
     }
     if (size != 0U) pma_read(destination.addr_, pma_addr_, size);
@@ -472,10 +470,10 @@ void CH32EndpointDevFs::TransferComplete(size_t size)
     set_tx_status(ep, USB_EP_TX_NAK);
     size = last_transfer_size_;
   }
-  OnTransferCompleteCallback(true, size);
+  OnHardwareComplete(true, 0, size);
 }
 
-ErrorCode CH32EndpointDevFs::StallHardware()
+ErrorCode CH32EndpointDevFs::StallHardware(bool /*in_isr*/)
 {
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
   if (GetDirection() == Direction::IN)
@@ -489,7 +487,7 @@ ErrorCode CH32EndpointDevFs::StallHardware()
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointDevFs::ClearStallHardware()
+ErrorCode CH32EndpointDevFs::ClearStallHardware(bool /*in_isr*/)
 {
   const uint8_t EP_I = static_cast<uint8_t>(EPNumberToInt8(GetNumber()));
   if (GetDirection() == Direction::IN)

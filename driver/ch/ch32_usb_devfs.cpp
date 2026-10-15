@@ -359,7 +359,7 @@ static void usbdev_fs_irqhandler()
 
           out0->CopyRxDataToBuffer(sizeof(LibXR::USB::SetupPacket));
           usb->OnSetupPacket(true, reinterpret_cast<const LibXR::USB::SetupPacket*>(
-                                       out0->GetBuffer().addr_));
+                                       out0->SlotMemory().addr_));
 
           continue;
         }
@@ -557,19 +557,12 @@ void CH32USBDeviceFS::Start(bool)
   auto& ep_map = LibXR::CH32EndpointDevFs::map_dev_fs_;
   constexpr uint8_t OUT_IDX = static_cast<uint8_t>(LibXR::USB::Endpoint::Direction::OUT);
   const uint8_t N_EP = static_cast<uint8_t>(LibXR::CH32EndpointDevFs::EP_DEV_FS_MAX_SIZE);
-  for (uint8_t ep = 1; ep < N_EP; ++ep)
-  {
-    auto* out = ep_map[ep][OUT_IDX];
-    if (out == nullptr)
-    {
-      continue;
-    }
-    if (out->GetState() != LibXR::USB::Endpoint::State::BUSY)
-    {
-      continue;
-    }
-    (void)out->Transfer(out->MaxTransferSize());
-  }
+  // 旧驱动在这里通过旧接口重挂各 OUT 端点；槽模型下挂接收是各类 BindEndpoints
+  // 的职责，且 DevFS 本分支未迁移（第 4 步交付），故不再做设备级重挂。
+  // The legacy driver re-armed the OUT endpoints here through the old API; in the
+  // slot model arming belongs to each class's BindEndpoints, and DevFS is not
+  // migrated on this branch (step 4 delivers it), so no device-level re-arm.
+  (void)N_EP;
 
   self_ = this;
   LibXR::CH32UsbCanShared::usb_inited.store(true, std::memory_order_release);
