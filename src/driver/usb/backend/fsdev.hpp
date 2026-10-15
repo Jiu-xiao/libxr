@@ -371,6 +371,12 @@ class FSDevDevice : public EndpointPool, public DeviceCore<FullSpeedCapabilities
 
   void OnStopsSettled() override
   {
+    if (!connected_)
+    {
+      // 已 Stop（上拉拉低）之后不会再有 SOF；不重开 SOFM，避免未连接状态下
+      // 出现"中断使能开着却没有事务"的困惑。
+      return;
+    }
     EndpointPool::HardwareScope hardware(this);
     // 配置切换后重估 SOFM（与 OTG 的 UpdateTick 对齐）：WantsBusTime() 为真时开，
     // 否则关。SOFM 只是中断使能，设备未 Start 时写它无副作用。
@@ -433,23 +439,43 @@ void FSDevEndpoint<HW>::SetStat(bool in, uint32_t target)
 {
   const uint8_t num = Num();
   const uint32_t stat_mask = in ? HW::kEpStatTx : HW::kEpStatRx;
-  // 写 1 翻转：只写到达目标的增量。读与写之间硬件可能自己完成一次事务
-  // （结束 IN/OUT 并自行把 STAT 改回 NAK、锁存 CTR），按读到的旧值算增量会把
-  // STAT 翻错（如 NAK 想写 VALID、NAK^VALID 翻回 NAK 反而写出了 VALID）。
-  // 所以写后回读核对，STAT 不等于目标就按新值重算再写，有界重试。
+  const uint32_t ctr = in ? HW::kEpCtrTx : HW::kEpCtrRx;
+  const uint32_t valid = in ? kFsDevStatTxValid : kFsDevStatRxValid;
+  const bool arming = (target == valid);
+  // 写 1 翻转：只写到达目标的增量。读与写（以及写与读回）之间硬件可能自己
+  // 完成一次事务（结束 IN/OUT 并自行把 STAT 改回 NAK、锁存 CTR），按旧值算
+  // 增量会把 STAT 翻错。所以写后回读核对，不对就按新值重算重写（有界）。
   // CTR/ERR 是 rc_w0：这些写永远写 1 保持，窗口里锁存的 CTR 不能被抹掉。
+  // 装填（目标 VALID）时若发现本方向 CTR 已锁存，说明写入已生效且这笔事务
+  // 已经完成——STAT 是硬件自动回的 NAK，绝不能重试：重试会把端点再次装填
+  // （IN 用同一份 PMA 数据重发一包、OUT 多收一包）。完成的事务交给 CTR 处
+  // 理推进。停止类目标（NAK/STALL/DISABLED）没有二次装填问题，窗口里完成
+  // 的事务只会把 STAT 推回 NAK，按新值重算重写即可收敛，不能提前放弃——
+  // 否则停止路径等于没停住。
   constexpr uint32_t kNoClear = HW::kEpCtrRx | HW::kEpCtrTx | HW::kEpErrRx | HW::kEpErrTx;
   for (unsigned attempt = 0U; attempt < 3U; ++attempt)
   {
     const uint32_t cur = HW::ReadEp(num);
+    if (arming && (cur & ctr) != 0U)
+    {
+      return;  // 本方向事务已完成，由 CTR 处理推进
+    }
     const uint32_t value =
         (cur & HW::kEpKeepMask) | ((cur ^ target) & stat_mask) | kNoClear;
     HW::WriteEp(num, value);
-    if ((HW::ReadEp(num) & stat_mask) == target)
+    const uint32_t after = HW::ReadEp(num);
+    if ((after & stat_mask) == target)
     {
       return;
     }
+    if (arming && (after & ctr) != 0U)
+    {
+      return;  // 装填后事务在窗口内完成：STAT 是硬件自动回的 NAK，不重试
+    }
   }
+  // 三次重算都没到达目标且（装填时）CTR 未锁存：读回路径异常，NAK/装填语义
+  // 已不可靠（停止路径等于没停住），不能静默继续。
+  REQUIRE(false);
 }
 
 template <typename HW>

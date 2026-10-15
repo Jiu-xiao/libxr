@@ -110,6 +110,10 @@ struct FakeHw
   /// 读改写窗口 / One-shot race hook: injects a hardware transaction right before
   /// the next WriteEp lands, reproducing the SetStat read-modify-write window.
   static inline std::function<void()> on_write;
+  /// 一次性竞态钩子：在 WriteEp 生效之后、软件读回之前注入硬件事务，复现
+  /// "写入已生效且事务已完成"的窗口 / One-shot race hook: injects a hardware
+  /// transaction after the write lands but before the software reads back.
+  static inline std::function<void()> on_write_post;
   static void WriteEp(uint8_t num, uint32_t value)
   {
     if (on_write)
@@ -129,6 +133,12 @@ struct FakeHw
     next = (next & ~kEpSetup) | (ep[num] & kEpSetup);
     ep[num] = next;
     UpdateIstr();
+    if (on_write_post)
+    {
+      std::function<void()> action = std::move(on_write_post);
+      on_write_post = nullptr;
+      action();
+    }
   }
   static uint16_t ReadCntr() { return cntr; }
   static void WriteCntr(uint16_t value) { cntr = value; }
@@ -913,6 +923,53 @@ void TestPmaLayoutChecks()
   expect_fatal(false, true);  // 布局超出 pma_limit / layout past the limit
 }
 
+/// 装填 VALID 后、硬件读回之前事务就完成了（写入生效、STAT 自动回 NAK、CTR
+/// 锁存）：重试逻辑不得把端点再次翻成 VALID——IN 会用同一份 PMA 数据重发一
+/// 包，OUT 会多收一包。正确行为是把这次完成交给 CTR 处理。
+/// The transaction completes after the VALID write lands but before the
+/// read-back (write effective, STAT auto-NAK, CTR latched): the retry logic
+/// must not flip the endpoint back to VALID — that re-arms the same PMA data
+/// (IN) or takes an extra packet (OUT). The completion goes through CTR.
+void TestArmNotRearmedByRace()
+{
+  // IN：装填即被 ACK / IN: the arm is ACKed inside the window
+  {
+    Fixture f(1);
+    Endpoint* in = nullptr;
+    TEST_ASSERT(f.device.Get(in, Endpoint::Direction::IN, Endpoint::EPNumber::EP1) ==
+                ErrorCode::OK);
+    Done done;
+    in->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, 64}, false);
+    in->SetOnComplete(done.CallbackFor());
+    const auto bytes = Bytes(64, 0x44);
+    FakeHw::on_write_post = [] { FakeHw::AckIn(1); };
+    TEST_ASSERT(in->Write({bytes.data(), bytes.size()}, false, false) == ErrorCode::OK);
+    // 必须停在 NAK（等 CTR 处理），不能被重试翻回 VALID
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatTx) == 0x0020U);
+    Pump();
+    TEST_ASSERT(done.count == 1 && done.actual == 64 && done.result == ErrorCode::OK);
+  }
+
+  // OUT：装填即被收包 / OUT: the arm is taken inside the window
+  {
+    Fixture f(1);
+    Endpoint* out = nullptr;
+    TEST_ASSERT(f.device.Get(out, Endpoint::Direction::OUT, Endpoint::EPNumber::EP1) ==
+                ErrorCode::OK);
+    Done done;
+    out->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, 64}, false);
+    out->SetOnComplete(done.CallbackFor());
+    const auto data = Bytes(64, 0x45);
+    FakeHw::on_write_post = [&data]
+    { FakeHw::RxPacket(1, data.data(), data.size(), false); };
+    TEST_ASSERT(out->Receive(64, false) == ErrorCode::OK);
+    TEST_ASSERT((FakeHw::ReadEp(1) & FakeHw::kEpStatRx) == 0x2000U);
+    Pump();
+    TEST_ASSERT(done.count == 1 && done.actual == 64 && done.result == ErrorCode::OK);
+    out->ReleaseSlot(done.slot, false);
+  }
+}
+
 }  // namespace
 
 int main()
@@ -923,6 +980,7 @@ int main()
   TestBulkOutMultiPacket();
   TestStopCountsLatePacket();
   TestStopRaceWithTransaction();
+  TestArmNotRearmedByRace();
   TestPmaLayoutChecks();
   TestBusResetEndsTransfers();
   TestSuspendResume();
