@@ -22,13 +22,15 @@ class ESP32USBEndpoint : public USB::Endpoint
 
   friend class ESP32USBDevice;
 
-  void ConfigureHardware(const Config& cfg) override;
-  void CloseHardware() override;
-  ErrorCode StallHardware() override;
-  ErrorCode ClearStallHardware() override;
-  ErrorCode StartHardware(RawData buffer, size_t size) override;
+  ErrorCode ConfigureHardware(const Config& cfg, Granted& granted) override;
+  void CloseHardware(bool in_isr) override;
+  ErrorCode StallHardware(bool in_isr) override;
+  ErrorCode ClearStallHardware(bool in_isr) override;
+  ErrorCode StartHardware(const HwRequest& request, bool in_isr) override;
+  StopResult StopHardware(bool in_isr) override;
+  size_t ReapProgress(const HwRequest& request, bool& retired) override;
 
-  size_t MaxHardwareTransferSize() const override;
+  size_t MaxPacketSizeLimit(Type type) const override;
 
  private:
   enum class Ep0OutPhase : uint8_t
@@ -62,6 +64,9 @@ class ESP32USBEndpoint : public USB::Endpoint
   uint8_t* transfer_buffer_ = nullptr;
   uint8_t* transfer_hw_buffer_ = nullptr;
   size_t transfer_request_size_ = 0U;
+  uint32_t transfer_tag_ = 0U;
+  bool transfer_active_ =
+      false;  ///< 在途请求由后端自持 / In-flight tracked by the backend
   size_t transfer_actual_size_ = 0U;
   size_t transfer_queued_size_ = 0U;
   bool transfer_uses_shadow_ = false;
