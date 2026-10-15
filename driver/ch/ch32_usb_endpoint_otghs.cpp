@@ -2,8 +2,6 @@
 
 #include "ch32_usb_endpoint.hpp"
 #include "ep.hpp"
-#include "libxr_time.hpp"
-#include "timebase.hpp"
 
 using namespace LibXR;
 
@@ -69,64 +67,32 @@ static void set_tx_len(USB::Endpoint::EPNumber ep_num, uint32_t value)
   *get_tx_len_addr(ep_num) = value;
 }
 
-static void set_tx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
-                              uint32_t buffer_size, bool double_buffer)
+static void set_tx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer)
 {
-  uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t* buf_alt = buf_base + buffer_size / 2;
-
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    USBHSD->UEP0_DMA = (uint32_t)buf_base;
+    USBHSD->UEP0_DMA = (uint32_t)buffer;
   }
   else
   {
-    *get_tx_dma_addr(ep_num) = (uint32_t)buf_base;
-    if (double_buffer)
-    {
-      *get_rx_dma_addr(ep_num) = (uint32_t)buf_alt;
-    }
+    *get_tx_dma_addr(ep_num) = (uint32_t)buffer;
   }
-
-  int IDX = static_cast<int>(ep_num);
-  if (double_buffer && ep_num != USB::Endpoint::EPNumber::EP0)
-  {
-    USBHSD->BUF_MODE |= (1 << IDX);
-  }
-  else
-  {
-    USBHSD->BUF_MODE &= ~(1 << IDX);
-  }
+  // BUF_MOD 恒 0：硬件双缓冲不再使用，双槽由软件按请求切换 DMA 指针实现
+  // （MODEL_USB §2.2）。
+  USBHSD->BUF_MODE &= ~(1 << static_cast<int>(ep_num));
 }
 
-static void set_rx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer,
-                              uint32_t buffer_size, bool double_buffer)
+static void set_rx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer)
 {
-  uint8_t* buf_base = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t* buf_alt = buf_base + buffer_size / 2;
-
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    USBHSD->UEP0_DMA = (uint32_t)buf_base;
+    USBHSD->UEP0_DMA = (uint32_t)buffer;
   }
   else
   {
-    *get_rx_dma_addr(ep_num) = (uint32_t)buf_base;
-    if (double_buffer)
-    {
-      *get_tx_dma_addr(ep_num) = (uint32_t)buf_alt;
-    }
+    *get_rx_dma_addr(ep_num) = (uint32_t)buffer;
   }
-
-  int IDX = static_cast<int>(ep_num);
-  if (double_buffer && ep_num != USB::Endpoint::EPNumber::EP0)
-  {
-    USBHSD->BUF_MODE |= (1 << IDX);
-  }
-  else
-  {
-    USBHSD->BUF_MODE &= ~(1 << IDX);
-  }
+  USBHSD->BUF_MODE &= ~(1 << static_cast<int>(ep_num));
 }
 
 static void enable_tx(USB::Endpoint::EPNumber ep_num)
@@ -359,36 +325,31 @@ static void disable_rx(USB::Endpoint::EPNumber ep_num)
 // NOLINTEND
 
 CH32EndpointOtgHs::CH32EndpointOtgHs(EPNumber ep_num, Direction dir,
-                                     LibXR::RawData buffer, bool double_buffer)
+                                     LibXR::RawData buffer)
     : Endpoint(ep_num, dir, buffer), dma_buffer_(buffer)
 {
-  UNUSED(double_buffer);
   map_otg_hs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
   if (dir == Direction::IN)
   {
-    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
-  }
-  else
-  {
-    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
-  }
-
-  if (dir == Direction::IN)
-  {
+    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_);
     set_tx_len(GetNumber(), 0);
     *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK;
   }
   else
   {
+    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_);
     *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
   }
 }
 
-void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
+ErrorCode CH32EndpointOtgHs::ConfigureHardware(const Config& cfg, Granted& /*granted*/)
 {
-  auto& ep_cfg = GetConfig();
-  ep_cfg = cfg;
+  // 包长已由核心按 MaxPacketSizeLimit 收敛；状态由基类管理，这里只编程寄存器。
+  if (IsPlanning())
+  {
+    return ErrorCode::OK;
+  }
 
   const int ep_idx = EPNumberToInt8(GetNumber());
   const uint8_t in_idx = static_cast<uint8_t>(Direction::IN);
@@ -396,30 +357,9 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
   const bool has_in = map_otg_hs_[ep_idx][in_idx] != nullptr;
   const bool has_out = map_otg_hs_[ep_idx][out_idx] != nullptr;
 
-  const size_t buffer_size = HardwareBuffer().size_;
-  if (ep_cfg.type == Type::BULK)
-  {
-    // CH32 USBHS 的 BULK 端点始终使用硬件固定的 512 字节包长。
-    // CH32 USBHS bulk endpoints always use the hardware-fixed 512-byte packet size.
-    ASSERT(buffer_size >= 512u);
-    ep_cfg.max_packet_size = cfg.max_packet_size;
-  }
-  else if (ep_cfg.max_packet_size > buffer_size)
-  {
-    // 非 BULK 端点的包长按缓冲区大小截断。
-    // Clamp non-bulk packet sizes to the endpoint buffer size.
-    ep_cfg.max_packet_size = buffer_size;
-  }
-
-  if (IsPlanning())
-  {
-    SetState(State::IDLE);
-    return;
-  }
-
   if (GetDirection() == Direction::IN)
   {
-    if (GetType() != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
+    if (cfg.type != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
     {
       *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;
     }
@@ -431,7 +371,7 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
   }
   else
   {
-    if (GetType() != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
+    if (cfg.type != Type::ISOCHRONOUS && GetNumber() != EPNumber::EP0)
     {
       *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_AUTO;
     }
@@ -440,13 +380,13 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
       *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
     }
 
-    *get_rx_max_len_addr(GetNumber()) = ep_cfg.max_packet_size;
+    *get_rx_max_len_addr(GetNumber()) = cfg.max_packet_size;
   }
 
-  const int IDX = static_cast<int>(GetNumber());
+  const int IDX = ep_idx;
   if (GetDirection() == Direction::IN)
   {
-    if (GetType() == Type::ISOCHRONOUS)
+    if (cfg.type == Type::ISOCHRONOUS)
     {
       USBHSD->ENDP_TYPE |= (USBHS_UEP0_T_TYPE << IDX);
     }
@@ -457,7 +397,7 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
   }
   else
   {
-    if (GetType() == Type::ISOCHRONOUS)
+    if (cfg.type == Type::ISOCHRONOUS)
     {
       USBHSD->ENDP_TYPE |= (USBHS_UEP0_R_TYPE << IDX);
     }
@@ -469,7 +409,7 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
 
   if (GetDirection() == Direction::IN)
   {
-    if (GetType() != Type::ISOCHRONOUS)
+    if (cfg.type != Type::ISOCHRONOUS)
     {
       enable_tx(GetNumber());
     }
@@ -483,7 +423,7 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
       disable_rx(GetNumber());
     }
 
-    set_tx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
+    set_tx_dma_buffer(GetNumber(), SlotMemory().addr_);
   }
   else
   {
@@ -494,13 +434,18 @@ void CH32EndpointOtgHs::ConfigureHardware(const Config& cfg)
       disable_tx(GetNumber());
     }
 
-    set_rx_dma_buffer(GetNumber(), dma_buffer_.addr_, dma_buffer_.size_, false);
+    set_rx_dma_buffer(GetNumber(), SlotMemory().addr_);
   }
 
-  SetState(State::IDLE);
+  transfer_active_ = false;
+  transfer_tag_ = 0;
+  transfer_requested_ = 0;
+  transfer_accumulated_ = 0;
+  transfer_cursor_ = nullptr;
+  return ErrorCode::OK;
 }
 
-void CH32EndpointOtgHs::CloseHardware()
+void CH32EndpointOtgHs::CloseHardware(bool /*in_isr*/)
 {
   if (GetDirection() == Direction::IN)
   {
@@ -512,60 +457,43 @@ void CH32EndpointOtgHs::CloseHardware()
     *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK;
     disable_rx(GetNumber());
   }
+  transfer_active_ = false;
 }
 
-ErrorCode CH32EndpointOtgHs::StartHardware(RawData buffer, size_t size)
+ErrorCode CH32EndpointOtgHs::StartHardware(const HwRequest& request, bool /*in_isr*/)
 {
-  if (buffer.size_ < size)
-  {
-    return ErrorCode::NO_BUFF;
-  }
+  const bool IS_IN = (GetDirection() == Direction::IN);
+  const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
 
-  bool IS_IN = (GetDirection() == Direction::IN);
-  const auto arena = HardwareBuffer();
-  const uintptr_t base = reinterpret_cast<uintptr_t>(arena.addr_);
-  const uintptr_t address = reinterpret_cast<uintptr_t>(buffer.addr_);
-  const bool direct = address >= base && address - base <= arena.size_ &&
-                      size <= arena.size_ - (address - base);
-  transfer_dma_ = direct ? buffer : arena;
-  if (IS_IN)
-  {
-    if (transfer_dma_.addr_ != buffer.addr_ && size != 0U)
-      Memory::FastCopy(transfer_dma_.addr_, buffer.addr_, size);
-    set_tx_dma_buffer(GetNumber(), transfer_dma_.addr_, transfer_dma_.size_, false);
-  }
-  else
-    set_rx_dma_buffer(GetNumber(), transfer_dma_.addr_, transfer_dma_.size_, false);
-
-  if (GetNumber() == EPNumber::EP0)
-  {
-    if (!IS_IN && size == 0)
-    {
-      tog0_ = true;
-      tog1_ = false;
-    }
-  }
-
-  last_transfer_size_ = size;
+  transfer_tag_ = request.tag;
+  transfer_requested_ = request.length;
+  transfer_accumulated_ = 0;
+  transfer_active_ = true;
+  transfer_dma_ = request.slot;
+  last_transfer_size_ = request.length;  // IRQ 窄恢复路径读取（EP0 IN 无 ACK 补偿）
 
   if (IS_IN)
   {
+    // 槽内存就是 DMA 缓冲：类在 Submit 前已把数据写进槽，无需再拷贝。
+    set_tx_dma_buffer(GetNumber(), request.slot.addr_);
+
     if (GetType() == Type::ISOCHRONOUS)
     {
       enable_tx(GetNumber());
     }
 
-    set_tx_len(GetNumber(), size);
+    set_tx_len(GetNumber(), request.length);
     auto addr = get_tx_control_addr(GetNumber());
 
     if (GetType() != Type::ISOCHRONOUS)
     {
-      if (GetNumber() != EPNumber::EP0)
+      if (!IS_EP0)
       {
         *addr = (*addr & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_ACK;
       }
       else
       {
+        // EP0 IN 按 start 次数翻转 toggle（HS 已上板方案）。
         *addr = USBHS_UEP_T_RES_ACK |
                 (*addr & (~(USBHS_UEP_T_RES_MASK | USBHS_UEP_T_TOG_MDATA))) |
                 (tog0_ ? USBHS_UEP_T_TOG_DATA1 : 0);
@@ -579,20 +507,28 @@ ErrorCode CH32EndpointOtgHs::StartHardware(RawData buffer, size_t size)
   }
   else
   {
+    if (IS_EP0 && request.length == 0)
+    {
+      // 控制传输的 status OUT 固定从 DATA1 开始。
+      tog0_ = true;
+      tog1_ = false;
+    }
+
+    set_rx_dma_buffer(GetNumber(), request.slot.addr_);
+
     auto addr = get_rx_control_addr(GetNumber());
 
     if (GetType() != Type::ISOCHRONOUS)
     {
-      if (GetNumber() != EPNumber::EP0)
+      if (!IS_EP0)
       {
         *addr = (*addr & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_ACK;
       }
       else
       {
-        if (size == 0u)
+        if (request.length == 0u)
         {
           // 控制传输的 status OUT 固定从 DATA1 开始。
-          // Control status OUT always starts from DATA1.
           *addr = USBHS_UEP_R_RES_ACK |
                   (*addr & (~(USBHS_UEP_R_RES_MASK | USBHS_UEP_R_TOG_MDATA))) |
                   USBHS_UEP_R_TOG_DATA1;
@@ -601,8 +537,6 @@ ErrorCode CH32EndpointOtgHs::StartHardware(RawData buffer, size_t size)
         {
           // EP0 多包 OUT 续挂时，这里只重新打开 ACK，不再用软件重算 DATA0/DATA1。
           // 每个包成功收完后，由完成路径推进一次硬件 RX toggle。
-          // For EP0 multi-packet OUT, only reopen ACK here and keep the current
-          // hardware DATA0/DATA1 phase; the packet-complete path advances RX toggle.
           *addr = (*addr & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_ACK;
         }
       }
@@ -614,7 +548,7 @@ ErrorCode CH32EndpointOtgHs::StartHardware(RawData buffer, size_t size)
     }
   }
 
-  if (GetNumber() == EPNumber::EP0 && IS_IN)
+  if (IS_EP0 && IS_IN)
   {
     tog0_ = !tog0_;
   }
@@ -622,11 +556,34 @@ ErrorCode CH32EndpointOtgHs::StartHardware(RawData buffer, size_t size)
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgHs::StallHardware()
+USB::Endpoint::StopResult CH32EndpointOtgHs::StopHardware(bool /*in_isr*/)
 {
-  const bool IS_IN = (GetDirection() == Direction::IN);
+  // RES=NAK 立即生效：控制器从下一个事务起不再访问槽；在途的最后一个事务仍会
+  // 完成（最多一个包落进槽），此后 INT_BUSY=1 自动 NAK 全部事务。无法也无须
+  // 中止在途事务，迟到的完成由核心按标签丢弃（与 FSDEV 先例一致）。
+  if (GetDirection() == Direction::IN)
+  {
+    *get_tx_control_addr(GetNumber()) =
+        (*get_tx_control_addr(GetNumber()) & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
+  }
+  else
+  {
+    *get_rx_control_addr(GetNumber()) =
+        (*get_rx_control_addr(GetNumber()) & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
+  }
+  transfer_active_ = false;
+  return StopResult::DONE;
+}
 
-  if (IS_IN)
+size_t CH32EndpointOtgHs::ReapProgress(const HwRequest& /*request*/, bool& retired)
+{
+  retired = true;
+  return transfer_accumulated_;
+}
+
+ErrorCode CH32EndpointOtgHs::StallHardware(bool /*in_isr*/)
+{
+  if (GetDirection() == Direction::IN)
   {
     *get_tx_control_addr(GetNumber()) |= USBHS_UEP_T_RES_STALL;
   }
@@ -634,11 +591,10 @@ ErrorCode CH32EndpointOtgHs::StallHardware()
   {
     *get_rx_control_addr(GetNumber()) |= USBHS_UEP_R_RES_STALL;
   }
-  SetState(State::STALLED);
   return ErrorCode::OK;
 }
 
-ErrorCode CH32EndpointOtgHs::ClearStallHardware()
+ErrorCode CH32EndpointOtgHs::ClearStallHardware(bool /*in_isr*/)
 {
   if (GetDirection() == Direction::IN)
     *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;
@@ -649,70 +605,70 @@ ErrorCode CH32EndpointOtgHs::ClearStallHardware()
   return ErrorCode::OK;
 }
 
+size_t CH32EndpointOtgHs::MaxPacketSizeLimit(Type type) const
+{
+  // CH32 USBHS 的 BULK 端点始终使用硬件固定的 512 字节包长；CONTROL/INTERRUPT
+  // 为 64；ISO 上限 1023（手册 p.340/p.344）。
+  if (type == Type::BULK)
+  {
+    return 512U;
+  }
+  if (type == Type::ISOCHRONOUS)
+  {
+    return 1023U;
+  }
+  return 64U;
+}
+
 void CH32EndpointOtgHs::TransferComplete(size_t size)
 {
   const bool IS_IN = (GetDirection() == Direction::IN);
-  const bool IS_OUT = !IS_IN;
   const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
   const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
 
   // UIF_TRANSFER/INT_FG 会在 IRQ handler 完成分发后统一清掉。
-  // UIF_TRANSFER/INT_FG are cleared by the IRQ handler after dispatch.
 
   if (IS_IN)
   {
     auto* tx_ctrl = get_tx_control_addr(GetNumber());
     *tx_ctrl = (*tx_ctrl & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
 
-    size = last_transfer_size_;
-
     if (IS_ISO)
     {
       set_tx_len(GetNumber(), 0);
       disable_tx(GetNumber());
     }
-  }
-  else
-  {
-    // 对 non-EP0 OUT 端点，完成后恢复到 NAK。
-    // For non-EP0 OUT endpoints, restore NAK on completion.
-    if (!IS_EP0)
-    {
-      auto* rx_ctrl = get_rx_control_addr(GetNumber());
-      *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
-    }
+
+    transfer_active_ = false;
+    OnHardwareComplete(true, transfer_tag_, transfer_requested_);
+    return;
   }
 
-  // TOG 不匹配表示数据同步失败。
-  // TOG mismatch indicates data synchronization failure.
-  if (IS_OUT && !IS_EP0)
+  // TOG 不匹配表示数据同步失败：丢弃本包并按原请求重新挂接收。
+  if (!IS_EP0 && !IS_ISO)
   {
     const bool TOG_OK =
         ((USBHSD->INT_ST & USBHS_UIS_TOG_OK) == USBHS_UIS_TOG_OK);  // NOLINT
     if (!TOG_OK)
     {
-      (void)StartHardware(TransferBuffer(), last_transfer_size_);
+      HwRequest retry{};
+      retry.slot = transfer_dma_;
+      retry.length = transfer_requested_;
+      retry.tag = transfer_tag_;
+      (void)StartHardware(retry, true);
       return;
     }
   }
 
-  if (IS_EP0 && IS_OUT)
+  if (IS_EP0)
   {
     auto* rx_ctrl = get_rx_control_addr(GetNumber());
-    // 这里不要直接把 EP0 OUT 留在 ACK。
-    // 上层控制传输栈会在“当前包已经被完整消费”后再重新挂接收；
-    // 否则下一轮 session 可能撞上陈旧的 EP0 软件状态，导致 DFU 数据块重复或丢失。
-    // Do not leave EP0 OUT open here. The upper control stack will re-arm it after the
-    // current packet has been fully consumed; otherwise the next session may race stale
-    // EP0 software state and duplicate/skip DFU payload blocks.
+    // 这里不要直接把 EP0 OUT 留在 ACK：上层控制传输栈会在当前包被完整消费后再
+    // 重新挂接收，否则下一轮 session 可能撞上陈旧的 EP0 软件状态。
     if (size > 0u)
     {
-      // 每成功收完一个 EP0 OUT 包，都要推进一次 RX DATA0/DATA1 相位。
-      // CH32 USBHS 在多包 EP0 OUT 上，如果这里只是重新开 ACK 而不消费当前 toggle，
-      // 后续包会停在这里。
-      // Advance the RX DATA0/DATA1 phase once per successfully received EP0 OUT packet.
-      // On CH32 USBHS, EP0 multi-packet OUT will stall if we only reopen ACK
-      // without consuming the current hardware toggle.
+      // 每成功收完一个 EP0 OUT 包，都推进一次硬件 RX DATA0/DATA1 相位（多包
+      // OUT 数据阶段在此推进；只重开 ACK 不消费 toggle 会让后续包停住）。
       *rx_ctrl = static_cast<uint8_t>(
           ((*rx_ctrl ^ USBHS_UEP_R_TOG_DATA1) & ~USBHS_UEP_R_RES_MASK) |
           USBHS_UEP_R_RES_NAK);
@@ -722,17 +678,33 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
       *rx_ctrl =
           static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK);
     }
+    transfer_active_ = false;
+    OnHardwareComplete(true, transfer_tag_, size);
+    return;
   }
-  if (IS_OUT && size != 0U && transfer_dma_.addr_ != TransferBuffer().addr_)
+
+  if (!IS_ISO)
   {
-    if (size > TransferBuffer().size_)
+    // 非 EP0 非 ISO：DMA 寄存器分立，按包推进 RX DMA，多包请求一次完成。
+    transfer_accumulated_ += size;
+    if (transfer_accumulated_ < transfer_requested_ && size == MaxPacketSize())
     {
-      OnTransferCompleteCallback(true, size, ErrorCode::OUT_OF_RANGE);
-      return;
+      transfer_cursor_ += size;
+      *get_rx_dma_addr(GetNumber()) = reinterpret_cast<uint32_t>(transfer_cursor_);
+      return;  // RES 仍为 ACK，继续收下一包
     }
-    Memory::FastCopy(TransferBuffer().addr_, transfer_dma_.addr_, size);
+    auto* rx_ctrl = get_rx_control_addr(GetNumber());
+    *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
+    transfer_active_ = false;
+    OnHardwareComplete(true, transfer_tag_, transfer_accumulated_);
+    return;
   }
-  OnTransferCompleteCallback(true, size);
+
+  // ISO：每包完成。
+  auto* rx_ctrl = get_rx_control_addr(GetNumber());
+  *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
+  transfer_active_ = false;
+  OnHardwareComplete(true, transfer_tag_, size);
 }
 
 #endif
