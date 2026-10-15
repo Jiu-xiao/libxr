@@ -17,6 +17,12 @@ namespace LibXR::USB
  * USB HID (Human Interface Device) base class with optional OUT endpoint and auto
  * descriptor generation, suitable for extension as keyboard, mouse, gamepad, etc.
  *
+ * 输入报告走槽模型：SendInputReport 在任何上下文取槽、拷贝、提交，单条在途
+ * （MODEL_USB §10.10）；OUT 报告以租约交给类，默认策略是取走数据后归还租约继续接收。
+ * Input reports use the slot model: SendInputReport acquires a slot, copies and submits
+ * in any context, one report in flight (MODEL_USB §10.10). OUT reports arrive as leases;
+ * the default policy consumes the report and returns the lease to keep receiving.
+ *
  * @tparam REPORT_DESC_LEN 报告描述符长度 / Report descriptor length (bytes)
  * @tparam TX_REPORT_LEN Input Report 长度 / Input report length (bytes)
  * @tparam RX_REPORT_LEN Output Report 长度 / Output report length (bytes) [default: 0]
@@ -144,7 +150,8 @@ class HID : public DeviceClass
    * @param start_itf_num 接口号起始 / Starting interface number
    * @param in_isr 是否在中断上下文 / Whether in ISR
    */
-  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                     bool in_isr) override
   {
     inited_ = false;
     itf_num_ = start_itf_num;
@@ -154,21 +161,29 @@ class HID : public DeviceClass
     // 获取IN端点
     auto ans = endpoint_pool.Get(ep_in_, Endpoint::Direction::IN, in_ep_num_);
     ASSERT(ans == ErrorCode::OK);
-    ep_in_->Configure(
+    // 包长显式：取报告长度与当前速度下中断端点合法包长的较小者；槽装不下一个包时
+    // Configure 返回 NO_BUFF，端点进入 ERROR，组合层会拒绝该配置。
+    // The packet size is explicit: the smaller of the report length and the largest
+    // legal interrupt packet at this speed. NO_BUFF means the slot cannot hold one
+    // packet; the endpoint enters ERROR and the composition rejects the configuration.
+    (void)ep_in_->Configure(
         {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT,
          static_cast<uint16_t>(LibXR::min<size_t>(
-             TX_REPORT_LEN, endpoint_pool.GetSpeed() == Speed::HIGH ? 1024U : 64U)),
-         TX_REPORT_LEN});
+             TX_REPORT_LEN, ep_in_->LargestPacketSize(Endpoint::Type::INTERRUPT)))},
+        in_isr);
 
     if (enable_out_endpoint_)
     {
       ans = endpoint_pool.Get(ep_out_, Endpoint::Direction::OUT, out_ep_num_);
       ASSERT(ans == ErrorCode::OK);
-      ep_out_->Configure(
-          {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT,
-           static_cast<uint16_t>(LibXR::min<size_t>(
-               RX_REPORT_LEN, endpoint_pool.GetSpeed() == Speed::HIGH ? 1024U : 64U)),
-           RX_REPORT_LEN});
+      const uint16_t packet = static_cast<uint16_t>(LibXR::min<size_t>(
+          RX_REPORT_LEN, ep_out_->LargestPacketSize(Endpoint::Type::INTERRUPT)));
+      // receive_size 与包长一致：每个租约恰是一条报告。
+      // receive_size equals one packet: one report per lease.
+      (void)ep_out_->Configure(
+          {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, packet,
+           Endpoint::Mult::ONE, 1, packet},
+          in_isr);
     }
 
     // 填充接口描述符
@@ -224,57 +239,20 @@ class HID : public DeviceClass
       SetData(RawData{reinterpret_cast<uint8_t*>(&desc_), sizeof(HIDDescBlockIN)});
     }
 
-    ep_in_->SetOnTransferCompleteCallback(on_data_in_complete_cb_);
-    ep_in_->SetOnTxFill(fill_report_cb_);
+    ep_in_->SetOnComplete(on_data_in_complete_cb_);
 
     if (enable_out_endpoint_)
     {
-      ep_out_->SetOnTransferCompleteCallback(on_data_out_complete_cb_);
-      ep_out_->Transfer(RX_REPORT_LEN);
+      ep_out_->SetOnComplete(on_data_out_complete_cb_);
+      // 挂一个槽接收 OUT 报告；租约处理完归还时按 receive_size 重新挂接收。
+      // Arm one slot for OUT reports; returning a lease rearms it by receive_size.
+      (void)ep_out_->Receive(ep_out_->MaxPacketSize(), in_isr);
     }
 
     inited_ = true;
+    input_in_flight_.store(0U, std::memory_order_release);
     last_input_length_ = 0;
-    input_endpoint_.store(ep_in_, std::memory_order_release);
-    // Preserve any cancelled writer until it releases the input storage.
-    input_phase_.fetch_or(INPUT_ENABLED, std::memory_order_release);
-  }
-
-  static void OnDataOutCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
-  {
-    if (self == nullptr || !self->inited_ || self->ep_out_ == nullptr)
-    {
-      return;
-    }
-    self->OnDataOutComplete(in_isr, data);
-  }
-
-  static void OnDataInCompleteStatic(bool in_isr, HID* self, LibXR::ConstRawData& data)
-  {
-    if (self == nullptr || !self->inited_ || self->ep_in_ == nullptr)
-    {
-      return;
-    }
-    uint32_t expected = IN_FLIGHT;
-    (void)self->input_phase_.compare_exchange_strong(expected, AVAILABLE,
-                                                     std::memory_order_acq_rel);
-    self->last_report_ms_ = static_cast<uint32_t>(Timebase::GetMilliseconds());
-    self->OnDataInComplete(in_isr, data);
-  }
-
-  virtual void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
-  {
-    UNUSED(in_isr);
-    UNUSED(data);
-    // This is the default HID class policy, not an unconditional core rearm
-    // after a derived class's callback. DAP may withhold this permission.
-    if (ep_out_) (void)ep_out_->ArmReceive(RX_REPORT_LEN);
-  }
-
-  virtual void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data)
-  {
-    UNUSED(in_isr);
-    UNUSED(data);
+    in_ep_ref_.store(ep_in_, std::memory_order_release);
   }
 
   /**
@@ -283,20 +261,23 @@ class HID : public DeviceClass
    * @param endpoint_pool 端点池 / Endpoint pool
    * @param in_isr 是否在中断中 / Whether in ISR
    */
-  void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
+  void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
     inited_ = false;
-    input_endpoint_.store(nullptr, std::memory_order_release);
-    CancelInput();
+    // 先摘掉引用再关闭：新的 SendInputReport 立刻得到 FAILED，不与新绑定竞争。
+    // Drop the reference before closing: a new SendInputReport fails at once and does
+    // not race the next binding.
+    in_ep_ref_.store(nullptr, std::memory_order_release);
+    input_in_flight_.store(0U, std::memory_order_release);
     if (ep_in_)
     {
-      ep_in_->Close();
+      ep_in_->Close(in_isr);
       endpoint_pool.Release(ep_in_);
       ep_in_ = nullptr;
     }
     if (ep_out_)
     {
-      ep_out_->Close();
+      ep_out_->Close(in_isr);
       endpoint_pool.Release(ep_out_);
       ep_out_ = nullptr;
     }
@@ -430,7 +411,9 @@ class HID : public DeviceClass
         {
           return ErrorCode::ARG_ERR;
         }
-        // 由OnClassData阶段接收
+        // OUT 数据阶段由核心接收，完整后经 OnClassData → OnSetReportData 交给类。
+        // The core receives the OUT data stage and hands it over via OnClassData →
+        // OnSetReportData once it is complete.
         return OnSetReport(report_id, result);
 
       case ClassRequest::GET_IDLE:
@@ -448,7 +431,6 @@ class HID : public DeviceClass
           return ErrorCode::ARG_ERR;
         }
         idle_rate_ = wValue >> 8;
-        result.write_zlp = true;
         return ErrorCode::OK;
 
       case ClassRequest::GET_PROTOCOL:
@@ -457,7 +439,6 @@ class HID : public DeviceClass
 
       case ClassRequest::SET_PROTOCOL:
         protocol_ = static_cast<Protocol>(wValue & 0xFF);
-        result.write_zlp = true;
         return ErrorCode::OK;
 
       default:
@@ -612,35 +593,63 @@ class HID : public DeviceClass
   }
 
   /**
-   * @brief 发送输入报告到主机
-   * Send Input Report to host
+   * @brief 发送输入报告到主机（任何上下文）
+   * Send Input Report to host (any context)
+   *
+   * 取槽 → 拷贝 → 提交，单条在途（MODEL_USB §10.10）；上一条报告完成前返回 BUSY。
+   * 取槽之后发生复位/解绑时 Submit 返回 ABORTED，本方法按 HID 现有语义返回 FAILED
+   * （与 A08 修复一致）：报告未发布，不重试。
+   * Acquire a slot, copy and submit, one report in flight (MODEL_USB §10.10); BUSY while
+   * the previous report is outstanding. A reset or unbind after the slot was acquired
+   * makes Submit return ABORTED; per the existing HID semantics (the A08 fix) this
+   * returns FAILED: the report was never published and is not retried.
    *
    * @param report 输入报告数据指针及长度 / Input report data and length
-   * @return ErrorCode 错误码 / Error code
+   * @param in_isr 是否在中断中 / Whether in ISR
+   * @return ErrorCode OK/BUSY/FAILED/ARG_ERR / Error code
    */
   ErrorCode SendInputReport(ConstRawData report, bool in_isr = false)
   {
     if (report.addr_ == nullptr || report.size_ == 0U || report.size_ > TX_REPORT_LEN)
       return ErrorCode::ARG_ERR;
-    uint32_t expected = AVAILABLE;
-    if (!input_phase_.compare_exchange_strong(expected, WRITING,
-                                              std::memory_order_acq_rel))
-      return expected == DISABLED ? ErrorCode::FAILED : ErrorCode::BUSY;
-    Memory::FastCopy(input_pending_, report.addr_, report.size_);
-    input_pending_size_ = report.size_;
-    expected = WRITING;
-    if (!input_phase_.compare_exchange_strong(expected, READY, std::memory_order_release,
-                                              std::memory_order_relaxed))
+    uint32_t expected = 0U;
+    if (!input_in_flight_.compare_exchange_strong(expected, 1U,
+                                                  std::memory_order_acq_rel))
+      return ErrorCode::BUSY;
+    Endpoint* ep = in_ep_ref_.load(std::memory_order_acquire);
+    if (ep == nullptr)
     {
-      // Release only writer ownership. A concurrent Bind/ClearHALT owns the
-      // enabled bit; an old writer must not overwrite its newer decision.
-      input_phase_.fetch_and(INPUT_ENABLED, std::memory_order_acq_rel);
-      return ErrorCode::FAILED;  // A reset cancelled this not-yet-published report.
+      input_in_flight_.store(0U, std::memory_order_release);
+      return ErrorCode::FAILED;
     }
-    // The pointer is only a perpetual-endpoint doorbell, sampled after publication.
-    // A reset may cancel this accepted report; a stale kick carries no payload.
-    if (auto* endpoint = input_endpoint_.load(std::memory_order_acquire))
-      endpoint->RequestTx(in_isr);
+    Endpoint::Slot slot;
+    ErrorCode ans = ep->AcquireSlot(slot, in_isr);
+    if (ans != ErrorCode::OK)
+    {
+      input_in_flight_.store(0U, std::memory_order_release);
+      // 未绑定时与旧的 DISABLED 语义一致：FAILED。
+      // Unbound matches the old DISABLED semantics: FAILED.
+      return ans == ErrorCode::STATE_ERR ? ErrorCode::FAILED : ans;
+    }
+    if (report.size_ > slot.data.size_)
+    {
+      ep->ReleaseSlot(slot, in_isr);
+      input_in_flight_.store(0U, std::memory_order_release);
+      return ErrorCode::ARG_ERR;
+    }
+    Memory::FastCopy(slot.data.addr_, report.addr_, report.size_);
+    ans = ep->Submit(slot, report.size_, false, in_isr);
+    if (ans != ErrorCode::OK)
+    {
+      // ABORTED：槽在解绑前借出，报告从未到达主机；SIZE_ERR 等其余失败同理。
+      // ABORTED: the slot was lent across an unbind and the report never reached the
+      // host; other failures are handled the same way.
+      ep->ReleaseSlot(slot, in_isr);
+      input_in_flight_.store(0U, std::memory_order_release);
+      return ErrorCode::FAILED;
+    }
+    Memory::FastCopy(last_input_, report.addr_, report.size_);
+    last_input_length_ = report.size_;
     return ErrorCode::OK;
   }
 
@@ -688,84 +697,90 @@ class HID : public DeviceClass
         static_cast<uint32_t>(Timebase::GetMilliseconds()) - last_report_ms_ >=
             static_cast<uint32_t>(idle_rate_) * 4U)
     {
-      uint32_t expected = AVAILABLE;
-      if (input_phase_.compare_exchange_strong(expected, IN_FLIGHT,
-                                               std::memory_order_acq_rel))
-      {
-        idle_report_pending_ = true;
-        ep_in_->RequestTx(in_isr);
-      }
+      // 空闲重发：重发类内 last_input_ 副本；在途时 BUSY，下一拍再试。
+      // Idle resend: send the class-local last_input_ copy again; BUSY while one report
+      // is in flight, retried on the next tick.
+      (void)SendInputReport(ConstRawData{last_input_, last_input_length_}, in_isr);
     }
   }
   void OnDeviceEvent(bool in_isr, DeviceEvent event, uint8_t endpoint) override
   {
-    if (event == DeviceEvent::ENDPOINT_HALTED && ep_in_ &&
-        endpoint == ep_in_->GetAddress())
-      CancelInput();
-    if (event == DeviceEvent::ENDPOINT_RESUMED)
-    {
-      if (ep_in_ && endpoint == ep_in_->GetAddress())
-      {
-        input_phase_.fetch_or(INPUT_ENABLED, std::memory_order_release);
-      }
-      if (ep_out_ && endpoint == ep_out_->GetAddress())
-        (void)ep_out_->ArmReceive(RX_REPORT_LEN);
-    }
-    UNUSED(in_isr);
+    if (event != DeviceEvent::ENDPOINT_RESUMED || ep_out_ == nullptr) return;
+    if (endpoint == ep_out_->GetAddress())
+      (void)ep_out_->Receive(ep_out_->MaxPacketSize(), in_isr);
   }
+
+ protected:
+  /**
+   * @brief OUT 端点传输完成（owner 上下文）。
+   * OUT endpoint completion (owner context).
+   *
+   * 默认 HID 策略：派生类经 OnOutReport 取走报告后归还租约继续接收；接收失败（非
+   * ABORTED）时重新挂接收。DAP 覆盖本函数以保留租约作背压。
+   * Default HID policy: the derived class consumes the report via OnOutReport, then the
+   * lease is returned to keep receiving; a failed receive (not ABORTED) is armed again.
+   * DAP overrides this to withhold the lease as backpressure.
+   */
+  virtual void OnDataOutComplete(bool in_isr, const Endpoint::Completion& completion)
+  {
+    if (completion.result == ErrorCode::OK && completion.slot.Valid())
+    {
+      OnOutReport(in_isr, completion);
+      if (ep_out_ != nullptr) (void)ep_out_->ReturnSlot(completion.slot, in_isr);
+    }
+    else if (completion.result != ErrorCode::ABORTED && ep_out_ != nullptr)
+    {
+      // 接收失败会释放槽；重新挂上保持接收。
+      // A failed receive frees its slot; arm it again.
+      (void)ep_out_->Receive(ep_out_->MaxPacketSize(), in_isr);
+    }
+  }
+
+  /**
+   * @brief 收到 OUT 报告（租约由基类归还）/ An OUT report arrived; the base returns the
+   * lease afterwards.
+   */
+  virtual void OnOutReport(bool, const Endpoint::Completion&) {}
+
+  /**
+   * @brief IN 端点传输完成（owner 上下文）：主机已取走输入报告。
+   * IN endpoint completion (owner context): the host took the input report.
+   */
+  virtual void OnDataInComplete(bool, const Endpoint::Completion&) {}
 
  private:
-  // Lifecycle permission and writer ownership share one publication point.
-  static constexpr uint32_t INPUT_ENABLED = 8U, INPUT_PHASE_MASK = 7U;
-  static constexpr uint32_t DISABLED = 0U, AVAILABLE = INPUT_ENABLED,
-                            WRITING = INPUT_ENABLED | 1U, READY = INPUT_ENABLED | 2U,
-                            IN_FLIGHT = INPUT_ENABLED | 3U, CANCEL_WRITING = 4U;
-  std::atomic<uint32_t> input_phase_{DISABLED};
-  std::atomic<Endpoint*> input_endpoint_{nullptr};
-  uint8_t input_pending_[TX_REPORT_LEN]{};
-  size_t input_pending_size_ = 0;
-  uint8_t last_input_[TX_REPORT_LEN]{};
-  size_t last_input_length_ = 0;
-  uint32_t last_report_ms_ = 0;
-  bool idle_report_pending_ = false;
-
-  void CancelInput()
+  static void OnDataOutCompleteStatic(bool in_isr, HID* self,
+                                      const Endpoint::Completion& completion)
   {
-    uint32_t state = input_phase_.load(std::memory_order_acquire);
-    while (!input_phase_.compare_exchange_weak(
-        state,
-        (state & INPUT_PHASE_MASK) == (WRITING & INPUT_PHASE_MASK) ||
-                (state & INPUT_PHASE_MASK) == CANCEL_WRITING
-            ? CANCEL_WRITING
-            : DISABLED,
-        std::memory_order_acq_rel))
+    if (!self->inited_ || self->ep_out_ == nullptr)
     {
+      // 解绑期间交出的租约立即归还。
+      // A lease handed over while unbinding is returned at once.
+      if (completion.slot.Valid() && self->ep_out_ != nullptr)
+        self->ep_out_->ReleaseSlot(completion.slot, in_isr);
+      return;
     }
-    idle_report_pending_ = false;
+    self->OnDataOutComplete(in_isr, completion);
   }
 
-  void FillReport(bool, Endpoint::TxFill& fill)
+  static void OnDataInCompleteStatic(bool in_isr, HID* self,
+                                     const Endpoint::Completion& completion)
   {
-    if (input_phase_.load(std::memory_order_acquire) == READY)
-    {
-      const size_t size = input_pending_size_;
-      REQUIRE(size <= fill.Buffer().size_);
-      Memory::FastCopy(fill.Buffer().addr_, input_pending_, size);
-      Memory::FastCopy(last_input_, input_pending_, size);
-      last_input_length_ = size;
-      fill.SetSize(size);
-      input_phase_.store(IN_FLIGHT, std::memory_order_release);
-    }
-    else if (idle_report_pending_)
-    {
-      idle_report_pending_ = false;
-      Memory::FastCopy(fill.Buffer().addr_, last_input_, last_input_length_);
-      fill.SetSize(last_input_length_);
-    }
+    // 单条在途：报告完成（无论结果）即释放写者标志。
+    // One report in flight: its completion (whatever the result) frees the writer flag.
+    self->input_in_flight_.store(0U, std::memory_order_release);
+    if (!self->inited_ || self->ep_in_ == nullptr) return;
+    self->last_report_ms_ = static_cast<uint32_t>(Timebase::GetMilliseconds());
+    self->OnDataInComplete(in_isr, completion);
   }
-  Callback<Endpoint::TxFill&> fill_report_cb_ = Callback<Endpoint::TxFill&>::Create(
-      [](bool context, HID* self, Endpoint::TxFill& fill)
-      { self->FillReport(context, fill); }, this);
+
+  std::atomic<uint32_t> input_in_flight_{
+      0};  ///< 单条在途标志 / One input report in flight
+  std::atomic<Endpoint*>
+      in_ep_ref_{nullptr};  ///< SendInputReport 的 IN 端点 / IN endpoint doorbell
+  uint8_t last_input_[TX_REPORT_LEN]{};  ///< 最近一次发出的报告 / Last published report
+  size_t last_input_length_ = 0;         ///< 上述报告长度 / Its length
+  uint32_t last_report_ms_ = 0;          ///< 主机最近取走报告的时刻 / Last completion ms
 
   uint8_t in_ep_interval_;         ///< 输入端点间隔 / IN endpoint interval
   uint8_t out_ep_interval_;        ///< 输出端点间隔 / OUT endpoint interval
@@ -784,11 +799,11 @@ class HID : public DeviceClass
   uint8_t last_output_report_id_ =
       0;  ///< 最近的 Output Report ID / Last Output Report ID
 
-  LibXR::Callback<LibXR::ConstRawData&> on_data_out_complete_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
+  Callback<const Endpoint::Completion&> on_data_out_complete_cb_ =
+      Callback<const Endpoint::Completion&>::Create(OnDataOutCompleteStatic, this);
 
-  LibXR::Callback<LibXR::ConstRawData&> on_data_in_complete_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
+  Callback<const Endpoint::Completion&> on_data_in_complete_cb_ =
+      Callback<const Endpoint::Completion&>::Create(OnDataInCompleteStatic, this);
 };
 
 }  // namespace LibXR::USB

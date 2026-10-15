@@ -12,6 +12,7 @@
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
+#include "timer.hpp"
 #include "timebase.hpp"
 
 namespace LibXR::USB
@@ -86,18 +87,38 @@ class DapLinkV1Class
                      bool in_isr) override;
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override;
 
-  void OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data) override;
-  void FillResponse(bool in_isr, Endpoint::TxFill& fill);
-  bool request_pending_ = false;
-  void OnDataInComplete(bool in_isr, LibXR::ConstRawData& data) override;
+  void OnDataOutComplete(bool in_isr,
+                         const Endpoint::Completion& completion) override;
 
  private:
-  static void OnDataOutCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                      LibXR::ConstRawData& data);
-  static void OnDataInCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                     LibXR::ConstRawData& data);
+  /// 命令状态机 / Command state machine
+  static constexpr uint32_t CMD_IDLE = 0U;         ///< 无命令 / No command
+  static constexpr uint32_t CMD_PENDING = 1U;      ///< 已收请求待处理 / Request received
+  static constexpr uint32_t CMD_PROCESSING = 2U;   ///< 命令执行中 / Command running
+  static constexpr uint32_t CMD_RESPONDING = 3U;   ///< 响应就绪待提交 / Response ready
+  static constexpr uint32_t CMD_SUBMITTING = 4U;   ///< 响应提交中 / Response submitting
 
-  void ArmOutTransferIfIdle();
+ public:
+  /**
+   * @brief 推进 DAP 命令处理（DAP 自己的上下文，任何线程上下文可调用）
+   * Drive DAP command processing (DAP's own context; callable from any thread context).
+   *
+   * 构造时注册的 Timer 周期任务会调用本函数；没有挂 Timer 任务的工程也可以从自己的
+   * 线程周期调用（见 MODEL_USB §10.3-a：BSP 要挂 Timer 任务）。
+   * The periodic Timer task registered in the constructor calls this; a project without
+   * the Timer mounted may call it from its own thread instead (MODEL_USB §10.3-a: the
+   * BSP mounts the Timer task).
+   *
+   * @param in_isr 是否在中断中（延时会忙等，勿在中断调用）/ Whether in ISR (delays spin;
+   * do not call from an ISR)
+   */
+  void ProcessPending(bool in_isr = false);
+
+ private:
+  bool TrySubmitResponse(bool in_isr);
+  static void PumpFromTimer(DapLinkV1Class* self) { self->ProcessPending(false); }
+
+  void OnDataInComplete(bool in_isr, const Endpoint::Completion& completion) override;
 
   ErrorCode ProcessOneCommand(bool in_isr, const uint8_t* req, uint16_t req_len,
                               uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
@@ -230,13 +251,16 @@ class DapLinkV1Class
   Endpoint* ep_in_ = nullptr;   // Cached HID IN endpoint
   Endpoint* ep_out_ = nullptr;  // Cached HID OUT endpoint
 
-  LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic, this);
-  Callback<Endpoint::TxFill&> fill_response_cb_ = Callback<Endpoint::TxFill&>::Create(
-      [](bool context, DapLinkV1Class* self, Endpoint::TxFill& fill)
-      { self->FillResponse(context, fill); }, this);
-  LibXR::Callback<LibXR::ConstRawData&> on_data_in_cb_ =
-      LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataInCompleteStatic, this);
+  // 命令状态机与 DAP 自己的上下文（Timer 任务）。请求保留在 OUT 租约里直到响应
+  // 提交后才归还（背压）；命令处理不在 owner 里（MODEL_USB §3.1）。
+  // Command state machine and DAP's own context (the Timer task). The request stays in
+  // the held OUT lease until the response is submitted (backpressure); command
+  // processing never runs in the owner (MODEL_USB §3.1).
+  std::atomic<uint32_t> cmd_state_{CMD_IDLE};
+  Endpoint::Slot out_lease_{};       ///< 保留的 OUT 租约 / Held OUT lease
+  uint8_t resp_buf_[MAX_RESP]{};     ///< 响应缓冲 / Response buffer
+  uint16_t resp_len_ = 0;            ///< 响应长度 / Response length
+  Timer::TimerHandle timer_task_ = nullptr;
 
   bool inited_ = false;
 };
@@ -256,6 +280,14 @@ DapLinkV1Class<SwdPort>::DapLinkV1Class(Endpoint::EPNumber in_ep_num,
     jtag_chain_.index = 0u;
   }
   (void)swd_.SetClockHz(swj_clock_hz_);
+
+  // 命令在 DAP 自己的上下文（Timer 线程路径）执行；BSP 要挂 Timer 任务
+  // （MODEL_USB §10.3-a）。任务节点与类同为初始化期生命周期。
+  // Commands run in DAP's own context (the Timer thread path); the BSP mounts the Timer
+  // task (MODEL_USB §10.3-a). The task node lives as long as the class.
+  timer_task_ = Timer::CreateTask(PumpFromTimer, this, 1U);
+  Timer::Start(timer_task_);
+  Timer::Add(timer_task_);
 }
 
 template <typename SwdPort>
@@ -308,29 +340,28 @@ template <typename SwdPort>
 void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
                                             uint8_t start_itf_num, bool in_isr)
 {
+  // 端点配置、回调和 OUT 接收挂载都由 HID 基类完成：包长取报告长度（MAX_REQ/MAX_RESP
+  // = 64）与当前速度合法包长的较小者。
+  // The HID base configures the endpoints, installs the completion callbacks and arms
+  // the OUT receive; the packet size is the report length (MAX_REQ / MAX_RESP = 64)
+  // capped by the largest legal packet at this speed.
   HID::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
 
   ep_in_ = GetInEndpoint();
   ep_out_ = GetOutEndpoint();
 
-  if (ep_in_ != nullptr)
+  // 丢弃上一个绑定遗留的命令；其作废租约归还端点，供新绑定使用。
+  // Drop a command left over from the previous binding; its stale lease goes back to
+  // the endpoint for the new binding.
+  Endpoint::Slot stale = out_lease_;
+  out_lease_ = Endpoint::Slot{};
+  resp_len_ = 0;
+  cmd_state_.store(CMD_IDLE, std::memory_order_release);
+  if (stale.Valid() && ep_out_ != nullptr)
   {
-    // Double buffer splits RawData into two halves; ensure EP IN buffer >= 2 * MAX_RESP.
-    ep_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, MAX_RESP, MAX_RESP});
-    ep_in_->SetOnTransferCompleteCallback(on_data_in_cb_);
-    ep_in_->SetOnTxFill(fill_response_cb_);
+    ep_out_->ReleaseSlot(stale, in_isr);
   }
 
-  if (ep_out_ != nullptr)
-  {
-    // Double buffer splits RawData into two halves; ensure EP OUT buffer >= 2 * MAX_REQ.
-    ep_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, MAX_REQ, MAX_REQ});
-    ep_out_->SetOnTransferCompleteCallback(on_data_out_cb_);
-  }
-
-  request_pending_ = false;
   inited_ = true;
   if (endpoint_pool.IsPlanning()) return;
   match_mask_ = 0xFFFFFFFFu;
@@ -363,8 +394,6 @@ void DapLinkV1Class<SwdPort>::BindEndpoints(EndpointPool& endpoint_pool,
   last_nreset_level_high_ = true;
   swj_shadow_ = static_cast<uint8_t>(DapLinkV1Def::DAP_SWJ_SWDIO_TMS |
                                      DapLinkV1Def::DAP_SWJ_NRESET);
-
-  ArmOutTransferIfIdle();
 }
 
 template <typename SwdPort>
@@ -376,6 +405,17 @@ void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool, bool 
   dap_state_.transfer_abort = false;
 
   HID::UnbindEndpoints(endpoint_pool, in_isr);
+
+  // 关闭后保留的租约已作废；归还它让槽回到空闲，命令状态回到空闲。
+  // After the close a held lease is stale; return it so the slot is free and the
+  // command state goes idle.
+  if (out_lease_.Valid() && ep_out_ != nullptr)
+  {
+    ep_out_->ReleaseSlot(out_lease_, in_isr);
+  }
+  out_lease_ = Endpoint::Slot{};
+  resp_len_ = 0;
+  cmd_state_.store(CMD_IDLE, std::memory_order_release);
 
   ep_in_ = nullptr;
   ep_out_ = nullptr;
@@ -395,72 +435,116 @@ void DapLinkV1Class<SwdPort>::UnbindEndpoints(EndpointPool& endpoint_pool, bool 
 }
 
 template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataOutCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                                      LibXR::ConstRawData& data)
-{
-  if (self && self->inited_)
-  {
-    self->OnDataOutComplete(in_isr, data);
-  }
-}
-
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataInCompleteStatic(bool in_isr, DapLinkV1Class* self,
-                                                     LibXR::ConstRawData& data)
-{
-  if (self && self->inited_)
-  {
-    self->OnDataInComplete(in_isr, data);
-  }
-}
-
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr, LibXR::ConstRawData& data)
-{
-  UNUSED(data);
-  if (!inited_ || !ep_in_ || !ep_out_) return;
-  REQUIRE(!request_pending_);
-  request_pending_ = true;
-  ep_in_->RequestTx(in_isr);
-}
-
-template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::OnDataInComplete(bool in_isr, LibXR::ConstRawData& data)
+void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr,
+                                                const Endpoint::Completion& completion)
 {
   UNUSED(in_isr);
-  UNUSED(data);
-  ArmOutTransferIfIdle();
+  if (completion.result != ErrorCode::OK || !completion.slot.Valid()) return;
+  // owner 只登记租约并置位（浅操作）；命令在 DAP 自己的上下文执行（§3.1），
+  // 响应提交前租约一直保留作背压，OUT 端点不会重新挂接收。
+  // The owner only records the lease and raises the flag (shallow); the command runs in
+  // DAP's own context (§3.1) and the lease is withheld until the response is
+  // submitted, so the OUT endpoint is not rearmed meanwhile.
+  uint32_t expected = CMD_IDLE;
+  REQUIRE(cmd_state_.compare_exchange_strong(expected, CMD_PENDING,
+                                             std::memory_order_acq_rel));
+  out_lease_ = completion.slot;
 }
 
 template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::FillResponse(bool in_isr, Endpoint::TxFill& fill)
+void DapLinkV1Class<SwdPort>::OnDataInComplete(bool in_isr,
+                                               const Endpoint::Completion& completion)
+{
+  UNUSED(completion);
+  // 主机取走响应；若上一条响应还卡在提交（槽不足），这里补一次提交尝试。
+  // The host took the response; if the previous one is still waiting for a free slot,
+  // retry the submission here.
+  if (cmd_state_.load(std::memory_order_acquire) == CMD_RESPONDING)
+  {
+    (void)TrySubmitResponse(in_isr);
+  }
+}
+
+template <typename SwdPort>
+void DapLinkV1Class<SwdPort>::ProcessPending(bool in_isr)
 {
   if (!inited_) return;
-  if (!request_pending_)
+
+  // 响应就绪但还没提交出去：先补提交。
+  // A ready response that has not been submitted yet: submit it first.
+  if (cmd_state_.load(std::memory_order_acquire) == CMD_RESPONDING)
   {
-    ArmOutTransferIfIdle();
+    (void)TrySubmitResponse(in_isr);
     return;
   }
-  const auto request = ep_out_->ReceiveResult();
-  request_pending_ = false;
-  Memory::FastSet(fill.Buffer().addr_, 0, MAX_RESP);
+
+  uint32_t expected = CMD_PENDING;
+  if (!cmd_state_.compare_exchange_strong(expected, CMD_PROCESSING,
+                                          std::memory_order_acq_rel))
+    return;
+
+  // 命令在 DAP 自己的上下文执行：请求直接读保留的 OUT 租约（§4.7 允许任何上下文
+  // 持有槽），响应写入 resp_buf_ 后经 TrySubmitResponse 提交。遇到延时命令时
+  // DelayMicroseconds 就在本线程上下文执行（§10.3-a），租约同时保留作背压。
+  // The command runs in DAP's own context: the request is read straight from the held
+  // OUT lease (§4.7 lets any context hold a slot) and the response lands in resp_buf_
+  // before TrySubmitResponse submits it. A delay command spins right here in this
+  // thread context (§10.3-a) while the lease keeps the backpressure.
+  Memory::FastSet(resp_buf_, 0, MAX_RESP);
   uint16_t length = 0;
-  const auto result = ProcessOneCommand(
-      in_isr, static_cast<const uint8_t*>(request.addr_),
-      static_cast<uint16_t>(request.size_), static_cast<uint8_t*>(fill.Buffer().addr_),
-      static_cast<uint16_t>(fill.Buffer().size_), length);
+  const auto result =
+      ProcessOneCommand(in_isr, static_cast<const uint8_t*>(out_lease_.data.addr_),
+                        static_cast<uint16_t>(out_lease_.data.size_), resp_buf_,
+                        MAX_RESP, length);
   UNUSED(result);
   REQUIRE(length <= MAX_RESP);
-  fill.SetSize(MAX_RESP);
+  resp_len_ = length;
+
+  cmd_state_.store(CMD_RESPONDING, std::memory_order_release);
+  (void)TrySubmitResponse(in_isr);
 }
 
 template <typename SwdPort>
-void DapLinkV1Class<SwdPort>::ArmOutTransferIfIdle()
+bool DapLinkV1Class<SwdPort>::TrySubmitResponse(bool in_isr)
 {
-  if (!inited_ || request_pending_ || !ep_in_ || !ep_out_ || !ep_in_->CanPrepareTx())
-    return;
-  if (ep_out_->GetState() == Endpoint::State::IDLE || ep_out_->HasReceiveResult())
-    (void)ep_out_->ArmReceive(MAX_REQ);
+  uint32_t expected = CMD_RESPONDING;
+  // SUBMITTING 保证 owner 的补提交与 Timer 路径的提交不会同时进行。
+  // SUBMITTING keeps the owner's retry and the Timer-path submission serialized.
+  if (!cmd_state_.compare_exchange_strong(expected, CMD_SUBMITTING,
+                                          std::memory_order_acq_rel))
+    return false;
+
+  if (ep_in_ == nullptr || ep_out_ == nullptr)
+  {
+    // 已解绑：状态保持 RESPONDING，重新绑定时清掉。
+    // Unbound: keep RESPONDING; the next bind clears it.
+    cmd_state_.store(CMD_RESPONDING, std::memory_order_release);
+    return false;
+  }
+
+  Endpoint::Slot slot;
+  if (ep_in_->AcquireSlot(slot, in_isr) != ErrorCode::OK)
+  {
+    cmd_state_.store(CMD_RESPONDING, std::memory_order_release);
+    return false;
+  }
+
+  Memory::FastCopy(slot.data.addr_, resp_buf_, MAX_RESP);
+  if (ep_in_->Submit(slot, MAX_RESP, false, in_isr) != ErrorCode::OK)
+  {
+    ep_in_->ReleaseSlot(slot, in_isr);
+    cmd_state_.store(CMD_RESPONDING, std::memory_order_release);
+    return false;
+  }
+
+  // 响应已被接受：归还 OUT 租约（按 receive_size 重新挂接收），回到空闲。
+  // The response was accepted: return the OUT lease (rearmed by receive_size) and go
+  // idle.
+  Endpoint::Slot lease = out_lease_;
+  out_lease_ = Endpoint::Slot{};
+  cmd_state_.store(CMD_IDLE, std::memory_order_release);
+  (void)ep_out_->ReturnSlot(lease, false);
+  return true;
 }
 
 template <typename SwdPort>
