@@ -162,7 +162,7 @@ set_tests_properties(
 # the static_assert message.
 add_library(
   test_stack_insert_nontrivial OBJECT EXCLUDE_FROM_ALL
-  structure/stack/stack_insert_nontrivial.cpp
+                                      structure/stack/stack_insert_nontrivial.cpp
 )
 target_link_libraries(test_stack_insert_nontrivial PRIVATE xr)
 add_test(NAME stack_insert_nontrivial
@@ -170,8 +170,9 @@ add_test(NAME stack_insert_nontrivial
                  --target test_stack_insert_nontrivial
 )
 set_tests_properties(
-  stack_insert_nontrivial PROPERTIES PASS_REGULAR_EXPRESSION
-                                     "requires a trivially copyable element type" TIMEOUT 120
+  stack_insert_nontrivial
+  PROPERTIES PASS_REGULAR_EXPRESSION "requires a trivially copyable element type" TIMEOUT
+             120
 )
 
 add_library(
@@ -213,10 +214,20 @@ target_include_directories(test_usb_endpoint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME usb_endpoint COMMAND test_usb_endpoint)
 set_tests_properties(usb_endpoint PROPERTIES TIMEOUT 30)
 
+# The shared FSDEV/CH32 DevFS register runtime against a fake controller.
+add_executable(test_usb_fsdev driver/usb/core/test_fsdev.cpp)
+target_link_libraries(test_usb_fsdev PRIVATE xr)
+target_include_directories(test_usb_fsdev PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_fsdev COMMAND test_usb_fsdev)
+set_tests_properties(usb_fsdev PROPERTIES TIMEOUT 30)
+
 # DriverAsyncCondition driven by OnTick() calls from the test instead of a timebase.
-add_executable(test_driver_async_condition
-               driver/async_condition/test_driver_async_condition.cpp)
+add_executable(
+  test_driver_async_condition driver/async_condition/test_driver_async_condition.cpp
+)
 target_link_libraries(test_driver_async_condition PRIVATE xr)
-target_include_directories(test_driver_async_condition PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_include_directories(
+  test_driver_async_condition PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
