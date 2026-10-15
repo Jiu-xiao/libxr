@@ -8,7 +8,12 @@
 namespace LibXR
 {
 
-#if defined(USBFSD) || defined(__DOXYGEN__)
+// The CH32 OTG FS/HS endpoints still speak the pre-slot-model backend interface; they
+// are migrated in step 5. Until then the legacy classes are only compiled when
+// LIBXR_CH32_USB_OTG_LEGACY is set, so a part that also defines USBFSD (V203 has both
+// the DevFS device and the OTG FS peripheral) can build the migrated DevFS path.
+// Remove this switch with the step-5 migration.
+#if (defined(USBFSD) && defined(LIBXR_CH32_USB_OTG_LEGACY)) || defined(__DOXYGEN__)
 
 /**
  * @brief CH32 OTG FS 端点实现 / CH32 OTG FS endpoint implementation
@@ -41,48 +46,7 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
 #endif  // defined(USBFSD) || defined(__DOXYGEN__)
 
-#if defined(RCC_APB1Periph_USB) || defined(__DOXYGEN__)
-
-/**
- * @brief CH32 FSDEV 端点实现 / CH32 FSDEV endpoint implementation
- */
-class CH32EndpointDevFs : public USB::Endpoint
-{
- public:
-  CH32EndpointDevFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
-                    bool is_isochronous);
-
-  void ConfigureHardware(const Config& cfg) override;
-  void CloseHardware() override;
-  ErrorCode StartHardware(RawData buffer, size_t size) override;
-
-  void TransferComplete(size_t size);
-
-  void CopyRxDataToBuffer(size_t size);
-
-  ErrorCode StallHardware() override;
-  ErrorCode ClearStallHardware() override;
-
-  static void ResetPMAAllocator();
-  static void SetEpTxStatus(uint8_t ep, uint16_t status);
-  static void SetEpRxStatus(uint8_t ep, uint16_t status);
-  static void ClearEpCtrTx(uint8_t ep);
-  static void ClearEpCtrRx(uint8_t ep);
-  static uint16_t GetRxCount(uint8_t ep);
-
-  bool is_isochronous_ = false;
-
-  size_t last_transfer_size_ = 0;
-
-  uint16_t pma_addr_ = 0;
-
-  static constexpr uint8_t EP_DEV_FS_MAX_SIZE = 8;
-  static inline CH32EndpointDevFs* map_dev_fs_[EP_DEV_FS_MAX_SIZE][2] = {};
-};
-
-#endif  // defined(RCC_APB1Periph_USB) || defined(__DOXYGEN__)
-
-#if defined(USBHSD) || defined(__DOXYGEN__)
+#if (defined(USBHSD) && defined(LIBXR_CH32_USB_OTG_LEGACY)) || defined(__DOXYGEN__)
 
 /**
  * @brief CH32 OTG HS 端点实现 / CH32 OTG HS endpoint implementation
