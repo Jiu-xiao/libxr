@@ -32,6 +32,26 @@ class CDCWriteTest : public CDCBase
   }
 
   /**
+   * @brief 绑定端点并挂上第一次 OUT 接收
+   *        Bind the endpoints and arm the first OUT receive
+   *
+   * CDCBase 只做 Configure，不会挂接收（接收由具体类负责，见 cdc_uart 的 ArmReceives）；
+   * 不挂这一下，写测试永远收不到主机的 OUT 数据。
+   * CDCBase only configures; arming a receive is the concrete class's job (see
+   * CDCUart::ArmReceives). Without it the write test would never receive host OUT data.
+   */
+  void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
+                     bool in_isr) override
+  {
+    CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
+    auto ep_data_out = GetDataOutEndpoint();
+    if (ep_data_out != nullptr)
+    {
+      (void)ep_data_out->Receive(ep_data_out->MaxPacketSize(), in_isr);
+    }
+  }
+
+  /**
    * @brief OUT 端点完成回调（写测试：归还租约并按 DTR 触发一次发送）
    *        Data OUT complete callback (write test: return the lease, send once on DTR)
    *
@@ -79,7 +99,8 @@ class CDCWriteTest : public CDCBase
     {
       return;
     }
-    const size_t length = LibXR::min<size_t>(ep_data_in->MaxPacketSize(), slot.data.size_);
+    const size_t length =
+        LibXR::min<size_t>(ep_data_in->MaxPacketSize(), slot.data.size_);
     std::memset(slot.data.addr_, 0, length);
     (void)ep_data_in->Submit(slot, length, false, in_isr);
   }
@@ -114,9 +135,15 @@ class CDCReadTest : public CDCBase
   void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num,
                      bool in_isr) override
   {
-    // 基类绑定已完成 Configure（含首次 Receive 预挂），这里无需额外操作。
-    // The base bind configures the endpoints, which already arms the first receive.
+    // 基类只做 Configure；首次接收必须由本类挂上，否则永远收不到数据。
+    // The base only configures; this class must arm the first receive or it would never
+    // receive anything.
     CDCBase::BindEndpoints(endpoint_pool, start_itf_num, in_isr);
+    auto ep_data_out = GetDataOutEndpoint();
+    if (ep_data_out != nullptr)
+    {
+      (void)ep_data_out->Receive(ep_data_out->MaxPacketSize(), in_isr);
+    }
   }
 
   /**

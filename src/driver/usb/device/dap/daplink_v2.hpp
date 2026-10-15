@@ -1055,25 +1055,23 @@ class DapLinkV2Class : public DeviceClass
 
   uint8_t OutstandingResponseCount() const
   {
-    // 已排队未发送 + 正由拷贝 Write 发送的 + 延时命令保留的响应槽；
-    // 三者合起来就是主机侧在途响应深度（§10.7-a 保持原有并发深度）。
-    // Queued unsent + the one sent by the copy Write + the slot reserved by a
-    // deferred delayed command: together they are the host-visible outstanding
-    // response depth (§10.7-a keeps the original concurrency depth).
-    const uint8_t sending = response_write_active_ ? 1U : 0U;
-    const uint8_t deferred =
-        pending_action_.load(std::memory_order_acquire) ==
-                static_cast<uint8_t>(PendingAction::NONE)
-            ? 0U
-            : 1U;
-    return static_cast<uint8_t>(resp_q_count_ + sending + deferred);
+    // resp_q_count_ 已经包含正由拷贝 Write 发送的那条响应（它要到完成回调才出队），
+    // 所以这里只补上延时命令保留的响应槽，不能再单独加"发送中"的那一条。
+    // resp_q_count_ already includes the response currently handed to the copy Write (it
+    // leaves the queue only in the completion callback), so only the slot a deferred
+    // delayed command reserved has to be added; counting the sending one again would
+    // shrink the host-visible depth below the advertised packet count.
+    const uint8_t deferred = pending_action_.load(std::memory_order_acquire) ==
+                                     static_cast<uint8_t>(PendingAction::NONE)
+                                 ? 0U
+                                 : 1U;
+    return static_cast<uint8_t>(resp_q_count_ + deferred);
   }
 
   void ArmOutTransferIfIdle(bool in_isr)
   {
     if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_ ||
-        IsResponseQueueFull() ||
-        OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
+        IsResponseQueueFull() || OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
       return;
     // 拷贝模式 Read：一条命令一次接收，短包或收满（DAP 包长）即完成。
     // Copy-mode Read: one command per receive; a short packet or a full buffer (the
@@ -1627,8 +1625,8 @@ class DapLinkV2Class : public DeviceClass
     // §10.3-a: a delayed command never busy-waits in the callback/owner context;
     // its response slot is reserved for the Timer path in thread context, which
     // completes and queues the response once the delay elapses (rounded up to 1 ms).
-    BeginDeferredAction(PendingAction::DELAY,
-                        (static_cast<uint32_t>(us) + 999u) / 1000u, resp, resp_cap);
+    BeginDeferredAction(PendingAction::DELAY, (static_cast<uint32_t>(us) + 999u) / 1000u,
+                        resp, resp_cap);
     out_len = 0u;
     return ErrorCode::OK;
   }
@@ -4232,12 +4230,10 @@ class DapLinkV2Class : public DeviceClass
   // goes through RequestClassService + OnService and responses through the copy-mode
   // Write.
   LibXR::Callback<const Endpoint::Completion&> on_data_out_cb_ =
-      LibXR::Callback<const Endpoint::Completion&>::Create(OnDataOutCompleteStatic,
-                                                           this);
+      LibXR::Callback<const Endpoint::Completion&>::Create(OnDataOutCompleteStatic, this);
 
   LibXR::Callback<const Endpoint::Completion&> on_data_in_cb_ =
-      LibXR::Callback<const Endpoint::Completion&>::Create(OnDataInCompleteStatic,
-                                                           this);
+      LibXR::Callback<const Endpoint::Completion&>::Create(OnDataInCompleteStatic, this);
 };
 
 }  // namespace LibXR::USB
