@@ -44,6 +44,11 @@ class CH32EndpointOtgFs : public USB::Endpoint
   size_t transfer_accumulated_ = 0;
   uint8_t* transfer_cursor_ = nullptr;
 
+  // IRQ 分发（自由函数）需要经端点对象读取槽内存（EP0 setup 包）。
+  // The IRQ dispatch (free functions) reads slot memory through the endpoint
+  // objects (the EP0 setup packet).
+  using USB::Endpoint::SlotMemory;
+
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
   static inline CH32EndpointOtgFs* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 };
@@ -145,6 +150,11 @@ class CH32EndpointOtgHs : public USB::Endpoint
   size_t transfer_requested_ = 0;
   size_t transfer_accumulated_ = 0;
   uint8_t* transfer_cursor_ = nullptr;
+
+  // 同 OtgFs：IRQ 分发（自由函数）经端点对象读取槽内存。
+  // Same as OtgFs: the IRQ dispatch (free functions) reads slot memory through
+  // the endpoint objects.
+  using USB::Endpoint::SlotMemory;
 
   static constexpr uint8_t EP_OTG_HS_MAX_SIZE = 16;
   static inline CH32EndpointOtgHs* map_otg_hs_[EP_OTG_HS_MAX_SIZE][2] = {};
