@@ -220,3 +220,17 @@ target_link_libraries(test_driver_async_condition PRIVATE xr)
 target_include_directories(test_driver_async_condition PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
+
+# HID device class on the slot model: input reports, OUT leases, LED and idle resend.
+add_executable(test_usb_hid driver/usb/device/hid/test_hid.cpp)
+target_link_libraries(test_usb_hid PRIVATE xr)
+target_include_directories(test_usb_hid PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_hid COMMAND test_usb_hid)
+set_tests_properties(usb_hid PROPERTIES TIMEOUT 30)
+
+# DAP v1 device class: the command state machine is driven by ProcessPending().
+add_executable(test_usb_daplink_v1 driver/usb/device/dap/test_daplink_v1.cpp)
+target_link_libraries(test_usb_daplink_v1 PRIVATE xr)
+target_include_directories(test_usb_daplink_v1 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_daplink_v1 COMMAND test_usb_daplink_v1)
+set_tests_properties(usb_daplink_v1 PROPERTIES TIMEOUT 30)
