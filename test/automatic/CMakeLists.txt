@@ -220,3 +220,10 @@ target_link_libraries(test_driver_async_condition PRIVATE xr)
 target_include_directories(test_driver_async_condition PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
+
+# UAC1 microphone on the slot model: alt switching, SOF pacing, FAILED recovery.
+add_executable(test_uac_mic driver/usb/device/uac/test_uac_mic.cpp)
+target_link_libraries(test_uac_mic PRIVATE xr)
+target_include_directories(test_uac_mic PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_uac_mic COMMAND test_uac_mic)
+set_tests_properties(usb_uac_mic PROPERTIES TIMEOUT 30)
