@@ -212,3 +212,11 @@ target_link_libraries(test_usb_endpoint PRIVATE xr)
 target_include_directories(test_usb_endpoint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME usb_endpoint COMMAND test_usb_endpoint)
 set_tests_properties(usb_endpoint PROPERTIES TIMEOUT 30)
+
+# DriverAsyncCondition driven by OnTick() calls from the test instead of a timebase.
+add_executable(test_driver_async_condition
+               driver/async_condition/test_driver_async_condition.cpp)
+target_link_libraries(test_driver_async_condition PRIVATE xr)
+target_include_directories(test_driver_async_condition PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
+set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)

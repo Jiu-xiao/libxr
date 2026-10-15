@@ -1,6 +1,11 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 #include "ch32_timebase.hpp"
 
+#include "driver_async_condition.hpp"
+#if defined(LIBXR_SYSTEM_freertos)
+#include "FreeRTOS.h"
+#endif
+
 using namespace LibXR;
 
 namespace
@@ -68,5 +73,19 @@ MillisecondTimestamp Timebase::GetMilliseconds()
   return MillisecondTimestamp(static_cast<uint32_t>(
       CyclesToUnits(ReadSysTickCounter(), MILLISECONDS_PER_SECOND)));
 }
+
+#if defined(LIBXR_SYSTEM_freertos)
+static_assert(
+    configUSE_TICK_HOOK == 1,
+    "LibXR drives its DriverAsyncCondition waits from the FreeRTOS tick hook: set "
+    "configUSE_TICK_HOOK to 1 in FreeRTOSConfig.h");
+
+// FreeRTOS 节拍（LibXR 要求 1 kHz）推进驱动的条件等待。
+// The FreeRTOS tick (1 kHz, which LibXR requires) advances the drivers' condition waits.
+extern "C" void vApplicationTickHook(void)  // NOLINT
+{
+  DriverAsyncCondition::OnTick();
+}
+#endif
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

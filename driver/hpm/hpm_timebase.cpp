@@ -1,5 +1,10 @@
 #include "hpm_timebase.hpp"
 
+#include "driver_async_condition.hpp"
+#if defined(LIBXR_SYSTEM_freertos)
+#include "FreeRTOS.h"
+#endif
+
 using namespace LibXR;
 
 namespace
@@ -38,3 +43,17 @@ MillisecondTimestamp Timebase::GetMilliseconds()
   const uint64_t ticks = mchtmr_get_count(g_timer);
   return MillisecondTimestamp(ConvertTicksToTime(ticks, g_clock_hz, 1000ULL));
 }
+
+#if defined(LIBXR_SYSTEM_freertos)
+static_assert(
+    configUSE_TICK_HOOK == 1,
+    "LibXR drives its DriverAsyncCondition waits from the FreeRTOS tick hook: set "
+    "configUSE_TICK_HOOK to 1 in FreeRTOSConfig.h");
+
+// FreeRTOS 节拍（LibXR 要求 1 kHz）推进驱动的条件等待。
+// The FreeRTOS tick (1 kHz, which LibXR requires) advances the drivers' condition waits.
+extern "C" void vApplicationTickHook(void)  // NOLINT
+{
+  DriverAsyncCondition::OnTick();
+}
+#endif
