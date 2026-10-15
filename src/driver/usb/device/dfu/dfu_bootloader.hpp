@@ -1223,13 +1223,18 @@ class DFUClass : public DfuInterfaceClassBase
         status_ = DFUStatusCode::OK;
         poll_timeout_ms_ = 0u;
       }
-      result.SendStatusInZLP() = true;
+      // 无数据阶段的控制传输由核心自行完成状态阶段（STATUS ZLP）。
+      // A control transfer without a data stage finishes its status stage in the core.
       return ErrorCode::OK;
     }
 
     pending_block_num_ = block_num;
     pending_dnload_length_ = wLength;
-    result.OutData() = {transfer_buffer_, wLength};
+    // OUT 数据阶段由核心收进自己的缓冲区，收完整段后经 OnControlData ->
+    // OnClassData 交给 backend；wTransferSize 块长由 GetControlReceiveCapacity 覆盖。
+    // The core receives the whole OUT data stage into its own buffer and hands it to
+    // the backend via OnControlData -> OnClassData; the wTransferSize block length is
+    // covered by GetControlReceiveCapacity.
     return ErrorCode::OK;
   }
 
@@ -1297,7 +1302,6 @@ class DFUClass : public DfuInterfaceClassBase
     }
     backend_.DfuClearStatus(current_alt_setting_);
     ClearErrorState();
-    result.SendStatusInZLP() = true;
     return ErrorCode::OK;
   }
 
@@ -1319,7 +1323,6 @@ class DFUClass : public DfuInterfaceClassBase
       case DFUState::DFU_MANIFEST_SYNC:
         backend_.DfuAbort(current_alt_setting_);
         ClearErrorState();
-        result.SendStatusInZLP() = true;
         return ErrorCode::OK;
 
       default:
@@ -1608,7 +1611,8 @@ class DfuBootloaderClassT : private DfuBootloaderClassStorage,
       // RUN_APP is only accepted when a valid sealed image is known.
       return ErrorCode::FAILED;
     }
-    result.SendStatusInZLP() = true;
+    // 无数据阶段的控制传输由核心自行完成状态阶段（STATUS ZLP）。
+    // A control transfer without a data stage finishes its status stage in the core.
     return ErrorCode::OK;
   }
 };

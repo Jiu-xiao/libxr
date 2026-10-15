@@ -253,7 +253,8 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
         detach_pending_ = true;  // Readiness starts at actual control completion.
         state_ = DFUState::APP_DETACH;
         desc_block_.func_desc.wDetachTimeOut = detach_timeout_ms_;
-        result.SendStatusInZLP() = true;
+        // 无数据阶段的控制传输由核心自行完成状态阶段（STATUS ZLP）。
+        // A control transfer without a data stage finishes its status stage in the core.
         return ErrorCode::OK;
 
       case DFURequest::GETSTATUS:

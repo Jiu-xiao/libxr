@@ -234,3 +234,23 @@ target_link_libraries(test_usb_daplink_v1 PRIVATE xr)
 target_include_directories(test_usb_daplink_v1 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME usb_daplink_v1 COMMAND test_usb_daplink_v1)
 set_tests_properties(usb_daplink_v1 PROPERTIES TIMEOUT 30)
+# DAP v2 device class: copy-mode Read/Write, response depth and the deferred delay path.
+add_executable(test_usb_daplink_v2 driver/usb/device/dap/test_daplink_v2.cpp)
+target_link_libraries(test_usb_daplink_v2 PRIVATE xr)
+target_include_directories(test_usb_daplink_v2 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_daplink_v2 COMMAND test_usb_daplink_v2)
+set_tests_properties(usb_daplink_v2 PROPERTIES TIMEOUT 30)
+
+# DFU device classes: core-owned status stage, DNLOAD data stage and receive capacity.
+add_executable(test_usb_dfu driver/usb/device/dfu/test_dfu.cpp)
+target_link_libraries(test_usb_dfu PRIVATE xr)
+target_include_directories(test_usb_dfu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_dfu COMMAND test_usb_dfu)
+set_tests_properties(usb_dfu PROPERTIES TIMEOUT 30)
+
+# cdc_test classes: lease return, DTR-triggered packet and the read re-arm.
+add_executable(test_usb_cdc_test driver/usb/device/cdc/test_cdc_test.cpp)
+target_link_libraries(test_usb_cdc_test PRIVATE xr)
+target_include_directories(test_usb_cdc_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_cdc_test COMMAND test_usb_cdc_test)
+set_tests_properties(usb_cdc_test PROPERTIES TIMEOUT 30)

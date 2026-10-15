@@ -1,0 +1,248 @@
+/**
+ * @file test_daplink_v2.cpp
+ * @brief DAP v2 设备类（槽模型）主机测试 / Host tests for the DAP v2 device class.
+ *
+ * 覆盖 5B 迁移改动的路径：OUT 用拷贝模式 Read 一次收一条完整命令、IN 用拷贝模式 Write
+ * 发队头响应（超过一个 USB 包的响应跨多个包）、响应环保持主机侧在途深度、以及延时命令
+ * 不在 owner 里忙等而是把响应槽留给 1 ms Timer 路径续做。
+ * Covers the paths the 5B migration changed: OUT receives one whole command per copy-mode
+ * Read, IN writes the head response through a copy-mode Write (a response above the wire
+ * packet size spans several packets), the response ring keeps the host-visible
+ * outstanding depth, and a delayed command does not busy-wait in the owner but reserves
+ * its response slot for the 1 ms Timer path.
+ */
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+#include <thread>
+#include <vector>
+
+#include "../../mock_endpoint.hpp"
+#include "daplink_v2.hpp"
+#include "debug/swd.hpp"
+#include "device_composition.hpp"
+#include "lockfree_list.hpp"
+#include "timer.hpp"
+
+using namespace LibXR;
+using namespace LibXR::USB;
+using namespace LibXR::USB::Test;
+
+namespace
+{
+static constexpr auto TEST_LANGUAGE = DescriptorStrings::MakeLanguagePack(
+    DescriptorStrings::Language::EN_US, "LibXR", "USB tests", "0");
+
+using CommandId = LibXR::USB::DapLinkV2Def::CommandId;
+using InfoId = LibXR::USB::DapLinkV2Def::InfoId;
+using Port = LibXR::USB::DapLinkV2Def::Port;
+
+constexpr uint8_t INFO = static_cast<uint8_t>(CommandId::INFO);
+constexpr uint8_t CONNECT = static_cast<uint8_t>(CommandId::CONNECT);
+constexpr uint8_t DELAY = static_cast<uint8_t>(CommandId::DELAY);
+constexpr uint8_t PACKET_SIZE_ID = static_cast<uint8_t>(InfoId::PACKET_SIZE);
+constexpr uint8_t PACKET_COUNT_ID = static_cast<uint8_t>(InfoId::PACKET_COUNT);
+
+/// Minimal SWD probe: every transfer succeeds and reads a fixed word.
+class FakeSwd : public LibXR::Debug::Swd
+{
+ public:
+  unsigned enters = 0, closes = 0;
+  uint32_t clock_hz = 0;
+
+  ErrorCode SetClockHz(uint32_t hz) override
+  {
+    clock_hz = hz;
+    return ErrorCode::OK;
+  }
+  void Close() override { ++closes; }
+  ErrorCode LineReset() override { return ErrorCode::OK; }
+  ErrorCode EnterSwd() override
+  {
+    ++enters;
+    return ErrorCode::OK;
+  }
+  ErrorCode Transfer(const LibXR::Debug::SwdProtocol::Request& req,
+                     LibXR::Debug::SwdProtocol::Response& resp) override
+  {
+    if (req.rnw) resp.rdata = 0x12345678u;
+    resp.ack = LibXR::Debug::SwdProtocol::Ack::OK;
+    resp.parity_ok = true;
+    return ErrorCode::OK;
+  }
+  void IdleClocks(uint32_t) override {}
+  ErrorCode SeqWriteBits(uint32_t, const uint8_t*) override { return ErrorCode::OK; }
+  ErrorCode SeqReadBits(uint32_t cycles, uint8_t* out) override
+  {
+    if (out != nullptr) std::memset(out, 0, (cycles + 7U) / 8U);
+    return ErrorCode::OK;
+  }
+};
+
+/// Give this test its own timer list so a class destroyed earlier cannot leave a
+/// dangling task node behind for the next Timer::Refresh().
+void FreshTimerList() { LibXR::Timer::list_ = new LibXR::LockFreeList(); }
+
+using DapV2 = DapLinkV2Class<FakeSwd>;
+
+class TestDap2 : public DapV2
+{
+ public:
+  using DapV2::BindEndpoints;
+  using DapV2::DapV2;
+  using DapV2::OnService;
+  using DapV2::UnbindEndpoints;
+};
+
+/// The class, its SWD probe and the composition that gives it a class-service pool.
+struct DapFixture : Fixture
+{
+  FakeSwd swd;
+  TestDap2 dap;
+  DeviceComposition composition;
+  Callback<uint32_t> handler;
+
+  DapFixture()
+      : swd(),
+        dap(Number::EP1, Number::EP2, swd),
+        composition(pool, {&TEST_LANGUAGE}, {{&dap}})
+  {
+    // Stand-in for DeviceCore's class-service dispatch.
+    handler = Callback<uint32_t>::Create(
+        [](bool in_isr, DeviceClass* self, uint32_t events)
+        {
+          if ((events & EndpointPool::CLASS_EVENT) != 0U) self->OnService(in_isr);
+        },
+        static_cast<DeviceClass*>(&dap));
+    pool.SetControlHandler(handler);
+  }
+};
+
+/// Send one whole DAP command; a short packet ends the copy-mode Read.
+void Send(DapFixture& f, std::initializer_list<uint8_t> bytes)
+{
+  f.out.HostSends(std::vector<uint8_t>(bytes));
+}
+
+void TestCommandRoundTrip()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // The OUT endpoint is armed with one wire packet of a whole DAP packet.
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64 && f.out.starts.size() == 1);
+  TEST_ASSERT(f.in.starts.empty());
+
+  // DAP_Info(PACKET_SIZE) answers the host-visible packet size (1024 by default).
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
+  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({INFO, 2, 0x00, 0x04}));
+  // The response was accepted, so the OUT receive re-armed behind it.
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 2);
+
+  f.in.Complete();
+  // The next command's Read was already armed when the first one was consumed, so the
+  // OUT endpoint does not start again here.
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 2);
+
+  // DAP_Info(PACKET_COUNT) answers the effective outstanding depth.
+  Send(f, {INFO, PACKET_COUNT_ID});
+  TEST_ASSERT(f.in.Last().length == 3);
+  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({INFO, 1, 0x04}));
+  f.in.Complete();
+
+  // A connect command reaches the SWD probe and answers the port.
+  Send(f, {CONNECT, static_cast<uint8_t>(Port::SWD)});
+  TEST_ASSERT(f.in.Last().length == 2);
+  TEST_ASSERT(f.in.Last().data[0] == CONNECT &&
+              f.in.Last().data[1] == static_cast<uint8_t>(Port::SWD));
+  TEST_ASSERT(f.swd.enters == 1 && f.swd.clock_hz == 1000000u);
+  f.in.Complete();
+}
+
+void TestPipelineKeepsAdvertisedDepth()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // The advertised packet count is four; four commands are accepted back to back.
+  for (unsigned i = 0; i < 4; ++i)
+  {
+    Send(f, {INFO, PACKET_SIZE_ID});
+  }
+  TEST_ASSERT(f.in.starts.size() == 1);   // one response on the wire at a time
+  TEST_ASSERT(f.out.starts.size() == 4);  // three re-arms plus the initial one
+  // The fourth response filled the outstanding window: OUT is not re-armed.
+  TEST_ASSERT(!f.out.active);
+
+  // Retiring one response opens the window again.
+  f.in.Complete();
+  TEST_ASSERT(f.in.starts.size() == 2 && f.out.active && f.out.starts.size() == 5);
+  f.in.Complete();
+  f.in.Complete();
+  f.in.Complete();
+  TEST_ASSERT(!f.in.active);
+}
+
+void TestDelayedCommand()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // A delay command does not busy-wait in the owner: no response is submitted and the
+  // OUT receive stays unarmed while the delay is pending.
+  Send(f, {DELAY, 0x10, 0x27});  // 10000 us
+  TEST_ASSERT(f.in.starts.empty());
+  TEST_ASSERT(!f.out.active);
+
+  // The 1 ms Timer task rings the class service; once the deadline passed the response
+  // is queued and sent.
+  std::this_thread::sleep_for(std::chrono::milliseconds(15));
+  Timer::Refresh();
+  TEST_ASSERT(f.in.active && f.in.Last().length == 2);
+  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({DELAY, 0x00}));
+  TEST_ASSERT(f.out.active);
+  f.in.Complete();
+
+  // A zero delay answers immediately.
+  Send(f, {DELAY, 0x00, 0x00});
+  TEST_ASSERT(f.in.active && f.in.Last().data == std::vector<uint8_t>({DELAY, 0x00}));
+  f.in.Complete();
+}
+
+void TestUnbind()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active);
+  f.dap.UnbindEndpoints(f.pool, false);
+  TEST_ASSERT(f.out.closes == 1);
+  // Rebinding serves the next command normally.
+  f.dap.BindEndpoints(f.pool, 0, false);
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
+  f.in.Complete();
+}
+}  // namespace
+
+int main()
+{
+  // Each test provides its own timer list so the constructor's Timer::Add() does not
+  // start a scheduler thread; the test drives every refresh itself.
+  TestCommandRoundTrip();
+  TestPipelineKeepsAdvertisedDepth();
+  TestDelayedCommand();
+  TestUnbind();
+  std::puts(
+      "DAP v2 class: copy-mode Read/Write, response depth and deferred delay passed");
+}
