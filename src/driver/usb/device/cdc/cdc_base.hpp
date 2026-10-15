@@ -265,8 +265,8 @@ class CDCBase : public DeviceClass
     const uint16_t out_packet = ep_data_out_->LargestPacketSize(Endpoint::Type::BULK);
     const uint16_t comm_packet = LibXR::min<uint16_t>(
         16U, ep_comm_in_->LargestPacketSize(Endpoint::Type::INTERRUPT));
-    (void)ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, in_packet},
-                                 in_isr);
+    (void)ep_data_in_->Configure(
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, in_packet}, in_isr);
     (void)ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK,
                                    out_packet, Endpoint::Mult::ONE, 1, out_packet},
                                   in_isr);

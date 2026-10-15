@@ -116,7 +116,6 @@ ErrorCode STM32Endpoint::StartHardware(const HwRequest& request, bool in_isr)
   return ErrorCode::OK;
 }
 
-
 void STM32Endpoint::Redirect()
 {
   PCD_EPTypeDef* ep = HalEndpoint();
@@ -215,9 +214,7 @@ void STM32Endpoint::VisitRedirected(stm32_usb_dev_id_t id, PCD_HandleTypeDef* hp
   }
 }
 
-void STM32Endpoint::ArmStopTimeout()
-{
-}
+void STM32Endpoint::ArmStopTimeout() {}
 
 void STM32Endpoint::ConfirmStop(bool in_isr)
 {

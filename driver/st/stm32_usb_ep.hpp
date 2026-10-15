@@ -14,8 +14,8 @@ namespace LibXR
 /**
  * @brief STM32 FSDEV USB 端点实现 / STM32 FSDEV USB endpoint implementation
  *
- * 槽到 PMA 的拷贝由 HAL 在中断中完成。停止在途请求时，端点把 HAL 的写指针改到设备的暂存区，
- * 之后不再访问槽，立即确认。OTG 控制器见 stm32_usb_otg.hpp。
+ * 槽到 PMA 的拷贝由 HAL 在中断中完成。停止在途请求时，端点把 HAL
+ * 的写指针改到设备的暂存区， 之后不再访问槽，立即确认。OTG 控制器见 stm32_usb_otg.hpp。
  *
  * HAL copies between slots and the PMA inside the interrupt. Stopping an in-flight
  * request points HAL's write cursor at the device's scratch area, never touches the slot

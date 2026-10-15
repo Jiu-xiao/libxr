@@ -307,7 +307,7 @@ class EndpointPool
   std::atomic<uint32_t> stop_frames_{0};
   static constexpr uint32_t NO_FRAME = UINT32_MAX;
   std::atomic<uint32_t> stop_last_frame_{NO_FRAME};  ///< Frame number of the last count.
-  bool lifecycle_hold_ = false;  ///< Controller-owner state.
+  bool lifecycle_hold_ = false;                      ///< Controller-owner state.
   bool data_enabled_ = true;
   bool planning_ = false;
   Speed speed_ = Speed::FULL;

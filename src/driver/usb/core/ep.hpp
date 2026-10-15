@@ -18,7 +18,8 @@ class EndpointPool;
  * @class Endpoint
  * @brief USB 端点基类 / USB endpoint base class
  *
- * 端点的内存由 BSP 提供，构造时分成固定的一个或两个槽，之后不随包长和速度变化。取槽、往槽里
+ * 端点的内存由 BSP
+ * 提供，构造时分成固定的一个或两个槽，之后不随包长和速度变化。取槽、往槽里
  * 写数据、提交、归还可以在任何上下文进行：取槽和提交各是一次对端点状态字的原子修改，中间的
  * 拷贝不加锁。借出的槽只能由持有者归还；端点解绑时借出的槽作废，持有者之后提交得到
  * `ABORTED`。启动硬件、回收完成、解绑与停止只在设备的串行化执行者（owner）中进行。
@@ -127,8 +128,8 @@ class Endpoint
   {
     Direction direction = Direction::OUT;
     Type type = Type::BULK;
-    /// 最大包长，必须是该类型在当前速度下的合法值；0 无效 / Max packet size; must be legal
-    /// for the type at the current speed; 0 is invalid
+    /// 最大包长，必须是该类型在当前速度下的合法值；0 无效 / Max packet size; must be
+    /// legal for the type at the current speed; 0 is invalid
     uint16_t max_packet_size = 0;
     Mult mult = Mult::ONE;
     uint8_t burst = 1;
@@ -168,8 +169,9 @@ class Endpoint
    * @param slots 槽内存，起点与长度按 HW_CACHE_LINE_SIZE 对齐 / Slot memory, start and
    * length aligned to HW_CACHE_LINE_SIZE
    * @param slot_count 槽数：1 或 2；0 表示 EP0 一个、其余两个。两个槽时内存平分，每个槽的
-   * 起点与长度按 HW_CACHE_LINE_SIZE 对齐 / Slot count, 1 or 2; 0 means one for EP0 and two
-   * for the others. Two slots split the memory in halves aligned to HW_CACHE_LINE_SIZE
+   * 起点与长度按 HW_CACHE_LINE_SIZE 对齐 / Slot count, 1 or 2; 0 means one for EP0 and
+   * two for the others. Two slots split the memory in halves aligned to
+   * HW_CACHE_LINE_SIZE
    */
   Endpoint(EPNumber number, Direction avail, RawData slots, uint8_t slot_count = 0);
   virtual ~Endpoint() = default;
@@ -192,7 +194,8 @@ class Endpoint
   uint16_t MaxPacketSize() const { return granted_.max_packet_size; }
   /// 当前速度下槽和后端都放得下的最大合法包长；没有时为 0。只读查询，Configure 仍须显式
   /// 指定包长 / Largest packet size legal at the current speed that the slot and the
-  /// backend hold, 0 when there is none. A query only: Configure still takes an explicit size
+  /// backend hold, 0 when there is none. A query only: Configure still takes an explicit
+  /// size
   uint16_t LargestPacketSize(Type type) const;
   /// 包长对该类型和速度是否合法 / Whether the packet size is legal for the type and speed
   static bool IsLegalPacket(Type type, Speed speed, size_t packet);
@@ -372,7 +375,7 @@ class Endpoint
   Direction avail_direction_;
   RawData memory_;
   uint8_t slot_count_ = 1;  // Fixed at construction.
-  size_t slot_size_ = 0;    // Bytes of each slot; slot 1 starts here. Cache-line multiple.
+  size_t slot_size_ = 0;  // Bytes of each slot; slot 1 starts here. Cache-line multiple.
   Config config_;
   Granted granted_;
   std::atomic<State> state_{State::DISABLED};

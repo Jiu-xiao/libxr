@@ -757,20 +757,20 @@ class DfuBootloaderBackend
   size_t seal_offset_ = 0u;  ///< seal 相对镜像区偏移 / Seal offset inside image region
   JumpCallback jump_to_app_ = nullptr;  ///< 跳 app 回调 / App jump callback
   void* jump_app_ctx_ = nullptr;        ///< 跳转上下文 / Jump callback context
-  bool autorun_ = true;  ///< manifest 后是否自动请求运行 / Autorun after manifest
-  ImageState image_ = {};          ///< 镜像级状态 / Image-level state
-  size_t erase_block_size_ = 1u;   ///< 最小擦除粒度 / Minimum erase granularity
-  size_t erase_block_count_ = 0u;  ///< 受管块数量 / Number of tracked erase blocks
+  bool autorun_ = true;    ///< manifest 后是否自动请求运行 / Autorun after manifest
+  ImageState image_ = {};  ///< 镜像级状态 / Image-level state
+  size_t erase_block_size_ = 1u;      ///< 最小擦除粒度 / Minimum erase granularity
+  size_t erase_block_count_ = 0u;     ///< 受管块数量 / Number of tracked erase blocks
   uint8_t* erased_blocks_ = nullptr;  ///< 每块擦除标记 / Per-block erase marks
   size_t seal_storage_size_ = 0u;     ///< seal 暂存大小 / Seal scratch size
   uint8_t* seal_storage_ = nullptr;   ///< seal 暂存区 / Seal scratch buffer
-  size_t transfer_size_ = 0u;        ///< 单次 DFU 传输上限 / Per-transfer DFU limit
-  uint8_t* write_buffer_ = nullptr;  ///< 下载块暂存区 / Download chunk buffer
-  uint8_t crc_buffer_[256] = {};     ///< CRC 分块缓冲 / CRC chunk buffer
-  DownloadState download_ = {};      ///< Download 状态 / Download state
-  WriteState write_ = {};            ///< 写入步骤状态 / Write-step state
-  ManifestState manifest_ = {};      ///< Manifest 状态 / Manifest state
-  UploadState upload_ = {};          ///< Upload 状态 / Upload state
+  size_t transfer_size_ = 0u;         ///< 单次 DFU 传输上限 / Per-transfer DFU limit
+  uint8_t* write_buffer_ = nullptr;   ///< 下载块暂存区 / Download chunk buffer
+  uint8_t crc_buffer_[256] = {};      ///< CRC 分块缓冲 / CRC chunk buffer
+  DownloadState download_ = {};       ///< Download 状态 / Download state
+  WriteState write_ = {};             ///< 写入步骤状态 / Write-step state
+  ManifestState manifest_ = {};       ///< Manifest 状态 / Manifest state
+  UploadState upload_ = {};           ///< Upload 状态 / Upload state
 };
 
 /**
@@ -1490,13 +1490,13 @@ class DFUClass : public DfuInterfaceClassBase
   uint8_t transfer_buffer_[MAX_TRANSFER_SIZE] =
       {};                          ///< EP0 传输缓冲 / EP0 transfer buffer
   bool download_started_ = false;  ///< 是否已有有效下载数据 / Whether payload has started
-  uint16_t pending_block_num_ = 0u;  ///< 待提交 block 编号 / Pending block number
+  uint16_t pending_block_num_ = 0u;      ///< 待提交 block 编号 / Pending block number
   uint16_t pending_dnload_length_ = 0u;  ///< 待提交 DNLOAD 长度 / Pending DNLOAD length
   uint32_t poll_deadline_ = 0;
   bool poll_waiting_ = false;
   bool manifest_started_ = false;
-  uint32_t poll_timeout_ms_ = 0u;        ///< 当前轮询超时 / Current poll timeout
-  DFUState state_ = DFUState::DFU_IDLE;  ///< DFU 状态 / DFU state
+  uint32_t poll_timeout_ms_ = 0u;             ///< 当前轮询超时 / Current poll timeout
+  DFUState state_ = DFUState::DFU_IDLE;       ///< DFU 状态 / DFU state
   DFUStatusCode status_ = DFUStatusCode::OK;  ///< DFU 状态码 / DFU status code
 };
 

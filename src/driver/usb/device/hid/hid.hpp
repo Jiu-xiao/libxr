@@ -72,11 +72,11 @@ class HID : public DeviceClass
   {
     uint8_t bLength;                    ///< 描述符长度 / Descriptor length
     HIDDescriptorType bDescriptorType;  ///< 描述符类型 / Descriptor type (0x21)
-    uint16_t bcdHID;          ///< HID 版本号 / HID class specification release
-    uint8_t bCountryCode;     ///< 国家码 / Country code
+    uint16_t bcdHID;                    ///< HID 版本号 / HID class specification release
+    uint8_t bCountryCode;               ///< 国家码 / Country code
     uint8_t bNumDescriptors;  ///< 后续描述符数量 / Number of subordinate descriptors
     HIDDescriptorType
-        bReportDescriptorType;  ///< 报告描述符类型 / Report descriptor type (0x22)
+        bReportDescriptorType;         ///< 报告描述符类型 / Report descriptor type (0x22)
     uint16_t wReportDescriptorLength;  ///< 报告描述符长度 / Report descriptor length
   };
 
@@ -780,7 +780,7 @@ class HID : public DeviceClass
   const char* interface_string_ = nullptr;  ///< 接口字符串 / Interface string
 
   Protocol protocol_ = Protocol::REPORT;  ///< 当前协议类型 / Current protocol
-  uint8_t idle_rate_ = 0;  ///< 当前空闲率/ Current idle rate (unit 4ms)
+  uint8_t idle_rate_ = 0;                 ///< 当前空闲率/ Current idle rate (unit 4ms)
   uint8_t last_output_report_id_ =
       0;  ///< 最近的 Output Report ID / Last Output Report ID
 

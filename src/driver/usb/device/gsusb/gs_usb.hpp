@@ -923,7 +923,7 @@ class GsUsbClass : public DeviceClass
 
   LibXR::Database* database_ = nullptr;  ///< 数据库存储（可选，用于 USER_ID） / Database
                                          ///< storage (optional, used by USER_ID)
-  uint32_t user_id_ram_ = 0;  ///< USER_ID 的 RAM 备份 / USER_ID RAM backup
+  uint32_t user_id_ram_ = 0;             ///< USER_ID 的 RAM 备份 / USER_ID RAM backup
 
   LibXR::Callback<LibXR::ConstRawData&> on_data_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnDataOutCompleteStatic,

@@ -278,14 +278,16 @@ void TestGeometry()
   f.in.Close(false);
   // A packet size that is illegal at the current speed is ARG_ERR: high-speed bulk is 512
   // only.
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) ==
+              ErrorCode::ARG_ERR);
   f.in.Close(false);
   f.pool.SetSpeed(Speed::FULL);
   // The packet size is never chosen for the caller: 0 is invalid.
   TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK}, false) == ErrorCode::ARG_ERR);
   f.in.Close(false);
   // Direction must match the registered direction.
-  TEST_ASSERT(f.in.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
+  TEST_ASSERT(f.in.Configure({Direction::OUT, Type::BULK, 64}, false) ==
+              ErrorCode::ARG_ERR);
   f.in.Close(false);
   // The query names the largest legal size the slot and the backend hold.
   TEST_ASSERT(f.in.LargestPacketSize(Type::BULK) == 64);
@@ -300,7 +302,8 @@ void TestGeometry()
   TEST_ASSERT(f.in.LargestPacketSize(Type::BULK) == 32 &&
               f.in.LargestPacketSize(Type::INTERRUPT) == 40);
   f.in.limit = 32;
-  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) == ErrorCode::ARG_ERR);
+  TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 64}, false) ==
+              ErrorCode::ARG_ERR);
   f.in.Close(false);
   TEST_ASSERT(f.in.Configure({Direction::IN, Type::BULK, 32}, false) == ErrorCode::OK);
   TEST_ASSERT(f.in.MaxPacketSize() == 32 && f.in.GetGranted().slot_capacity == 64);

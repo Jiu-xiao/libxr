@@ -296,13 +296,13 @@ class DfuRuntimeClass : public DfuInterfaceClassBase
   DescriptorBlock desc_block_ = {};            ///< 描述符缓存 / Descriptor cache
   StatusResponse status_response_ = {};        ///< GETSTATUS 缓冲区 / GETSTATUS buffer
   JumpCallback jump_to_bootloader_ = nullptr;  ///< 跳 boot 回调 / Boot jump callback
-  void* jump_ctx_ = nullptr;     ///< 跳转上下文 / Jump callback context
+  void* jump_ctx_ = nullptr;                   ///< 跳转上下文 / Jump callback context
   uint8_t state_response_ = 0u;  ///< GETSTATE 缓冲字节 / GETSTATE byte buffer
   bool detach_pending_ = false;  ///< 是否等待 detach 超时 / Waiting for detach timeout
   uint16_t default_detach_timeout_ms_ =
-      50u;                            ///< 默认 detach 超时 / Default detach timeout
-  uint16_t detach_timeout_ms_ = 50u;  ///< 当前 detach 超时 / Active detach timeout
-  uint32_t detach_deadline_ms_ = 0u;  ///< detach 截止时刻 / Detach deadline tick
+      50u;                               ///< 默认 detach 超时 / Default detach timeout
+  uint16_t detach_timeout_ms_ = 50u;     ///< 当前 detach 超时 / Active detach timeout
+  uint32_t detach_deadline_ms_ = 0u;     ///< detach 截止时刻 / Detach deadline tick
   DFUState state_ = DFUState::APP_IDLE;  ///< Runtime DFU 状态 / Runtime DFU state
 };
 

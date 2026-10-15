@@ -36,7 +36,8 @@ class STM32USBDevice : public LibXR::USB::EndpointPool, public STM32USBDeviceCor
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
-      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
+      const std::initializer_list<
+          const std::initializer_list<USB::ConfigDescriptorItem*> >
           CONFIGS,
       ConstRawData uid = {nullptr, 0}, USB::Speed speed = USB::Speed::FULL,
       USB::USBSpec spec = USB::USBSpec::USB_2_1)
@@ -227,7 +228,8 @@ class STM32USBDeviceDevFs : public STM32USBDevice
       USB::DeviceDescriptor::PacketSize0 packet_size, uint16_t vid, uint16_t pid,
       uint16_t bcd,
       const std::initializer_list<const USB::DescriptorStrings::LanguagePack*> LANG_LIST,
-      const std::initializer_list<const std::initializer_list<USB::ConfigDescriptorItem*>>
+      const std::initializer_list<
+          const std::initializer_list<USB::ConfigDescriptorItem*> >
           CONFIGS,
       ConstRawData uid = {nullptr, 0});
 

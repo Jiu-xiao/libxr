@@ -19,7 +19,8 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef* hpcd)
 extern "C" void __real_HAL_PCD_IRQHandler(PCD_HandleTypeDef* hpcd);
 extern "C" HAL_StatusTypeDef __real_HAL_PCD_Init(PCD_HandleTypeDef* hpcd);
 
-// The link also wraps HAL_PCD_Init for the OTG runtime; FSDEV still initializes through HAL.
+// The link also wraps HAL_PCD_Init for the OTG runtime; FSDEV still initializes through
+// HAL.
 extern "C" HAL_StatusTypeDef __wrap_HAL_PCD_Init(PCD_HandleTypeDef* hpcd)
 {
   return __real_HAL_PCD_Init(hpcd);

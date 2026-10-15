@@ -297,7 +297,7 @@ class UAC1MicrophoneQ : public DeviceClass
    */
   struct UAC1DescBlock
   {
-    IADDescriptor iad;  ///< 接口关联描述符 / Interface association descriptor
+    IADDescriptor iad;             ///< 接口关联描述符 / Interface association descriptor
     InterfaceDescriptor ac_intf;   ///< AC 接口 / AC interface
     CSACHeader ac_hdr;             ///< AC 头 / AC header
     ACInputTerminal it_mic;        ///< 输入端子 / Input terminal

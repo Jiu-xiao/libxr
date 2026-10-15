@@ -7,7 +7,8 @@
 
 namespace LibXR::USB
 {
-Endpoint::Endpoint(EPNumber number, Direction direction, RawData slots, uint8_t slot_count)
+Endpoint::Endpoint(EPNumber number, Direction direction, RawData slots,
+                   uint8_t slot_count)
     : number_(number), avail_direction_(direction), memory_(slots)
 {
   REQUIRE(slots.addr_ != nullptr && slots.size_ != 0U);
