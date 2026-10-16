@@ -94,8 +94,8 @@ class TestDap2 : public DapV2
 {
  public:
   using DapV2::BindEndpoints;
-  using DapV2::GetWinUsbMsOs20DescriptorSet;
   using DapV2::DapV2;
+  using DapV2::GetWinUsbMsOs20DescriptorSet;
   using DapV2::OnService;
   using DapV2::UnbindEndpoints;
 };
@@ -125,9 +125,24 @@ struct DapFixture : Fixture
 };
 
 /// Send one whole DAP command; a short packet ends the copy-mode Read.
+/// Run every command that has arrived, the way the application's DAP thread would.
+void Run(DapFixture& f)
+{
+  while (f.dap.Step(0) == ErrorCode::OK)
+  {
+  }
+}
+
+/// The host sends bytes; the commands they complete are then executed by Step().
+void Host(DapFixture& f, const std::vector<uint8_t>& bytes)
+{
+  f.out.HostSends(bytes);
+  Run(f);
+}
+
 void Send(DapFixture& f, std::initializer_list<uint8_t> bytes)
 {
-  f.out.HostSends(std::vector<uint8_t>(bytes));
+  Host(f, std::vector<uint8_t>(bytes));
 }
 
 void TestCommandRoundTrip()
@@ -198,35 +213,27 @@ void TestDelayedCommand()
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // A delay command does not busy-wait in the owner: no response is submitted while the
-  // delay is pending. The next command may already be received (the OUT receive is
-  // armed); it waits for the delay to finish.
-  Send(f, {DELAY, 0x10, 0x27});  // 10000 us
+  // A delay command is only received by the USB side; nothing is executed or answered
+  // until the DAP thread steps, and the next receive is already armed.
+  f.out.HostSends({DELAY, 0x10, 0x27});  // 10000 us
   TEST_ASSERT(f.in.starts.empty());
   TEST_ASSERT(f.out.active);
 
-  // The 1 ms Timer task rings the class service; once the deadline passed the response
-  // is queued and sent.
-  std::this_thread::sleep_for(std::chrono::milliseconds(15));
-  Timer::Refresh();
+  // Step() sleeps the delay out in the calling thread and then answers.
+  TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
   TEST_ASSERT(f.in.active && f.in.Last().length == 2);
   TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({DELAY, 0x00}));
-  TEST_ASSERT(f.out.active);
   f.in.Complete();
 
-  // A zero delay answers immediately.
+  // A zero delay answers at once.
   Send(f, {DELAY, 0x00, 0x00});
   TEST_ASSERT(f.in.active && f.in.Last().data == std::vector<uint8_t>({DELAY, 0x00}));
   f.in.Complete();
 }
 
-/// 批命令里包含延时命令：旧实现会挂起并带着"半个响应"返回，延时到期后 Timer
-/// 路径往已发出的缓冲里补写（主机收到多余响应、批响应缺字节）；现在延时就地
-/// 同步完成，批响应一次完整发出。
-/// A batch that contains a delay command: the old implementation suspended and
-/// returned a half-built response, and the Timer path later wrote into a buffer
-/// that had already been sent (an extra response on the host, a short batch
-/// response). The delay now finishes inline and the batch response goes out whole.
+/// 批命令里包含延时命令：延时在 Step 线程里睡完，批响应一次完整发出。
+/// A batch that contains a delay command: the delay is slept out in the Step thread and
+/// the batch response goes out whole.
 void TestBatchWithDelay()
 {
   FreshTimerList();
@@ -247,29 +254,18 @@ void TestBatchWithDelay()
       0xD0,
       0x07,  // 2000 us little-endian
   };
-  f.out.HostSends(queue);
+  Host(f, queue);
   TEST_ASSERT(
       f.in.Last().data ==
       std::vector<uint8_t>({static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 0x00}));
   f.in.Complete();
 
-  // EXECUTE_COMMANDS：批内的延时命令让批处理挂起——owner 不忙等，响应槽保留，
-  // 此刻还没有响应发出，OUT 也没有重挂。
-  // EXECUTE_COMMANDS: the delay command suspends the batch — the owner does not
-  // busy-wait, the response slot stays reserved, and nothing has been sent yet.
-  Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
-  // 只有前面 QUEUE_COMMANDS 那一次 IN 启动，没有新的响应发出。
-  // Only the earlier QUEUE_COMMANDS start exists; no new response went out.
-  TEST_ASSERT(f.in.starts.size() == 1u && !f.in.active);
-  TEST_ASSERT(f.out.active);
-
-  // 延时到期（Timer 路径续做）后，整条批响应一次完整到达：
+  // EXECUTE_COMMANDS：批内的延时命令让 Step 睡到到期，整条批响应一次完整到达：
   // [EXECUTE, INFO 响应, DELAY 响应]，没有第二条多余响应。
-  // Once the delay elapses (the Timer path resumes), the whole batch response
-  // arrives at once: [EXECUTE, INFO response, DELAY response], with no second stray
-  // response.
-  std::this_thread::sleep_for(std::chrono::milliseconds(15));
-  Timer::Refresh();
+  // EXECUTE_COMMANDS: the delay inside the batch makes Step sleep until it is due, and
+  // the whole batch response arrives at once: [EXECUTE, INFO response, DELAY response],
+  // with no second stray response.
+  Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
   TEST_ASSERT(f.in.active);
   const auto& batch = f.in.Last().data;
   // INFO 响应：[INFO, len=7, "XRobot" + NUL]，共 9 字节（批内 [1..9]）；DELAY
@@ -299,19 +295,19 @@ void TestNextCommandReceivedDuringDelay()
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  Send(f, {DELAY, 0x10, 0x27});  // 10000 us
-  TEST_ASSERT(f.in.starts.empty() && f.out.active);
+  f.out.HostSends({DELAY, 0x10, 0x27});  // 10000 us
+  std::thread dap_thread([&f]() { (void)f.dap.Step(1000); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
-  // The host sends the next command while the delay is pending: it is received but not
-  // executed yet, and no response is sent.
+  // The host sends the next command while the delay is pending: it is received (the
+  // USB side does not wait for the DAP thread) but not executed, and nothing answers.
   f.out.HostSends({INFO, PACKET_SIZE_ID});
-  TEST_ASSERT(f.in.starts.empty());
+  dap_thread.join();
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(15));
-  Timer::Refresh();
   // The delay response goes first; the received command answers after it.
   TEST_ASSERT(f.in.active && f.in.Last().data == std::vector<uint8_t>({DELAY, 0x00}));
   f.in.Complete();
+  Run(f);
   TEST_ASSERT(f.in.active && f.in.Last().data[0] == INFO);
   f.in.Complete();
   TEST_ASSERT(!f.in.active && f.out.active);
@@ -382,12 +378,12 @@ void TestCommandOnPacketBoundaryEndsWithoutZlp()
   TEST_ASSERT(queue.size() == 128);
 
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
-  f.out.HostSends(std::vector<uint8_t>(queue.begin(), queue.begin() + 64));
+  Host(f, std::vector<uint8_t>(queue.begin(), queue.begin() + 64));
   // The first packet does not complete the command: exactly the missing 64 bytes are
   // asked for, and nothing has been answered.
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   TEST_ASSERT(f.in.starts.empty());
-  f.out.HostSends(std::vector<uint8_t>(queue.begin() + 64, queue.end()));
+  Host(f, std::vector<uint8_t>(queue.begin() + 64, queue.end()));
   // The command is complete after the second whole packet: it answers.
   TEST_ASSERT(f.in.active);
   TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::QUEUE_COMMANDS));
@@ -405,19 +401,19 @@ void TestZeroPaddedTransferIsDropped()
   std::vector<uint8_t> first(64, 0);
   first[0] = INFO;
   first[1] = PACKET_SIZE_ID;
-  f.out.HostSends(first);  // the command is complete inside the first packet
+  Host(f, first);  // the command is complete inside the first packet
   TEST_ASSERT(f.in.active && f.in.starts.size() == 1);
   f.in.Complete();
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
 
   // The next whole packet is all zero: padding. The rest of the 1024 byte transfer is
   // asked for in one receive and dropped.
-  f.out.HostSends(std::vector<uint8_t>(64, 0));
+  Host(f, std::vector<uint8_t>(64, 0));
   // The remaining 896 bytes arrive as 14 packets of the one receive; no command starts.
   for (unsigned i = 0; i < 14; ++i)
   {
     TEST_ASSERT(f.out.active);
-    f.out.HostSends(std::vector<uint8_t>(64, 0));
+    Host(f, std::vector<uint8_t>(64, 0));
   }
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   TEST_ASSERT(f.in.starts.size() == 1);  // no response to padding
@@ -488,12 +484,12 @@ void TestPaddedRequestsFillTheWindowWithoutStalling()
     first[0] = INFO;
     first[1] = PACKET_SIZE_ID;
     TEST_ASSERT(f.out.active);
-    f.out.HostSends(first);
+    Host(f, first);
     // The padding that follows is taken whether or not the window is full.
     for (unsigned packet = 1; packet < 16; ++packet)
     {
       TEST_ASSERT(f.out.active);
-      f.out.HostSends(std::vector<uint8_t>(64, 0));
+      Host(f, std::vector<uint8_t>(64, 0));
     }
   }
   // Four commands outstanding: the window is full, one response is on the wire.

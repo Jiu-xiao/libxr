@@ -14,6 +14,7 @@
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
+#include "semaphore.hpp"
 #include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
@@ -91,23 +92,9 @@ class DapLinkV2Class : public DeviceClass
     // Init WinUSB descriptor templates (constant parts)
     InitWinUsbDescriptors();
 
-    // §10.3-a：延时命令由线程上下文的 Timer 路径续做；这个 1 ms 周期任务只按门铃
-    // （有被延时命令时请求类服务），自己不执行延时、不忙等。
-    // §10.3-a: delayed commands resume through the Timer path in thread context; this
-    // 1 ms periodic task only rings the class service while a deferred command is
-    // pending, it never executes the delay itself and never busy-waits.
-    delay_timer_ = Timer::CreateTask(
-        +[](DapLinkV2Class* self)
-        {
-          if (self->pending_action_.load(std::memory_order_acquire) !=
-              static_cast<uint8_t>(PendingAction::NONE))
-          {
-            self->RequestClassService(false);
-          }
-        },
-        this, 1U);
-    Timer::Start(delay_timer_);
-    Timer::Add(delay_timer_);
+    // 命令由应用线程循环调用 Step() 执行（见 Step）；类自己不起线程，也不起定时任务。
+    // Commands run when the application thread calls Step() in a loop (see Step); the
+    // class starts no thread and no timer task of its own.
   }
 
   /**
@@ -239,6 +226,54 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
+   * @brief 在调用线程里做一次 DAP 工作：等一条命令（或续做延时动作）并执行它。
+   *        Do one unit of DAP work in the calling thread: wait for a command (or carry a
+   *        delayed action on) and execute it.
+   *
+   * 应用起一个线程循环调用即可（例如 while (true) { dap.Step(); }）。SWD/JTAG 的操作只在
+   * 这个线程里发生，USB 回调只接收命令、发送响应，不执行命令。延时类命令（DAP_Delay、
+   * ResetTarget、带等待的 SWJ_Pins）在线程里睡到到期，不占用 USB 上下文。
+   * Run it from one application thread, for example while (true) { dap.Step(); }.
+   * SWD/JTAG work happens in this thread only; the USB callbacks receive commands and
+   * send responses but never execute them. Delay-type commands (DAP_Delay, ResetTarget,
+   * SWJ_Pins with a wait) sleep in this thread until they are due and do not occupy the
+   * USB context.
+   *
+   * @param timeout_ms 等待命令的最长时间；0 为不等待 / Longest wait for a command; 0 does
+   *                   not wait
+   * @return OK 做了一件事（执行一条命令或推进一个延时动作）；TIMEOUT 在期限内没有工作
+   *         / OK when something was done (a command executed or a delayed action
+   *         advanced); TIMEOUT when no work arrived in time
+   */
+  ErrorCode Step(uint32_t timeout_ms = UINT32_MAX)
+  {
+    step_epoch_ = epoch_.load(std::memory_order_acquire);
+    if (pending_action_.load(std::memory_order_acquire) !=
+        static_cast<uint8_t>(PendingAction::NONE))
+    {
+      RunPendingAction();
+      return ErrorCode::OK;
+    }
+    if (CommandCount() == 0u)
+    {
+      if (cmd_sem_.Wait(timeout_ms) != ErrorCode::OK)
+      {
+        return ErrorCode::TIMEOUT;
+      }
+    }
+    if (!inited_ || CommandCount() == 0u)
+    {
+      return ErrorCode::OK;  // woken by a bind/unbind, nothing to execute
+    }
+    ProcessReceivedCommand(false);
+    // 延时类命令在这里睡到到期并发布响应，一次 Step 就把一条命令做完。
+    // A delay-type command sleeps until it is due and publishes its response here, so
+    // one Step finishes one command.
+    RunPendingAction();
+    return ErrorCode::OK;
+  }
+
+  /**
    * @brief 请求中止正在执行的传输，可在另一个线程里调用。
    *        Request that the transfer in progress be aborted; may be called from another
    *        thread.
@@ -316,7 +351,7 @@ class DapLinkV2Class : public DeviceClass
     // Runtime defaults
     dap_state_ = {};
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
-    dap_state_.transfer_abort = false;
+    transfer_abort_.store(false, std::memory_order_release);
 
     swj_clock_hz_ = 1'000'000u;
     (void)swd_.SetClockHz(swj_clock_hz_);
@@ -336,8 +371,7 @@ class DapLinkV2Class : public DeviceClass
     ResetResponseQueue();
     ResetQueuedCommandState();
     ResetJtagChainState();
-    cmd_head_ = 0u;
-    cmd_count_ = 0u;
+    ResetCommandRing();
     ResetOutAssembly();
     command_read_active_ = false;
     response_write_active_ = false;
@@ -359,15 +393,16 @@ class DapLinkV2Class : public DeviceClass
     ResetQueuedCommandState();
 
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
-    dap_state_.transfer_abort = false;
+    // 正在执行的传输尽快结束；下一条传输开始时会清掉这个标志。
+    // End a transfer in progress soon; the next transfer clears the flag when it starts.
+    transfer_abort_.store(true, std::memory_order_release);
 
     // 借出的槽由解绑作废；在途拷贝传输的 ABORTED 完成在 Close 里同步送达，
     // 此时 inited_ 已为 false，回调入口直接忽略。
     // Lent slots are voided by the unbind; the ABORTED completions of the in-flight
     // copy transfers arrive synchronously inside Close, where the callback entry
     // ignores them because inited_ is already false.
-    cmd_head_ = 0u;
-    cmd_count_ = 0u;
+    ResetCommandRing();
     ResetOutAssembly();
     command_read_active_ = false;
     response_write_active_ = false;
@@ -502,32 +537,11 @@ class DapLinkV2Class : public DeviceClass
     {
       return;
     }
-    if (pending_action_.load(std::memory_order_acquire) !=
-        static_cast<uint8_t>(PendingAction::NONE))
-    {
-      ServicePendingAction(in_isr);
-      if (pending_action_.load(std::memory_order_acquire) !=
-          static_cast<uint8_t>(PendingAction::NONE))
-      {
-        return;
-      }
-      // 延时动作刚完成；同一次服务里继续处理已在等待的命令。
-      // The deferred action just completed; a command already received continues
-      // within the same service call.
-    }
-    if (cmd_count_ == 0u)
-    {
-      return;
-    }
-    ProcessReceivedCommand(in_isr);
-    // 还有已收到的命令就再请求一次服务，每次服务只执行一条，不长占 owner。
-    // More received commands: ask for another service call; one command per call keeps
-    // the owner from being held for long.
-    if (cmd_count_ != 0u && pending_action_.load(std::memory_order_acquire) ==
-                                static_cast<uint8_t>(PendingAction::NONE))
-    {
-      RequestClassService(in_isr);
-    }
+    // 服务上下文只做 USB 侧的事：把已完成的响应发出去，补挂接收。命令由 Step() 执行。
+    // The service context only does the USB side: send finished responses and re-arm the
+    // receive. Commands are executed by Step().
+    KickResponse(in_isr);
+    ArmOutTransferIfIdle(in_isr);
   }
 
  private:
@@ -739,7 +753,22 @@ class DapLinkV2Class : public DeviceClass
   uint8_t* AssemblyBuffer() { return command_buffers_[AssemblyIndex()]; }
   uint8_t AssemblyIndex() const
   {
-    return static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
+    return static_cast<uint8_t>(cmd_wr_.load(std::memory_order_relaxed) &
+                                (CMD_BUFFER_COUNT - 1u));
+  }
+
+  /// 已收到、还没执行完的命令数 / Commands received and not yet finished
+  uint8_t CommandCount() const
+  {
+    return static_cast<uint8_t>(cmd_wr_.load(std::memory_order_acquire) -
+                                cmd_rd_.load(std::memory_order_acquire));
+  }
+
+  void ResetCommandRing()
+  {
+    cmd_rd_.store(0u, std::memory_order_release);
+    cmd_wr_.store(0u, std::memory_order_release);
+    epoch_.fetch_add(1u, std::memory_order_acq_rel);
   }
 
   /// 探针接收：上一条命令以整包结束后，紧接着的那一包先收进探针缓冲，不占命令环，也
@@ -799,7 +828,7 @@ class DapLinkV2Class : public DeviceClass
 
   void DeliverStashedProbe(bool in_isr)
   {
-    if (!rx_probe_stashed_ || cmd_count_ >= CMD_BUFFER_COUNT || command_read_active_)
+    if (!rx_probe_stashed_ || CommandCount() >= CMD_BUFFER_COUNT || command_read_active_)
     {
       return;
     }
@@ -887,21 +916,21 @@ class DapLinkV2Class : public DeviceClass
     cmd_len_[index] = rx_off_;
     rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
     rx_off_ = 0u;
-    ++cmd_count_;
+    // 发布命令：缓冲和长度先写好，再推进写下标，Step() 线程以 acquire 读到。
+    // Publish the command: buffer and length are written first, then the write index
+    // advances, which the Step() thread reads with acquire.
+    cmd_wr_.store(static_cast<uint8_t>(cmd_wr_.load(std::memory_order_relaxed) + 1u),
+                  std::memory_order_release);
+    cmd_sem_.PostFromCallback(in_isr);
     if (padded_candidate)
     {
-      // 命令在整包处完整：主机可能还在补零，紧接着那一包不受响应窗口限制。探针接收要先
-      // 挂上，再请求服务——服务可能在同一个调用里执行命令并去挂普通接收。
+      // 命令在整包处完整：主机可能还在补零，紧接着那一包不受响应窗口限制。
       // The command is complete on a whole packet: the host may still be padding, so the
-      // packet that follows is not held back by the response window. The probe receive is
-      // armed first and the service requested after, since the service may run the
-      // command in the same call and arm an ordinary receive.
+      // packet that follows is not held back by the response window.
       StartProbeRead(mps, in_isr);
-      RequestClassService(in_isr);
     }
     else
     {
-      RequestClassService(in_isr);
       ArmOutTransferIfIdle(in_isr);
     }
   }
@@ -918,56 +947,92 @@ class DapLinkV2Class : public DeviceClass
     if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
     response_write_active_ = false;
     REQUIRE(!IsResponseQueueEmpty());
-    resp_q_head_ = NextRespQueueIndex(resp_q_head_);
-    --resp_q_count_;
+    resp_q_rd_.store(
+        static_cast<uint8_t>(resp_q_rd_.load(std::memory_order_relaxed) + 1u),
+        std::memory_order_release);
     KickResponse(in_isr);
     ArmOutTransferIfIdle(in_isr);
   }
 
-  /// 处理命令环里最早的一条完整命令；响应入队并尝试发送。延时命令把
-  /// 队尾响应槽保留下来（size 为 0），由 Timer 路径续做后入队。
-  /// Process the oldest whole command in the command ring; queue its response and try to
-  /// send it. A delayed command reserves the tail response slot instead (size 0) and
-  /// the Timer path queues it after the delay.
+  /// 延时命令：睡到到期再续做；每毫秒检查一次，解绑时提前结束。
+  /// A delayed command: sleep until it is due and continue it; checked every millisecond,
+  /// and ended early on an unbind.
+  void RunPendingAction()
+  {
+    while (pending_action_.load(std::memory_order_acquire) !=
+           static_cast<uint8_t>(PendingAction::NONE))
+    {
+      if (!inited_)
+      {
+        CancelPendingAction();
+        return;
+      }
+      ServicePendingAction(false);
+      if (pending_action_.load(std::memory_order_acquire) ==
+          static_cast<uint8_t>(PendingAction::NONE))
+      {
+        return;
+      }
+      LibXR::Thread::Sleep(1);
+    }
+  }
+
+  /// 处理命令环里最早的一条完整命令（Step 线程）；响应发布给 USB 侧去发送。延时命令把
+  /// 队尾响应槽保留下来（size 为 0），续做完成后才发布，命令在那之前留在环里。
+  /// Process the oldest whole command in the command ring (Step thread); the response is
+  /// published for the USB side to send. A delayed command reserves the tail response
+  /// slot (size 0) and is published once it is carried on to completion; the command
+  /// stays in the ring until then.
   void ProcessReceivedCommand(bool in_isr)
   {
     REQUIRE(!IsResponseQueueFull());
-    auto& response = resp_q_[resp_q_tail_];
+    const uint8_t index = static_cast<uint8_t>(cmd_rd_.load(std::memory_order_acquire) &
+                                               (CMD_BUFFER_COUNT - 1u));
+    auto& response =
+        resp_q_[resp_q_wr_.load(std::memory_order_relaxed) & (RESP_QUEUE_DEPTH - 1u)];
     uint16_t size = 0;
     const auto result =
-        ProcessOneCommand(in_isr, command_buffers_[cmd_head_], cmd_len_[cmd_head_],
+        ProcessOneCommand(in_isr, command_buffers_[index], cmd_len_[index],
                           response.payload, RESP_SLOT_SIZE, size);
     UNUSED(result);
-    // 命令缓冲在执行完后才出环；出环后它的名额由响应队列（或延时保留槽）接着计数。
-    // The command buffer leaves the ring only after the command ran; its place in the
-    // outstanding count passes to the response queue (or the deferred slot).
-    cmd_head_ = static_cast<uint8_t>((cmd_head_ + 1u) % CMD_BUFFER_COUNT);
-    --cmd_count_;
     if (size == 0u)
     {
       if (pending_action_.load(std::memory_order_acquire) ==
           static_cast<uint8_t>(PendingAction::NONE))
       {
-        // 没有响应的命令：不入响应队列，直接让出名额并继续接收。
-        // A command without a response: nothing joins the response queue; the place is
-        // given back and reception continues.
-        ArmOutTransferIfIdle(in_isr);
+        // 没有响应的命令：不发布响应，让出名额，USB 侧继续接收。
+        // A command without a response: nothing is published, its place is given back
+        // and the USB side goes on receiving.
+        RetireCommand();
+        RequestClassService(false);
         return;
       }
-      // §10.3-a：延时命令的响应未就绪；槽已保留，pending_action_ 已登记。
-      // §10.3-a: the delayed command's response is not ready; the slot is reserved
-      // and the pending action is registered.
+      // 延时命令的响应未就绪；槽已保留，pending_action_ 已登记，Step() 会续做。
+      // The delayed command's response is not ready; the slot is reserved and the
+      // pending action is registered, Step() carries it on.
       return;
     }
     REQUIRE(size <= RESP_SLOT_SIZE);
     CompleteResponse(size, in_isr);
   }
 
-  /// 把队尾响应槽投入队列并尝试发送；延时的响应在续做完成后也从这里入队。
-  /// Queue the tail response slot and try to send it; a deferred response joins the
-  /// queue here once its continuation completes.
+  /// 命令执行完：把它从环里取走 / The command is finished: take it out of the ring
+  void RetireCommand()
+  {
+    if (step_epoch_ != epoch_.load(std::memory_order_acquire))
+    {
+      return;  // 解绑/重新绑定期间，环已被重置 / the ring was reset by an unbind/bind
+    }
+    cmd_rd_.store(static_cast<uint8_t>(cmd_rd_.load(std::memory_order_relaxed) + 1u),
+                  std::memory_order_release);
+  }
+
+  /// 发布队尾响应槽，并让 USB 侧去发送；延时的响应在续做完成后也从这里发布。
+  /// Publish the tail response slot and let the USB side send it; a deferred response is
+  /// published here once its continuation completes.
   void CompleteResponse(uint16_t size, bool in_isr)
   {
+    UNUSED(in_isr);
     if (external_active_)
     {
       // ExecuteExternal 自己交付响应，不进 USB 响应队列。
@@ -975,12 +1040,16 @@ class DapLinkV2Class : public DeviceClass
       external_size_ = size;
       return;
     }
-    auto& response = resp_q_[resp_q_tail_];
-    response.len = size;
-    resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
-    ++resp_q_count_;
-    KickResponse(in_isr);
-    ArmOutTransferIfIdle(in_isr);
+    if (step_epoch_ != epoch_.load(std::memory_order_acquire))
+    {
+      return;  // 命令执行期间发生了解绑/重新绑定：这条响应作废 / unbound meanwhile:
+               // dropped
+    }
+    const uint8_t wr = resp_q_wr_.load(std::memory_order_relaxed);
+    resp_q_[wr & (RESP_QUEUE_DEPTH - 1u)].len = size;
+    resp_q_wr_.store(static_cast<uint8_t>(wr + 1u), std::memory_order_release);
+    RetireCommand();
+    RequestClassService(false);
   }
 
   /// 保留队尾响应槽并登记延时动作；deadline 从现在起算（ms）。
@@ -1101,14 +1170,19 @@ class DapLinkV2Class : public DeviceClass
 
   void ResetResponseQueue()
   {
-    resp_q_head_ = 0u;
-    resp_q_tail_ = 0u;
-    resp_q_count_ = 0u;
+    resp_q_rd_.store(0u, std::memory_order_release);
+    resp_q_wr_.store(0u, std::memory_order_release);
   }
 
-  bool IsResponseQueueEmpty() const { return resp_q_count_ == 0u; }
+  uint8_t ResponseCount() const
+  {
+    return static_cast<uint8_t>(resp_q_wr_.load(std::memory_order_acquire) -
+                                resp_q_rd_.load(std::memory_order_acquire));
+  }
 
-  bool IsResponseQueueFull() const { return resp_q_count_ >= RESP_QUEUE_DEPTH; }
+  bool IsResponseQueueEmpty() const { return ResponseCount() == 0u; }
+
+  bool IsResponseQueueFull() const { return ResponseCount() >= RESP_QUEUE_DEPTH; }
 
   void ResetQueuedCommandState()
   {
@@ -1498,17 +1572,13 @@ class DapLinkV2Class : public DeviceClass
 
   uint8_t OutstandingResponseCount() const
   {
-    // resp_q_count_ 已经包含正由拷贝 Write 发送的那条响应（它要到完成回调才出队），
-    // 所以这里只补上延时命令保留的响应槽，不能再单独加"发送中"的那一条。
-    // resp_q_count_ already includes the response currently handed to the copy Write (it
-    // leaves the queue only in the completion callback), so only the slot a deferred
-    // delayed command reserved has to be added; counting the sending one again would
-    // shrink the host-visible depth below the advertised packet count.
-    const uint8_t deferred = pending_action_.load(std::memory_order_acquire) ==
-                                     static_cast<uint8_t>(PendingAction::NONE)
-                                 ? 0U
-                                 : 1U;
-    return static_cast<uint8_t>(resp_q_count_ + deferred);
+    // 响应队列里的（含正由拷贝 Write 发送的那条，它要到完成回调才出队）加上命令环里
+    // 还没执行完的。延时命令执行完之前一直留在命令环里，所以不再单独计延时保留槽。
+    // Responses in the queue (including the one the copy Write is sending, which leaves
+    // only in the completion callback) plus the commands in the ring that are not
+    // finished. A delayed command stays in the ring until it is done, so the reserved
+    // slot is not counted separately.
+    return static_cast<uint8_t>(ResponseCount() + CommandCount());
   }
 
   void ArmOutTransferIfIdle(bool in_isr)
@@ -1522,15 +1592,13 @@ class DapLinkV2Class : public DeviceClass
       DeliverStashedProbe(in_isr);
       return;
     }
-    if (cmd_count_ >= CMD_BUFFER_COUNT || IsResponseQueueFull() ||
-        OutstandingResponseCount() + cmd_count_ >= MAX_OUTSTANDING_RESPONSES)
+    if (CommandCount() >= CMD_BUFFER_COUNT || IsResponseQueueFull() ||
+        OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
       return;
     // 拷贝模式 Read：一条命令一次接收，短包或收满（DAP 包长）即完成。
     // Copy-mode Read: one command per receive; a short packet or a full buffer (the
     // DAP packet size) ends it.
-    const uint8_t index =
-        static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
-    StartOutRead(command_buffers_[index], 0u, OutChunkSize(), in_isr);
+    StartOutRead(AssemblyBuffer(), 0u, OutChunkSize(), in_isr);
   }
 
   /// 命令的第一次接收只要一个端点包：整包到来后再按命令长度决定还要多少。
@@ -1642,7 +1710,8 @@ class DapLinkV2Class : public DeviceClass
   {
     if (!inited_ || !ep_data_in_ || response_write_active_ || IsResponseQueueEmpty())
       return;
-    const auto& response = resp_q_[resp_q_head_];
+    const auto& response =
+        resp_q_[resp_q_rd_.load(std::memory_order_relaxed) & (RESP_QUEUE_DEPTH - 1u)];
     REQUIRE(response.len != 0U);
     // 长度恰为包长整数倍时必须补一个零长包收尾，否则没有短包提示结束，按
     // PACKET_SIZE 读的主机会一直等到超时（USB 的分段结束规则）。
@@ -1989,7 +2058,7 @@ class DapLinkV2Class : public DeviceClass
       (void)swd_.SetClockHz(swj_clock_hz_);
 
       dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::SWD;
-      dap_state_.transfer_abort = false;
+      transfer_abort_.store(false, std::memory_order_release);
       ResetQueuedCommandState();
 
       resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::SWD);
@@ -2017,7 +2086,7 @@ class DapLinkV2Class : public DeviceClass
           (void)jtag_->ResetTap();
 
           dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::JTAG;
-          dap_state_.transfer_abort = false;
+          transfer_abort_.store(false, std::memory_order_release);
           ResetQueuedCommandState();
           ResetJtagChainState();
           resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Port::JTAG);
@@ -2052,7 +2121,7 @@ class DapLinkV2Class : public DeviceClass
       }
     }
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
-    dap_state_.transfer_abort = false;
+    transfer_abort_.store(false, std::memory_order_release);
     ResetQueuedCommandState();
 
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::DISCONNECT);
@@ -3011,7 +3080,10 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  void SetTransferAbortFlag(bool on) { dap_state_.transfer_abort = on; }
+  void SetTransferAbortFlag(bool on)
+  {
+    transfer_abort_.store(on, std::memory_order_release);
+  }
 
  private:
   // ============================================================================
@@ -3055,7 +3127,7 @@ class DapLinkV2Class : public DeviceClass
     // Clear a stale abort flag when a transfer starts (an abort that arrives while no
     // transfer runs must not abort the next one); an abort that arrives later sets it
     // during the execution.
-    dap_state_.transfer_abort = false;
+    transfer_abort_.store(false, std::memory_order_release);
 
     const uint8_t COUNT = req[2];
     uint16_t req_off = 3u;
@@ -3493,9 +3565,9 @@ class DapLinkV2Class : public DeviceClass
         }
       }
 
-      if (dap_state_.transfer_abort)
+      if (transfer_abort_.load(std::memory_order_acquire))
       {
-        dap_state_.transfer_abort = false;
+        transfer_abort_.store(false, std::memory_order_release);
         break;
       }
     }
@@ -3569,7 +3641,7 @@ class DapLinkV2Class : public DeviceClass
     // Clear a stale abort flag when a transfer starts (an abort that arrives while no
     // transfer runs must not abort the next one); an abort that arrives later sets it
     // during the execution.
-    dap_state_.transfer_abort = false;
+    transfer_abort_.store(false, std::memory_order_release);
 
     uint16_t count = 0u;
     count = LoadU16Le(&req[2]);
@@ -3862,7 +3934,7 @@ class DapLinkV2Class : public DeviceClass
     // Clear a stale abort flag when a transfer starts (an abort that arrives while no
     // transfer runs must not abort the next one); an abort that arrives later sets it
     // during the execution.
-    dap_state_.transfer_abort = false;
+    transfer_abort_.store(false, std::memory_order_release);
 
     const uint8_t TAP_INDEX = req[1];
     if (TAP_INDEX >= jtag_chain_.count)
@@ -3919,7 +3991,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.DpReadTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -3936,7 +4008,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.DpWriteTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -3953,7 +4025,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.ApReadTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -3970,7 +4042,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.ApWriteTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -4270,9 +4342,9 @@ class DapLinkV2Class : public DeviceClass
         response_value = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_OK;
       }
 
-      if (dap_state_.transfer_abort)
+      if (transfer_abort_.load(std::memory_order_acquire))
       {
-        dap_state_.transfer_abort = false;
+        transfer_abort_.store(false, std::memory_order_release);
         break;
       }
     }
@@ -4318,7 +4390,7 @@ class DapLinkV2Class : public DeviceClass
     // Clear a stale abort flag when a transfer starts (an abort that arrives while no
     // transfer runs must not abort the next one); an abort that arrives later sets it
     // during the execution.
-    dap_state_.transfer_abort = false;
+    transfer_abort_.store(false, std::memory_order_release);
 
     const uint8_t TAP_INDEX = req[1];
     if (TAP_INDEX >= jtag_chain_.count)
@@ -4373,7 +4445,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.DpReadTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -4390,7 +4462,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.DpWriteTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -4407,7 +4479,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.ApReadTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -4424,7 +4496,7 @@ class DapLinkV2Class : public DeviceClass
         const ErrorCode ec = dp.ApWriteTxn(addr2b, val, ack);
         idle_after_attempt();
         if (ack != LibXR::Debug::JtagProtocol::Ack::WAIT || retry == 0u ||
-            dap_state_.transfer_abort)
+            transfer_abort_.load(std::memory_order_acquire))
         {
           return ec;
         }
@@ -4691,9 +4763,6 @@ class DapLinkV2Class : public DeviceClass
   };
 
   ResponseSlot resp_q_[RESP_QUEUE_DEPTH] = {};
-  uint8_t resp_q_head_ = 0u;
-  uint8_t resp_q_tail_ = 0u;
-  uint8_t resp_q_count_ = 0u;
 
   uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
   uint16_t queued_request_length_ = 0u;
@@ -4721,8 +4790,26 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint8_t CMD_BUFFER_COUNT = 2u;
   uint8_t command_buffers_[CMD_BUFFER_COUNT][MAX_DAP_PACKET_SIZE] = {};
   uint16_t cmd_len_[CMD_BUFFER_COUNT] = {};  ///< 各缓冲里的命令长度 / Command lengths
-  uint8_t cmd_head_ = 0u;   ///< 最早一条待执行命令的缓冲 / Buffer of the oldest command
-  uint8_t cmd_count_ = 0u;  ///< 已收到、未执行完的命令数 / Received, not yet executed
+  /// 命令环的读写下标（自由计数，按 CMD_BUFFER_COUNT 取模）：写下标由 USB
+  /// 服务上下文推进， 读下标由 Step 线程推进。 Read and write indices of the command ring
+  /// (free-running, taken modulo CMD_BUFFER_COUNT): the USB service context advances the
+  /// write index, the Step thread the read index.
+  std::atomic<uint8_t> cmd_rd_{0u};
+  std::atomic<uint8_t> cmd_wr_{0u};
+  /// 响应队列的读写下标：Step 线程发布（写），USB 服务上下文发送并退役（读）。
+  /// Response-queue indices: the Step thread publishes (write), the USB service context
+  /// sends and retires (read).
+  std::atomic<uint8_t> resp_q_rd_{0u};
+  std::atomic<uint8_t> resp_q_wr_{0u};
+  /// 每收到一条命令发一次，Step() 在它上面等 / Posted per received command, Step() waits
+  /// on it
+  LibXR::Semaphore cmd_sem_{0};
+  /// 解绑/重新绑定时加一：Step 线程用它丢弃跨越重绑的响应 / Bumped on unbind/bind: the
+  /// Step thread drops a response that spans a rebind
+  std::atomic<uint32_t> epoch_{0u};
+  uint32_t step_epoch_ =
+      0u;  ///< Step 线程开始本次工作时的 epoch_ / epoch_ when this Step began
+  std::atomic<bool> transfer_abort_{false};  ///< DAP_TransferAbort 标志 / Abort flag
   uint16_t rx_off_ =
       0u;  ///< 正在接收的命令已收字节数 / Bytes of the command in reception
   /// 上一条命令以整包结束时的字节数，其后的整包全零视为补零 / Bytes of the previous
@@ -4756,7 +4843,6 @@ class DapLinkV2Class : public DeviceClass
   uint16_t deferred_resp_cap_ = 0u;   ///< 保留的响应容量 / Reserved response capacity
   uint8_t swj_pin_sel_ = 0u;          ///< PinWait 引脚选择 / PinWait pin select
   uint8_t swj_pin_expect_ = 0u;       ///< PinWait 期望电平 / PinWait expected level
-  Timer::TimerHandle delay_timer_ = nullptr;  ///< 1 ms 门铃任务 / 1 ms doorbell task
 
   LIBXR_PACKED_BEGIN
   /**
@@ -4814,8 +4900,8 @@ class DapLinkV2Class : public DeviceClass
   Endpoint* ep_data_in_ = nullptr;   ///< Bulk IN endpoint
   Endpoint* ep_data_out_ = nullptr;  ///< Bulk OUT endpoint
 
-  bool inited_ = false;        ///< Initialized flag
-  uint8_t interface_num_ = 0;  ///< Interface number
+  std::atomic<bool> inited_{false};  ///< Initialized flag
+  uint8_t interface_num_ = 0;        ///< Interface number
 
   LIBXR_PACKED_BEGIN
   /**
