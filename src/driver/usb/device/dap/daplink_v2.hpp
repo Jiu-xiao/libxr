@@ -988,6 +988,89 @@ class DapLinkV2Class : public DeviceClass
    * @return true execute success
    * @return false execute failure
    */
+  /**
+   * @brief 就地完成被延时的命令（仅用于批执行）/ Finish a deferred command inline
+   *        (batched execution only)
+   *
+   * 批处理里的延时命令不能挂起：挂起会让 EXECUTE_COMMANDS 带着"半个响应"返回，
+   * 延时到期后 Timer 路径再往已经发出去的响应缓冲里补写，主机收到多余响应、
+   * 批响应缺字节。批内的延时通常很短，就地等完再继续下一条。
+   * A deferred command inside a batch cannot be suspended: suspending lets
+   * EXECUTE_COMMANDS return with a half-built response, and when the delay
+   * elapses the Timer path writes into a buffer that was already sent, so the
+   * host gets an extra response and the batch response is short. Delays inside a
+   * batch are short, so finish it here and carry on with the next command.
+   */
+  bool RunDeferredInline(uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
+  {
+    out_len = 0u;
+    if (resp == nullptr || resp_cap < 2u)
+    {
+      CancelPendingAction();
+      return false;
+    }
+
+    for (uint32_t stage = 0u; stage < 4u; ++stage)
+    {
+      const auto action =
+          static_cast<PendingAction>(pending_action_.load(std::memory_order_acquire));
+      if (action == PendingAction::NONE) break;
+
+      uint32_t poll = 0u;
+      while (static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
+                                  action_deadline_ms_) < 0)
+      {
+        // 批内延时很短；设上限避免异常时钟下卡死。
+        // Delays inside a batch are short; cap the spin so a broken clock cannot
+        // hang the device.
+        if (++poll > 1000000u) break;
+      }
+
+      if (action == PendingAction::RESET_LOW)
+      {
+        DriveReset(true);
+        BeginDeferredAction(PendingAction::RESET_HIGH, 1u, resp, resp_cap);
+        continue;
+      }
+      if (action == PendingAction::SWJ_PINS)
+      {
+        const uint8_t pin_in = ReadSwjPins();
+        const bool matched =
+            swj_pin_sel_ != 0u && (pin_in & swj_pin_sel_) == swj_pin_expect_;
+        const bool expired =
+            static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
+                                 action_deadline_ms_) >= 0;
+        if (!matched && !expired) continue;
+        resp[1] = pin_in;
+        out_len = 2u;
+        CancelPendingAction();
+        return true;
+      }
+      if (action == PendingAction::RESET_HIGH)
+      {
+        if (resp_cap < 3u)
+        {
+          CancelPendingAction();
+          return false;
+        }
+        resp[1] = DAP_OK;
+        resp[2] = 1u;
+        out_len = 3u;
+        CancelPendingAction();
+        return true;
+      }
+
+      // DELAY
+      resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
+      out_len = 2u;
+      CancelPendingAction();
+      return true;
+    }
+
+    CancelPendingAction();
+    return false;
+  }
+
   bool TryExecuteQueuedCommandStream(bool in_isr, uint8_t* resp, uint16_t resp_cap,
                                      uint16_t& out_len)
   {
@@ -1033,6 +1116,28 @@ class DapLinkV2Class : public DeviceClass
           in_isr, &queued_request_buffer_[req_off], cmd_len, &resp[resp_off],
           static_cast<uint16_t>(resp_cap - resp_off), cmd_out);
       UNUSED(ans);
+
+      // 命令挂起了（含延时的 DAP_Delay / ResetTarget / SWJ_Pins）：就地完成，
+      // 不能让批处理带着半个响应返回。
+      // The command suspended itself (DAP_Delay / ResetTarget / SWJ_Pins with a
+      // wait): finish it here so the batch cannot return a half-built response.
+      if (pending_action_.load(std::memory_order_acquire) !=
+          static_cast<uint8_t>(PendingAction::NONE))
+      {
+        if (!RunDeferredInline(&resp[resp_off],
+                               static_cast<uint16_t>(resp_cap - resp_off), cmd_out))
+        {
+          return false;
+        }
+      }
+
+      // 每条命令至少要有 [cmd, status] 两个字节；0 字节会破坏响应流对齐。
+      // Every command answers with at least [cmd, status]; zero bytes would
+      // desynchronise the response stream.
+      if (cmd_out == 0u)
+      {
+        return false;
+      }
 
       if (static_cast<uint32_t>(resp_off) + static_cast<uint32_t>(cmd_out) >
           static_cast<uint32_t>(resp_cap))
@@ -1092,7 +1197,15 @@ class DapLinkV2Class : public DeviceClass
       return;
     const auto& response = resp_q_[resp_q_head_];
     REQUIRE(response.len != 0U);
-    if (ep_data_in_->Write({response.payload, response.len}, false, in_isr) ==
+    // 长度恰为包长整数倍时必须补一个零长包收尾，否则没有短包提示结束，按
+    // PACKET_SIZE 读的主机会一直等到超时（USB 的分段结束规则）。
+    // A response whose length is an exact multiple of the packet size needs a
+    // zero-length packet to terminate it: without the short packet the host has
+    // no end-of-transfer hint and a PACKET_SIZE-sized read times out (the USB
+    // end-of-transfer rule).
+    const size_t mps = ep_data_in_->MaxPacketSize();
+    const bool need_zlp = (mps != 0U) && (response.len % mps == 0U);
+    if (ep_data_in_->Write({response.payload, response.len}, need_zlp, in_isr) ==
         ErrorCode::OK)
     {
       response_write_active_ = true;
