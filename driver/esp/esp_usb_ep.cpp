@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cstring>
 
-#include "esp_heap_caps.h"
 #include "esp_usb.hpp"
 #include "esp_usb_dev.hpp"
 
@@ -50,9 +49,15 @@ ErrorCode ESP32USBEndpoint::ConfigureHardware(const Config& cfg, Granted& /*gran
   ASSERT(packet > 0U);
 
   auto buffer = SlotMemory();
-  if (device_.DmaEnabled() && (buffer.size_ > 0U) && !EnsureDmaShadow(buffer.size_))
+  // 槽内存就是 DMA 目标，没有备用缓冲：槽不满足 DMA 对齐/可达性时拒绝配置。
+  // The slot memory is the DMA target and there is no fallback buffer: refuse the
+  // configuration when a slot does not satisfy DMA alignment and reachability.
+  if (device_.DmaEnabled() && (buffer.size_ > 0U) &&
+      !(cfg.direction == Direction::IN
+            ? ESPUSBDetail::CanUseDirectInDmaBuffer(buffer.addr_, buffer.size_)
+            : ESPUSBDetail::CanUseDirectOutDmaBuffer(buffer.addr_, buffer.size_)))
   {
-    return ErrorCode::NO_MEM;
+    return ErrorCode::NO_BUFF;
   }
 
   if (IsPlanning())
@@ -663,84 +668,27 @@ void ESP32USBEndpoint::ResetTransferState()
   transfer_request_size_ = 0U;
   transfer_actual_size_ = 0U;
   transfer_queued_size_ = 0U;
-  transfer_uses_shadow_ = false;
   dma_rx_status_bytes_ = 0U;
   dma_rx_status_seen_ = false;
-}
-
-bool ESP32USBEndpoint::EnsureDmaShadow(size_t size)
-{
-  const size_t need = ESPUSBDetail::AlignUp(size, ESPUSBDetail::USB_DMA_ALIGNMENT);
-  if (need == 0U)
-  {
-    return true;
-  }
-
-  if ((dma_shadow_buffer_ != nullptr) && (dma_shadow_size_ >= need))
-  {
-    return true;
-  }
-
-  void* new_buffer = heap_caps_aligned_alloc(ESPUSBDetail::USB_DMA_ALIGNMENT, need,
-                                             ESPUSBDetail::DMA_MEMORY_CAPS);
-  if (new_buffer == nullptr)
-  {
-    return false;
-  }
-
-  if (dma_shadow_buffer_ != nullptr)
-  {
-    heap_caps_free(dma_shadow_buffer_);
-  }
-
-  dma_shadow_buffer_ = static_cast<uint8_t*>(new_buffer);
-  dma_shadow_size_ = need;
-  return true;
 }
 
 bool ESP32USBEndpoint::PrepareTransferBuffer(size_t size)
 {
   transfer_hw_buffer_ = transfer_buffer_;
-  transfer_uses_shadow_ = false;
 
   if (!device_.DmaEnabled() || (size == 0U))
   {
     return true;
   }
 
+  // 槽在 ConfigureHardware 里已验证满足 DMA 要求，这里只做 IN 方向的 cache 回写。
+  // The slot was verified for DMA in ConfigureHardware; only the IN-direction cache
+  // write-back is left to do here.
   if (GetDirection() == Direction::IN)
   {
-    if (ESPUSBDetail::CanUseDirectInDmaBuffer(transfer_buffer_, size))
-    {
-      return ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_, size, true, true);
-    }
+    return ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_, size, true, true);
   }
-  else
-  {
-    auto buffer = SlotMemory();
-    if (ESPUSBDetail::CanUseDirectOutDmaBuffer(buffer.addr_, buffer.size_))
-    {
-      return true;
-    }
-  }
-
-  if (dma_shadow_buffer_ == nullptr || dma_shadow_size_ < size) return false;
-
-  transfer_hw_buffer_ = dma_shadow_buffer_;
-  transfer_uses_shadow_ = true;
-
-  if (GetDirection() == Direction::IN)
-  {
-    DEV_ASSERT(transfer_buffer_ != nullptr);
-    std::memcpy(transfer_hw_buffer_, transfer_buffer_, size);
-    return ESPUSBDetail::CacheSyncDmaBuffer(
-        transfer_hw_buffer_, ESPUSBDetail::AlignUp(size, ESPUSBDetail::USB_DMA_ALIGNMENT),
-        true);
-  }
-
-  return ESPUSBDetail::CacheSyncDmaBuffer(
-      transfer_hw_buffer_, ESPUSBDetail::AlignUp(size, ESPUSBDetail::USB_DMA_ALIGNMENT),
-      false);
+  return true;
 }
 
 bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
@@ -754,30 +702,11 @@ bool ESP32USBEndpoint::FinishOutTransfer(size_t actual_size)
 
   DEV_ASSERT(transfer_hw_buffer_ != nullptr);
 
-  if (!transfer_uses_shadow_)
-  {
-    // 只同步 DMA 实际写入的范围：之前同步整块槽内存，最后一个槽会越过该槽的末尾
-    // （多槽端点里第二个槽之后就是别的内存），既浪费也可能踩到相邻数据。
-    // Sync only the range the DMA actually wrote: syncing the whole slot memory ran
-    // past the end of the last slot (on a two-slot endpoint the second slot is
-    // followed by unrelated memory), wasting work and potentially touching a
-    // neighbour.
-    const size_t sync =
-        ESPUSBDetail::AlignUp(actual_size, ESPUSBDetail::USB_DMA_ALIGNMENT);
-    return ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_, sync, false);
-  }
-
-  DEV_ASSERT(transfer_buffer_ != nullptr);
-
-  if (!ESPUSBDetail::CacheSyncDmaBuffer(
-          transfer_hw_buffer_,
-          ESPUSBDetail::AlignUp(actual_size, ESPUSBDetail::USB_DMA_ALIGNMENT), false))
-  {
-    return false;
-  }
-
-  std::memcpy(transfer_buffer_, transfer_hw_buffer_, actual_size);
-  return true;
+  // 只同步 DMA 实际写入的范围：同步整块槽内存会越过最后一个槽的末尾。
+  // Sync only the range the DMA actually wrote: syncing the whole slot memory runs past
+  // the end of the last slot.
+  const size_t sync = ESPUSBDetail::AlignUp(actual_size, ESPUSBDetail::USB_DMA_ALIGNMENT);
+  return ESPUSBDetail::CacheSyncDmaBuffer(transfer_hw_buffer_, sync, false);
 }
 
 size_t ESP32USBEndpoint::GetRemainingTransferSize() const

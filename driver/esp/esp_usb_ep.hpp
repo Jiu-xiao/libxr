@@ -67,7 +67,6 @@ class ESP32USBEndpoint : public USB::Endpoint
   void HandleRxData(size_t size);
   void ObserveDmaRxStatus(uint8_t pktsts, size_t size);
   void ResetTransferState();
-  bool EnsureDmaShadow(size_t size);
   bool PrepareTransferBuffer(size_t size);
   bool FinishOutTransfer(size_t actual_size);
   size_t GetRemainingTransferSize() const;
@@ -79,8 +78,6 @@ class ESP32USBEndpoint : public USB::Endpoint
   ESP32USBDevice& device_;
   bool fifo_allocated_ = false;
   uint16_t fifo_words_ = 0U;
-  uint8_t* dma_shadow_buffer_ = nullptr;
-  size_t dma_shadow_size_ = 0U;
   uint8_t* transfer_buffer_ = nullptr;
   uint8_t* transfer_hw_buffer_ = nullptr;
   size_t transfer_request_size_ = 0U;
@@ -93,7 +90,6 @@ class ESP32USBEndpoint : public USB::Endpoint
       {};  ///< 在途请求由后端自持 / In-flight tracked by the backend
   size_t transfer_actual_size_ = 0U;
   size_t transfer_queued_size_ = 0U;
-  bool transfer_uses_shadow_ = false;
   size_t dma_rx_status_bytes_ = 0U;
   bool dma_rx_status_seen_ = false;
   Ep0OutPhase ep0_out_phase_ = Ep0OutPhase::SETUP;
