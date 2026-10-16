@@ -90,6 +90,12 @@ ErrorCode ESP32USBEndpoint::ConfigureHardware(const Config& cfg, Granted& /*gran
 
 void ESP32USBEndpoint::CloseHardware(bool /*in_isr*/)
 {
+  // 核心保证先停止、确认后才关闭，所以到这里端点已经是禁用的；这里只收掉中断掩码，
+  // 万一硬件仍是使能，发出禁用请求但不等待（等待由停止状态机和 SOF 超时负责）。
+  // The core stops an endpoint and waits for the confirmation before closing it, so the
+  // endpoint is already disabled here; only the interrupt masks are dropped. If the
+  // hardware is still enabled, a disable request goes out without waiting (waiting
+  // belongs to the stop state machine and the SOF timeout).
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
 
@@ -99,7 +105,8 @@ void ESP32USBEndpoint::CloseHardware(bool /*in_isr*/)
     {
       if (dev->diepctl0_reg.epena)
       {
-        ESPUSBDetail::DisableInEndpointAndWait(dev);
+        dev->diepctl0_reg.snak = 1;
+        dev->diepctl0_reg.epdis = 1;
       }
     }
     else
@@ -107,7 +114,8 @@ void ESP32USBEndpoint::CloseHardware(bool /*in_isr*/)
       dev->diepempmsk_reg.val &= ~(1UL << ep_num);
       if (dev->in_eps[ep_num - 1U].diepctl_reg.epena)
       {
-        ESPUSBDetail::DisableInEndpointAndWait(dev, ep_num);
+        dev->in_eps[ep_num - 1U].diepctl_reg.snak = 1;
+        dev->in_eps[ep_num - 1U].diepctl_reg.epdis = 1;
       }
     }
     dev->daintmsk_reg.val &= ~(1UL << ep_num);
@@ -116,11 +124,11 @@ void ESP32USBEndpoint::CloseHardware(bool /*in_isr*/)
   {
     if (ep_num == 0U)
     {
-      ESPUSBDetail::DisableOutEndpointAndWait(dev->doepctl0_reg);
+      ESPUSBDetail::RequestOutDisable(dev->doepctl0_reg, false);
     }
     else
     {
-      ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[ep_num - 1U].doepctl_reg);
+      ESPUSBDetail::RequestOutDisable(dev->out_eps[ep_num - 1U].doepctl_reg, true);
     }
     dev->daintmsk_reg.val &= ~(1UL << (16U + ep_num));
   }
@@ -361,6 +369,21 @@ void ESP32USBEndpoint::AdvanceStop(bool in_isr)
     transfer_active_ = false;
     OnHardwareStopped(in_isr);
   }
+}
+
+void ESP32USBEndpoint::ConfirmStopAfterReset(bool in_isr)
+{
+  // 复位清掉了端点中断掩码，等待中的停止不会再有 EPDISD 中断来推进；复位已经确认
+  // 端点被禁用，这里直接完成它。
+  // The reset wipes the endpoint interrupt masks, so a waiting stop would never get its
+  // EPDISD interrupt; the reset has confirmed the endpoint disabled, so finish it here.
+  if (stop_phase_ == StopPhase::NONE)
+  {
+    return;
+  }
+  stop_phase_ = StopPhase::NONE;
+  transfer_active_ = false;
+  OnHardwareStopped(in_isr);
 }
 
 void ESP32USBEndpoint::ForceStop(bool in_isr)

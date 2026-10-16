@@ -61,6 +61,9 @@ class ESP32USBEndpoint : public USB::Endpoint
   };
 
   void ResetHardwareState();
+  /// 总线复位里硬件已被禁用：确认还在等待的停止 / The hardware is disabled by a bus
+  /// reset: confirm a stop that is still waiting
+  void ConfirmStopAfterReset(bool in_isr);
   void HandleInInterrupt(bool in_isr);
   void FinishPendingEp0InStatus(bool in_isr);
   void HandleOutInterrupt(bool in_isr);

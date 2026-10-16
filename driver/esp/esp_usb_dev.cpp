@@ -240,8 +240,13 @@ bool ESP32USBDevice::EnsureInterruptReady()
     return true;
   }
 
-  if (esp_intr_alloc(ETS_USB_INTR_SOURCE, ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_INTRDISABLED,
-                     IsrEntry, this, &runtime_.intr_handle) != ESP_OK)
+  // 不带 ESP_INTR_FLAG_IRAM：处理链会进入核心和类代码（在 flash 里），flash 缓存被禁用
+  // 期间（写 flash）中断只是被推迟，而不是在缓存关闭时去取 flash 里的指令而崩溃。
+  // Without ESP_INTR_FLAG_IRAM: the handler chain reaches the core and class code (in
+  // flash), so while the flash cache is disabled (flash writes) the interrupt is only
+  // deferred instead of fetching flash instructions with the cache off and crashing.
+  if (esp_intr_alloc(ETS_USB_INTR_SOURCE, ESP_INTR_FLAG_INTRDISABLED, IsrEntry, this,
+                     &runtime_.intr_handle) != ESP_OK)
   {
     runtime_.intr_handle = nullptr;
     return false;
@@ -575,6 +580,18 @@ void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
 
 void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
+  // 中断也持有硬件守卫：任务侧的 HardwareScope 在另一个核上时只靠本核关中断挡不住
+  // 中断，两边会交错访问寄存器。守卫可重入，中断里的回调再进 HardwareScope 没问题。
+  // The interrupt holds the hardware guard too: when a task-side HardwareScope runs on
+  // the other core, masking interrupts on its own core does not keep this interrupt out,
+  // and both sides would interleave register accesses. The guard is re-entrant, so a
+  // callback that enters a HardwareScope inside the interrupt is fine.
+  struct IsrGuard
+  {
+    portMUX_TYPE* mux;
+    explicit IsrGuard(portMUX_TYPE* m) : mux(m) { portENTER_CRITICAL_SAFE(mux); }
+    ~IsrGuard() { portEXIT_CRITICAL_SAFE(mux); }
+  } isr_guard(&hardware_mux_);
   USB::EndpointPool::InterruptScope interrupt_scope(*this);
   // 统一从 gintsts & gintmsk 取当前批次待处理中断，并在有限 guard 内排空 / Pull one
   // interrupt batch from gintsts & gintmsk and drain it under a bounded guard.
@@ -659,33 +676,54 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
   // finally rearms the setup receive window.
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
-  for (uint8_t i = 0; i < ENDPOINT_COUNT; ++i)
+  // 复位时硬件要求所有 OUT 端点 NAK；IN 端点请求禁用。这里只发请求，随后做一次有界
+  // 确认：硬件在复位期间没有总线事务，使能位应在几个周期内清掉（EP0 OUT 不允许写
+  // EPDIS，也不参与确认）。没清掉说明控制器状态不可信，走控制器复位升级。
+  // On reset the hardware requires every OUT endpoint to NAK, and IN endpoints get a
+  // disable request. Only the requests are made here, followed by one bounded check:
+  // there is no bus traffic during a reset, so the enable bits clear within a few
+  // cycles (EP0 OUT must not get EPDIS and does not take part in the check). If they
+  // do not clear the controller cannot be trusted and the controller-reset escalation
+  // takes over.
+  ESPUSBDetail::RequestOutDisable(dev->doepctl0_reg, false);
+  for (uint8_t i = 1; i < ENDPOINT_COUNT; ++i)
   {
-    if (i == 0U)
-    {
-      ESPUSBDetail::DisableOutEndpointAndWait(dev->doepctl0_reg);
-    }
-    else
-    {
-      ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[i - 1U].doepctl_reg);
-    }
+    ESPUSBDetail::RequestOutDisable(dev->out_eps[i - 1U].doepctl_reg, true);
   }
-
-  for (uint8_t i = 0; i < ENDPOINT_COUNT; ++i)
+  if (dev->diepctl0_reg.epena)
   {
-    if (i == 0U)
-    {
-      if (dev->diepctl0_reg.epena)
-      {
-        dev->diepctl0_reg.snak = 1;
-        dev->diepctl0_reg.epdis = 1;
-      }
-    }
-    else if (dev->in_eps[i - 1U].diepctl_reg.epena)
+    dev->diepctl0_reg.snak = 1;
+    dev->diepctl0_reg.epdis = 1;
+  }
+  for (uint8_t i = 1; i < ENDPOINT_COUNT; ++i)
+  {
+    if (dev->in_eps[i - 1U].diepctl_reg.epena)
     {
       dev->in_eps[i - 1U].diepctl_reg.snak = 1;
       dev->in_eps[i - 1U].diepctl_reg.epdis = 1;
     }
+  }
+  const bool settled = ESPUSBDetail::SpinUntil(
+      [dev]()
+      {
+        if (dev->diepctl0_reg.epena)
+        {
+          return false;
+        }
+        for (uint8_t i = 1; i < ENDPOINT_COUNT; ++i)
+        {
+          if (dev->in_eps[i - 1U].diepctl_reg.epena ||
+              dev->out_eps[i - 1U].doepctl_reg.epena)
+          {
+            return false;
+          }
+        }
+        return true;
+      });
+  if (!settled)
+  {
+    OnStopTimeout(in_isr);
+    return;
   }
 
   dev->daintmsk_reg.val = 0U;
@@ -707,6 +745,19 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
   dev->diepmsk_reg.timeoutmsk = 1;
 
   (void)FlushFifos();
+
+  for (size_t i = 0U; i < ENDPOINT_COUNT; ++i)
+  {
+    if (endpoint_map_.in[i] != nullptr)
+    {
+      static_cast<ESP32USBEndpoint*>(endpoint_map_.in[i])->ConfirmStopAfterReset(in_isr);
+    }
+    if (endpoint_map_.out[i] != nullptr)
+    {
+      static_cast<ESP32USBEndpoint*>(endpoint_map_.out[i])->ConfirmStopAfterReset(in_isr);
+    }
+  }
+  UpdateTick();
 
   dev->dcfg_reg.devaddr = 0U;
 
