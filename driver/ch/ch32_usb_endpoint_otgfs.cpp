@@ -380,8 +380,15 @@ ErrorCode CH32EndpointOtgFs::StartHardware(const HwRequest& request, bool /*in_i
   }
   else
   {
-    // EP0 OUT 不在 start 时翻转：状态阶段强制 DATA1，由完成路径置位。
-    *addr = USBFS_UEP_R_RES_ACK | (tog_ ? USBFS_UEP_R_TOG : 0);
+    // EP0 OUT：数据阶段按 tog_ 交替（SETUP 后为 DATA1，之后逐包翻转）；状态
+    // 阶段（长度 0）固定 DATA1。多包控制写数据阶段第二包是 DATA0，若每包都按
+    // DATA1 挂接收会全部被丢。
+    // EP0 OUT: the data stage alternates per tog_ (DATA1 after SETUP, flipping
+    // every packet); the status stage (length 0) is always DATA1. The second
+    // packet of a multi-packet control write is DATA0, so arming DATA1 for every
+    // packet would drop them all.
+    const bool data1 = (request.length == 0U) ? true : tog_;
+    *addr = USBFS_UEP_R_RES_ACK | (data1 ? USBFS_UEP_R_TOG : 0);
   }
   return ErrorCode::OK;
 }
@@ -530,9 +537,15 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     const bool TOG_OK = ((USBFSD->INT_ST & USBFS_U_TOG_OK) == USBFS_U_TOG_OK);  // NOLINT
     if (!TOG_OK)
     {
+      // 重试只补收没到的部分：单向模式可能已经 ACK 了前几包，整请求重来会丢掉
+      // 它们（shared/EP0/ISO 每包完成，remaining == requested，行为不变）。
+      // Retry only the missing part: in single-direction mode earlier packets may
+      // already be ACKed and a full restart would drop them (shared/EP0/ISO
+      // complete per packet, so remaining == requested and nothing changes).
       HwRequest retry{};
-      retry.slot = transfer_dma_;
-      retry.length = transfer_requested_;
+      const size_t remaining = transfer_requested_ - transfer_accumulated_;
+      retry.slot = LibXR::RawData(transfer_cursor_, remaining);
+      retry.length = remaining;
       retry.tag = transfer_tag_;
       (void)StartHardware(retry, true);
       return;
@@ -569,9 +582,12 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
   hw_completed_ = true;
   if (IS_EP0)
   {
-    // 每个 EP0 OUT 包完成即是一个阶段的收尾（FS 下 MPS0 ≤ 64 = 单包）：置
-    // DATA1，保证状态阶段 OUT 与 SETUP 后数据阶段首包为 DATA1（HS 已上板方案）。
-    tog_ = true;
+    // 数据阶段的包按 DATA1/DATA0 交替：完成一次翻转一次。状态阶段（长度 0）
+    // 由 StartHardware 强制 DATA1，不依赖这里的值。
+    // Data-stage packets alternate DATA1/DATA0: flip per completion. The status
+    // stage (length 0) is forced to DATA1 by StartHardware and does not depend
+    // on this value.
+    tog_ = !tog_;
   }
   OnHardwareComplete(true, transfer_tag_, size);
 }
