@@ -35,15 +35,20 @@ ESP32USBDevice::ESP32USBDevice(
                                                   bcd, lang_list, configs, uid),
       reset_wait_(ResetCheck, ResetDone, this)
 {
+  // 这两个回调会从 IRAM 中断里被调用（每个 SOF 都会走到）。Flash 操作期间 cache 关闭，
+  // 它们必须放在 IRAM，否则应用做 NVS / Wi-Fi 初始化时 USB 中断会触发 Cache error。
+  // Both callbacks are called from the IRAM interrupt (every SOF reaches them). The cache
+  // is off during flash operations, so they must live in IRAM; otherwise a USB interrupt
+  // during NVS / Wi-Fi initialisation raises a cache error.
   SetHardwareGuard(
       this,
-      [](void* context) -> uintptr_t
+      [](void* context) IRAM_ATTR -> uintptr_t
       {
         auto* self = static_cast<ESP32USBDevice*>(context);
         portENTER_CRITICAL_SAFE(&self->hardware_mux_);
         return 0;
       },
-      [](void* context, uintptr_t)
+      [](void* context, uintptr_t) IRAM_ATTR
       {
         auto* self = static_cast<ESP32USBDevice*>(context);
         portEXIT_CRITICAL_SAFE(&self->hardware_mux_);
@@ -53,10 +58,16 @@ ESP32USBDevice::ESP32USBDevice(
 
   auto cfg_it = ep_cfgs.begin();
 
+  // EP0 的 OUT 与 IN 各占缓冲的一半，各自能放下一个 EP0 包。
+  // EP0 OUT and IN each take half of the buffer, and each half holds one EP0 packet.
+  const size_t ep0_half = cfg_it->buffer.size_ / 2U;
+  REQUIRE(ep0_half >= static_cast<size_t>(packet_size) && ep0_half % 4U == 0U);
   auto* ep0_out = new ESP32USBEndpoint(*this, USB::Endpoint::EPNumber::EP0,
-                                       USB::Endpoint::Direction::OUT, cfg_it->buffer);
-  auto* ep0_in = new ESP32USBEndpoint(*this, USB::Endpoint::EPNumber::EP0,
-                                      USB::Endpoint::Direction::IN, cfg_it->buffer);
+                                       USB::Endpoint::Direction::OUT,
+                                       {cfg_it->buffer.addr_, ep0_half});
+  auto* ep0_in = new ESP32USBEndpoint(
+      *this, USB::Endpoint::EPNumber::EP0, USB::Endpoint::Direction::IN,
+      {static_cast<uint8_t*>(cfg_it->buffer.addr_) + ep0_half, ep0_half});
 
   SetEndpoint0(ep0_in, ep0_out);
   endpoint_map_.in[0] = ep0_in;
