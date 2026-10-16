@@ -13,6 +13,7 @@
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
+#include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
 #include "usb/core/desc_cfg.hpp"
@@ -184,6 +185,65 @@ class DapLinkV2Class : public DeviceClass
            command_read_active_;
   }
 
+  /**
+   * @brief 在调用线程里同步执行一条 DAP 命令，供 USB 以外的传输使用（例如 TCP）。
+   *        Execute one DAP command synchronously in the caller's thread, for transports
+   *        other than USB (for example TCP).
+   *
+   * 延时类命令（DAP_Delay、ResetTarget、带等待的 SWJ_Pins，以及批里的这些命令）在本
+   * 调用内等到完成才返回，所以返回时响应已完整。out_len 为 0 表示该命令没有响应。
+   * 本入口不检查、也不排他 USB：启用它之前由调用方负责停掉 USB，二者不能同时驱动同
+   * 一个类实例。
+   * Delay-type commands (DAP_Delay, ResetTarget, SWJ_Pins with a wait, and such
+   * commands inside a batch) are waited for inside this call, so the response is
+   * complete on return. out_len of 0 means the command has no response. This entry
+   * neither checks nor excludes USB: the caller stops USB before using it, and the two
+   * must not drive the same instance at the same time.
+   *
+   * @param req       请求缓冲 / Request buffer
+   * @param req_len   请求长度 / Request length
+   * @param resp      响应缓冲 / Response buffer
+   * @param resp_cap  响应缓冲容量 / Response buffer capacity
+   * @param out_len   响应长度 / Response length
+   * @return ErrorCode 命令处理结果 / Command processing result
+   */
+  ErrorCode ExecuteExternal(const uint8_t* req, uint16_t req_len, uint8_t* resp,
+                            uint16_t resp_cap, uint16_t& out_len)
+  {
+    external_active_ = true;
+    external_size_ = 0u;
+    uint16_t size = 0u;
+    const ErrorCode EC = ProcessOneCommand(false, req, req_len, resp, resp_cap, size);
+
+    // 命令挂起后，续做点把完成的响应交给 CompleteResponse，这里等它走完。
+    // A suspended command finishes through CompleteResponse; wait for that here.
+    while (pending_action_.load(std::memory_order_acquire) !=
+           static_cast<uint8_t>(PendingAction::NONE))
+    {
+      ServicePendingAction(false);
+      if (pending_action_.load(std::memory_order_acquire) ==
+          static_cast<uint8_t>(PendingAction::NONE))
+      {
+        break;
+      }
+      LibXR::Thread::Sleep(1);
+    }
+    if (size == 0u)
+    {
+      size = external_size_;
+    }
+    external_active_ = false;
+    out_len = size;
+    return EC;
+  }
+
+  /**
+   * @brief 请求中止正在执行的传输，可在另一个线程里调用。
+   *        Request that the transfer in progress be aborted; may be called from another
+   *        thread.
+   */
+  void RequestAbort() { SetTransferAbortFlag(true); }
+
  protected:
   /**
    * @brief Bind endpoint resources
@@ -275,8 +335,8 @@ class DapLinkV2Class : public DeviceClass
     ResetResponseQueue();
     ResetQueuedCommandState();
     ResetJtagChainState();
-    cmd_pending_ = false;
-    cmd_len_ = 0u;
+    cmd_head_ = 0u;
+    cmd_count_ = 0u;
     command_read_active_ = false;
     response_write_active_ = false;
     CancelPendingAction();
@@ -304,8 +364,8 @@ class DapLinkV2Class : public DeviceClass
     // Lent slots are voided by the unbind; the ABORTED completions of the in-flight
     // copy transfers arrive synchronously inside Close, where the callback entry
     // ignores them because inited_ is already false.
-    cmd_pending_ = false;
-    cmd_len_ = 0u;
+    cmd_head_ = 0u;
+    cmd_count_ = 0u;
     command_read_active_ = false;
     response_write_active_ = false;
     CancelPendingAction();
@@ -426,12 +486,19 @@ class DapLinkV2Class : public DeviceClass
       // The deferred action just completed; a command already received continues
       // within the same service call.
     }
-    if (!cmd_pending_)
+    if (cmd_count_ == 0u)
     {
       return;
     }
-    cmd_pending_ = false;
     ProcessReceivedCommand(in_isr);
+    // 还有已收到的命令就再请求一次服务，每次服务只执行一条，不长占 owner。
+    // More received commands: ask for another service call; one command per call keeps
+    // the owner from being held for long.
+    if (cmd_count_ != 0u && pending_action_.load(std::memory_order_acquire) ==
+                                static_cast<uint8_t>(PendingAction::NONE))
+    {
+      RequestClassService(in_isr);
+    }
   }
 
  private:
@@ -599,9 +666,9 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief OUT 完成回调：浅操作。一条命令已完整落进 command_buffer_，登记后
+   * @brief OUT 完成回调：浅操作。一条命令已完整落进命令环，登记后
    *        请求类服务执行；命令处理不在回调里做。
-   *        OUT completion: shallow. One whole command has landed in command_buffer_;
+   *        OUT completion: shallow. One whole command has landed in the command ring;
    *        record it and ask the class service to run it. Commands never execute
    *        inside the completion callback.
    */
@@ -619,9 +686,15 @@ class DapLinkV2Class : public DeviceClass
       ArmOutTransferIfIdle(in_isr);
       return;
     }
-    cmd_pending_ = true;
-    cmd_len_ = static_cast<uint16_t>(completion.actual);
+    // 刚读完的缓冲是环里 head+count 的位置；登记后立刻挂下一条接收，让下一条命令在
+    // 本条执行期间到达。
+    // The buffer just read is the ring position head+count; record it and arm the next
+    // receive at once so the next command arrives while this one executes.
+    cmd_len_[(cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT] =
+        static_cast<uint16_t>(completion.actual);
+    ++cmd_count_;
     RequestClassService(in_isr);
+    ArmOutTransferIfIdle(in_isr);
   }
 
   /**
@@ -642,9 +715,9 @@ class DapLinkV2Class : public DeviceClass
     ArmOutTransferIfIdle(in_isr);
   }
 
-  /// 处理 command_buffer_ 里的一条完整命令；响应入队并尝试发送。延时命令把
+  /// 处理命令环里最早的一条完整命令；响应入队并尝试发送。延时命令把
   /// 队尾响应槽保留下来（size 为 0），由 Timer 路径续做后入队。
-  /// Process one whole command from command_buffer_; queue its response and try to
+  /// Process the oldest whole command in the command ring; queue its response and try to
   /// send it. A delayed command reserves the tail response slot instead (size 0) and
   /// the Timer path queues it after the delay.
   void ProcessReceivedCommand(bool in_isr)
@@ -652,9 +725,15 @@ class DapLinkV2Class : public DeviceClass
     REQUIRE(!IsResponseQueueFull());
     auto& response = resp_q_[resp_q_tail_];
     uint16_t size = 0;
-    const auto result = ProcessOneCommand(in_isr, command_buffer_, cmd_len_,
-                                          response.payload, RESP_SLOT_SIZE, size);
+    const auto result =
+        ProcessOneCommand(in_isr, command_buffers_[cmd_head_], cmd_len_[cmd_head_],
+                          response.payload, RESP_SLOT_SIZE, size);
     UNUSED(result);
+    // 命令缓冲在执行完后才出环；出环后它的名额由响应队列（或延时保留槽）接着计数。
+    // The command buffer leaves the ring only after the command ran; its place in the
+    // outstanding count passes to the response queue (or the deferred slot).
+    cmd_head_ = static_cast<uint8_t>((cmd_head_ + 1u) % CMD_BUFFER_COUNT);
+    --cmd_count_;
     if (size == 0u)
     {
       // §10.3-a：延时命令的响应未就绪；槽已保留，pending_action_ 已登记。
@@ -673,6 +752,13 @@ class DapLinkV2Class : public DeviceClass
   /// queue here once its continuation completes.
   void CompleteResponse(uint16_t size, bool in_isr)
   {
+    if (external_active_)
+    {
+      // ExecuteExternal 自己交付响应，不进 USB 响应队列。
+      // ExecuteExternal delivers the response itself; it does not join the USB queue.
+      external_size_ = size;
+      return;
+    }
     auto& response = resp_q_[resp_q_tail_];
     response.len = size;
     resp_q_tail_ = NextRespQueueIndex(resp_q_tail_);
@@ -1212,12 +1298,15 @@ class DapLinkV2Class : public DeviceClass
   void ArmOutTransferIfIdle(bool in_isr)
   {
     if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_ ||
-        IsResponseQueueFull() || OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
+        cmd_count_ >= CMD_BUFFER_COUNT || IsResponseQueueFull() ||
+        OutstandingResponseCount() + cmd_count_ >= MAX_OUTSTANDING_RESPONSES)
       return;
     // 拷贝模式 Read：一条命令一次接收，短包或收满（DAP 包长）即完成。
     // Copy-mode Read: one command per receive; a short packet or a full buffer (the
     // DAP packet size) ends it.
-    if (ep_data_out_->Read({command_buffer_, GetDapPacketSize()}, in_isr) ==
+    const uint8_t index =
+        static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
+    if (ep_data_out_->Read({command_buffers_[index], GetDapPacketSize()}, in_isr) ==
         ErrorCode::OK)
     {
       command_read_active_ = true;
@@ -1240,7 +1329,15 @@ class DapLinkV2Class : public DeviceClass
     // no end-of-transfer hint and a PACKET_SIZE-sized read times out (the USB
     // end-of-transfer rule).
     const size_t mps = ep_data_in_->MaxPacketSize();
-    const bool need_zlp = (mps != 0U) && (response.len % mps == 0U);
+    // 响应恰好等于 DAP 包长时，主机的 DAP 包长缓冲读满即结束，不需要 ZLP；此时补 ZLP 会
+    // 留下一个主机不取的零长包，把响应队列的一个位置占住直到下一次读，深流水下会把
+    // 命令流堵死。
+    // A response exactly as long as the DAP packet needs no ZLP: the host's
+    // DAP-packet-sized read completes when the buffer is full. Appending one would leave
+    // a zero-length packet the host never takes, keeping a response-queue slot occupied
+    // until the next read, which stalls the command stream under a deep pipeline.
+    const bool need_zlp =
+        (mps != 0U) && (response.len % mps == 0U) && (response.len < GetDapPacketSize());
     if (ep_data_in_->Write({response.payload, response.len}, need_zlp, in_isr) ==
         ErrorCode::OK)
     {
@@ -4295,11 +4392,16 @@ class DapLinkV2Class : public DeviceClass
 
   /// 命令缓冲：拷贝模式 Read 的目标，一次收一条完整命令。
   /// Command buffer: the copy-mode Read target, one whole command at a time.
-  uint8_t command_buffer_[MAX_DAP_PACKET_SIZE] = {};
+  /// 命令缓冲环：一个在执行时另一个接收下一条命令，两者重叠。
+  /// Command buffer ring: one executes while the other receives the next command, so
+  /// the two overlap.
+  static constexpr uint8_t CMD_BUFFER_COUNT = 2u;
+  uint8_t command_buffers_[CMD_BUFFER_COUNT][MAX_DAP_PACKET_SIZE] = {};
+  uint16_t cmd_len_[CMD_BUFFER_COUNT] = {};  ///< 各缓冲里的命令长度 / Command lengths
+  uint8_t cmd_head_ = 0u;   ///< 最早一条待执行命令的缓冲 / Buffer of the oldest command
+  uint8_t cmd_count_ = 0u;  ///< 已收到、未执行完的命令数 / Received, not yet executed
   bool command_read_active_ = false;    ///< OUT 拷贝 Read 在途 / OUT copy Read in flight
   bool response_write_active_ = false;  ///< IN 拷贝 Write 在途 / IN copy Write in flight
-  bool cmd_pending_ = false;  ///< 已收到待处理命令 / A received command awaits service
-  uint16_t cmd_len_ = 0u;     ///< 已收命令长度 / Received command length
 
   // §10.3-a：延时命令状态。pending_action_ 由 owner 写、Timer 线程读（只读它来
   // 按门铃）；deadline 与响应 stash 在 store（release）之前写好，owner 续做时在
@@ -4309,6 +4411,10 @@ class DapLinkV2Class : public DeviceClass
   // are written before the store (release) and read back after the load (acquire)
   // when the owner resumes.
   std::atomic<uint8_t> pending_action_{static_cast<uint8_t>(PendingAction::NONE)};
+  bool external_active_ =
+      false;  ///< ExecuteExternal 正在执行 / ExecuteExternal in progress
+  uint16_t external_size_ =
+      0u;  ///< ExecuteExternal 收到的响应长度 / Response length it received
   uint32_t action_deadline_ms_ = 0u;  ///< 续做时刻（ms） / Resume deadline (ms)
   uint8_t* deferred_resp_ = nullptr;  ///< 保留的响应缓冲 / Reserved response buffer
   uint16_t deferred_resp_cap_ = 0u;   ///< 保留的响应容量 / Reserved response capacity

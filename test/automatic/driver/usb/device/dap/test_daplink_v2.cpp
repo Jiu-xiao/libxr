@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -196,11 +197,12 @@ void TestDelayedCommand()
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // A delay command does not busy-wait in the owner: no response is submitted and the
-  // OUT receive stays unarmed while the delay is pending.
+  // A delay command does not busy-wait in the owner: no response is submitted while the
+  // delay is pending. The next command may already be received (the OUT receive is
+  // armed); it waits for the delay to finish.
   Send(f, {DELAY, 0x10, 0x27});  // 10000 us
   TEST_ASSERT(f.in.starts.empty());
-  TEST_ASSERT(!f.out.active);
+  TEST_ASSERT(f.out.active);
 
   // The 1 ms Timer task rings the class service; once the deadline passed the response
   // is queued and sent.
@@ -258,7 +260,7 @@ void TestBatchWithDelay()
   // 只有前面 QUEUE_COMMANDS 那一次 IN 启动，没有新的响应发出。
   // Only the earlier QUEUE_COMMANDS start exists; no new response went out.
   TEST_ASSERT(f.in.starts.size() == 1u && !f.in.active);
-  TEST_ASSERT(!f.out.active);
+  TEST_ASSERT(f.out.active);
 
   // 延时到期（Timer 路径续做）后，整条批响应一次完整到达：
   // [EXECUTE, INFO 响应, DELAY 响应]，没有第二条多余响应。
@@ -287,6 +289,79 @@ void TestBatchWithDelay()
   TEST_ASSERT(f.out.active);
 }
 
+/// 下一条命令在上一条执行（这里是延时）期间就已收下，按序在它之后执行。
+/// The next command is received while the previous one executes (here: a delay) and runs
+/// after it, in order.
+void TestNextCommandReceivedDuringDelay()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  Send(f, {DELAY, 0x10, 0x27});  // 10000 us
+  TEST_ASSERT(f.in.starts.empty() && f.out.active);
+
+  // The host sends the next command while the delay is pending: it is received but not
+  // executed yet, and no response is sent.
+  f.out.HostSends({INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.starts.empty());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(15));
+  Timer::Refresh();
+  // The delay response goes first; the received command answers after it.
+  TEST_ASSERT(f.in.active && f.in.Last().data == std::vector<uint8_t>({DELAY, 0x00}));
+  f.in.Complete();
+  TEST_ASSERT(f.in.active && f.in.Last().data[0] == INFO);
+  f.in.Complete();
+  TEST_ASSERT(!f.in.active && f.out.active);
+}
+
+/// 响应恰好等于 DAP 包长时主机的包长缓冲读满即结束，不补零长包；补了会留下一个主机不取的
+/// 零长包，占住响应队列的一个位置。短于包长的端点包长整数倍响应仍要补零长包收尾。
+/// A response exactly as long as the DAP packet needs no ZLP (the host's packet-sized
+/// read ends when full); one would stay armed on the endpoint and keep a response-queue
+/// slot occupied. A response shorter than the DAP packet that is a multiple of the
+/// endpoint packet size still ends with a ZLP.
+void TestZlpOnlyBelowDapPacketSize()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // Complete every hardware request of one response; count bytes and zero-length tails.
+  auto drain = [&f](size_t& bytes, unsigned& tails)
+  {
+    bytes = 0;
+    tails = 0;
+    while (f.in.active)
+    {
+      if (f.in.Last().length == 0)
+        ++tails;
+      else
+        bytes += f.in.Last().length;
+      f.in.Complete();
+    }
+  };
+  size_t bytes;
+  unsigned tails;
+
+  // 64 bytes = one endpoint packet, shorter than the DAP packet: a ZLP follows.
+  const std::string vendor(61, 'V');  // [INFO, 62, 61 chars + NUL] = 64 bytes
+  DapV2::InfoStrings info{};
+  info.vendor = vendor.c_str();
+  f.dap.SetInfoStrings(info);
+  Send(f, {INFO, static_cast<uint8_t>(InfoId::VENDOR)});
+  drain(bytes, tails);
+  TEST_ASSERT(bytes == 64 && tails == 1);
+
+  // 1024 bytes = the DAP packet size (a 255-word block read): no ZLP.
+  Send(f, {CONNECT, static_cast<uint8_t>(Port::SWD)});
+  drain(bytes, tails);
+  Send(f, {static_cast<uint8_t>(CommandId::TRANSFER_BLOCK), 0x00, 0xFF, 0x00, 0x0F});
+  drain(bytes, tails);
+  TEST_ASSERT(bytes == 1024 && tails == 0);
+}
+
 void TestUnbind()
 {
   FreshTimerList();
@@ -313,6 +388,8 @@ int main()
   TestPipelineKeepsAdvertisedDepth();
   TestDelayedCommand();
   TestBatchWithDelay();
+  TestNextCommandReceivedDuringDelay();
+  TestZlpOnlyBelowDapPacketSize();
   TestUnbind();
   std::puts(
       "DAP v2 class: copy-mode Read/Write, response depth and deferred delay passed");
