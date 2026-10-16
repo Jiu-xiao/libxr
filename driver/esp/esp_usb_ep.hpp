@@ -30,6 +30,20 @@ class ESP32USBEndpoint : public USB::Endpoint
   StopResult StopHardware(bool in_isr) override;
   size_t ReapProgress(const HwRequest& request, bool& retired) override;
 
+  /// 停止时序的阶段（MODEL_USB §5.1/§5.3：由中断推进，不忙等）/ Stop sequence
+  /// phase (MODEL_USB §5.1/§5.3: advanced by interrupts, never busy-waiting)
+  enum class StopPhase : uint8_t
+  {
+    NONE = 0,
+    SNAK_WAIT,
+    DIS_WAIT,
+    EP0_SNAK_WAIT,
+  };
+
+  /// 由 IN/OUT 中断调用，推进停止时序 / Called from the IN/OUT interrupts to
+  /// advance the stop sequence
+  void AdvanceStop(bool in_isr);
+
   size_t MaxPacketSizeLimit(Type type) const override;
 
  private:
@@ -66,7 +80,15 @@ class ESP32USBEndpoint : public USB::Endpoint
   size_t transfer_request_size_ = 0U;
   uint32_t transfer_tag_ = 0U;
   bool transfer_active_ =
-      false;  ///< 在途请求由后端自持 / In-flight tracked by the backend
+      false;
+  StopPhase stop_phase_ = StopPhase::NONE;
+  uint32_t stop_deadline_ms_ = 0U;
+  /// 停止确认的最长等待，超时按已停止交付 / Longest wait for the stop
+  /// confirmation; on timeout the stop is reported as done
+  static constexpr uint32_t STOP_TIMEOUT_MS = 20U;
+  /// EP0 OUT 停止后的 DMA 落点，避免仍指向被借出的槽 / DMA target after an EP0
+  /// OUT stop so it no longer points at the lent slot
+  uint8_t ep0_scratch_[64] = {};  ///< 在途请求由后端自持 / In-flight tracked by the backend
   size_t transfer_actual_size_ = 0U;
   size_t transfer_queued_size_ = 0U;
   bool transfer_uses_shadow_ = false;

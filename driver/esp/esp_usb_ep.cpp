@@ -13,6 +13,14 @@
 namespace LibXR
 {
 
+namespace
+{
+// DWC2 端点中断位：INEPNE（bit 6）与 EPDISD（bit 1）/ DWC2 endpoint interrupt
+// bits: INEPNE (bit 6) and EPDISD (bit 1)
+constexpr uint32_t USB_DWC_EPDISD_MSK = 1UL << 1;
+constexpr uint32_t USB_DWC_INEPNE_MSK = 1UL << 6;
+}  // namespace
+
 ESP32USBEndpoint::ESP32USBEndpoint(ESP32USBDevice& device, EPNumber number,
                                    Direction direction, RawData buffer)
     : USB::Endpoint(number, direction, buffer), device_(device)
@@ -171,51 +179,199 @@ ErrorCode ESP32USBEndpoint::ClearStallHardware(bool /*in_isr*/)
   return ErrorCode::OK;
 }
 
-USB::Endpoint::StopResult ESP32USBEndpoint::StopHardware(bool /*in_isr*/)
+USB::Endpoint::StopResult ESP32USBEndpoint::StopHardware(bool in_isr)
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
+  const bool is_in = (GetDirection() == Direction::IN);
 
-  if (GetDirection() == Direction::IN)
+  if (!transfer_active_)
   {
+    // 没有在途请求：硬件侧无需停止，直接确认。
+    // Nothing in flight: nothing to stop on the hardware side, confirm at once.
+    stop_phase_ = StopPhase::NONE;
+    return StopResult::DONE;
+  }
+
+  // MODEL_USB §5.1/§5.3：停止是 SNAK -> 中断确认 INEPNE -> EPDIS -> 中断确认
+  // EPDISD -> 刷 FIFO，期间不能忙等（核心在临界区里调用本函数，主机不轮询时
+  // 忙等会卡到看门狗）。这里只发起第一步，其余由中断推进，完成后调
+  // OnHardwareStopped。
+  // MODEL_USB §5.1/§5.3: stopping is SNAK -> INEPNE interrupt -> EPDIS ->
+  // EPDISD interrupt -> flush FIFO, and it must not busy-wait (the core calls
+  // this inside a critical section, and a host that stops polling would hang the
+  // device until the watchdog fires). Start the first step here, let the
+  // interrupt advance the rest and call OnHardwareStopped when it is done.
+  stop_deadline_ms_ =
+      static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) + STOP_TIMEOUT_MS;
+
+  if (is_in)
+  {
+    bool enabled = false;
     if (ep_num == 0U)
     {
-      if (dev->diepctl0_reg.epena)
-      {
-        ESPUSBDetail::DisableInEndpointAndWait(dev);
-      }
+      enabled = dev->diepctl0_reg.epena != 0U;
     }
     else
     {
-      dev->diepempmsk_reg.val &= ~(1UL << ep_num);
-      if (dev->in_eps[ep_num - 1U].diepctl_reg.epena)
-      {
-        ESPUSBDetail::DisableInEndpointAndWait(dev, ep_num);
-      }
+      enabled = dev->in_eps[ep_num - 1U].diepctl_reg.epena != 0U;
     }
-  }
-  else
-  {
+    if (!enabled)
+    {
+      ESPUSBDetail::FlushTxFifo(dev, ep_num);
+      stop_phase_ = StopPhase::NONE;
+      transfer_active_ = false;
+      return StopResult::DONE;
+    }
+    // 打开 EPDISD 与 INEPNE 的中断，才能在中断里推进。
+    // Unmask EPDISD and INEPNE so the interrupt can drive the sequence.
+    dev->diepmsk_reg.epdisbldmsk = 1;
+    dev->diepmsk_reg.inepnakeffmsk = 1;
     if (ep_num == 0U)
     {
-      ESPUSBDetail::DisableOutEndpointAndWait(dev->doepctl0_reg);
+      dev->diepctl0_reg.snak = 1;
     }
     else
     {
-      ESPUSBDetail::DisableOutEndpointAndWait(dev->out_eps[ep_num - 1U].doepctl_reg);
+      dev->in_eps[ep_num - 1U].diepctl_reg.snak = 1;
     }
+    stop_phase_ = StopPhase::SNAK_WAIT;
+    return StopResult::PENDING;
   }
 
-  // 不清传输状态：ReapProgress 还要读硬件事实，核心交付 ABORTED 完成后统一复位。
-  // Keep the transfer state: ReapProgress still reads the hardware facts; the core
-  // resets it after the ABORTED completion is delivered.
-  transfer_active_ = false;
-  return StopResult::DONE;
+  if (ep_num == 0U)
+  {
+    dev->doepctl0_reg.snak = 1;
+    // 手册不允许对 EP0 写 EPDIS：只 SNAK，确认后把 DOEPDMA0 指向驱动自己的
+    // 暂存，被借出的槽才能安全回收。
+    // The manual forbids EPDIS on EP0: SNAK only, and once it is effective point
+    // DOEPDMA0 at the driver's own scratch so the lent slot can be reclaimed.
+    stop_phase_ = StopPhase::EP0_SNAK_WAIT;
+    return StopResult::PENDING;
+  }
+
+  if (dev->out_eps[ep_num - 1U].doepctl_reg.epena == 0U)
+  {
+    stop_phase_ = StopPhase::NONE;
+    transfer_active_ = false;
+    return StopResult::DONE;
+  }
+  dev->doepmsk_reg.epdisbldmsk = 1;
+  dev->out_eps[ep_num - 1U].doepctl_reg.epdis = 1;
+  stop_phase_ = StopPhase::DIS_WAIT;
+  return StopResult::PENDING;
+  UNUSED(in_isr);
 }
 
-size_t ESP32USBEndpoint::ReapProgress(const HwRequest& /*request*/, bool& retired)
+void ESP32USBEndpoint::AdvanceStop(bool in_isr)
 {
-  retired = true;
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  const uint8_t ep_num = EPNumberToInt8(GetNumber());
+  const bool is_in = (GetDirection() == Direction::IN);
+
+  if (stop_phase_ == StopPhase::NONE)
+  {
+    return;
+  }
+
+  // 停止超时：不再等硬件确认，按已停止交付（对应 OnStopTimeout 的职责）。
+  // Stop timed out: stop waiting for the hardware confirmation and report the
+  // stop as done (this is what OnStopTimeout is for).
+  if (static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
+                           stop_deadline_ms_) >= 0)
+  {
+    stop_phase_ = StopPhase::NONE;
+    transfer_active_ = false;
+    OnHardwareStopped(in_isr);
+    return;
+  }
+
+  if (is_in)
+  {
+    if (stop_phase_ == StopPhase::SNAK_WAIT)
+    {
+      const bool nak_effective = (ep_num == 0U)
+                                     ? (dev->diepint0_reg.inepnakeff != 0U)
+                                     : (dev->in_eps[ep_num - 1U].diepint_reg.inepnakeff != 0U);
+      if (!nak_effective) return;
+      if (ep_num == 0U)
+      {
+        dev->diepint0_reg.val = USB_DWC_INEPNE_MSK;
+        dev->diepctl0_reg.epdis = 1;
+      }
+      else
+      {
+        dev->in_eps[ep_num - 1U].diepint_reg.val = USB_DWC_INEPNE_MSK;
+        dev->in_eps[ep_num - 1U].diepctl_reg.epdis = 1;
+      }
+      stop_phase_ = StopPhase::DIS_WAIT;
+      return;
+    }
+    if (stop_phase_ == StopPhase::DIS_WAIT)
+    {
+      const bool disabled = (ep_num == 0U)
+                                ? (dev->diepint0_reg.epdisbld != 0U)
+                                : (dev->in_eps[ep_num - 1U].diepint_reg.epdisbld != 0U);
+      if (!disabled) return;
+      if (ep_num == 0U)
+      {
+        dev->diepint0_reg.val = USB_DWC_EPDISD_MSK;
+      }
+      else
+      {
+        dev->in_eps[ep_num - 1U].diepint_reg.val = USB_DWC_EPDISD_MSK;
+      }
+      ESPUSBDetail::FlushTxFifo(dev, ep_num);
+      stop_phase_ = StopPhase::NONE;
+      transfer_active_ = false;
+      OnHardwareStopped(in_isr);
+    }
+    return;
+  }
+
+  if (stop_phase_ == StopPhase::EP0_SNAK_WAIT)
+  {
+    // EP0 OUT 不能写 EPDIS：SNAK 生效即可认为停止完成，并把 DMA 指向暂存。
+    // EP0 OUT must not be disabled: SNAK taking effect is enough, then point the
+    // DMA at the scratch buffer.
+    dev->doepdma0_reg.val = reinterpret_cast<uint32_t>(ep0_scratch_);
+    stop_phase_ = StopPhase::NONE;
+    transfer_active_ = false;
+    OnHardwareStopped(in_isr);
+    return;
+  }
+
+  if (stop_phase_ == StopPhase::DIS_WAIT &&
+      dev->out_eps[ep_num - 1U].doepint_reg.epdisbld != 0U)
+  {
+    dev->out_eps[ep_num - 1U].doepint_reg.val = USB_DWC_EPDISD_MSK;
+    stop_phase_ = StopPhase::NONE;
+    transfer_active_ = false;
+    OnHardwareStopped(in_isr);
+  }
+}
+
+size_t ESP32USBEndpoint::ReapProgress(const HwRequest& request, bool& retired)
+{
+  // 只有硬件报过传输完成（XFRC 未处理）才能认为主机真的取走了数据；DMA 模式下
+  // xfersize 在数据进 FIFO 时就清零，不能拿它当成功凭据（与 STM32 OTG 同口径）。
+  // Only a transfer-complete interrupt (XFRC pending) proves the host really took
+  // the data: in DMA mode xfersize drops as soon as a packet enters the FIFO, so
+  // it is no evidence of success (same criterion as the STM32 OTG backend).
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  const uint8_t ep_num = EPNumberToInt8(GetNumber());
+  retired = false;
+  if (GetDirection() == Direction::IN && ep_num != 0U)
+  {
+    if (dev->in_eps[ep_num - 1U].diepint_reg.xfercompl != 0U)
+    {
+      retired = true;
+      return request.length;
+    }
+    return GetCompletedTransferSize();
+  }
+  // OUT 侧：已经落进槽的字节数是确定的。
+  // OUT side: the bytes already in the slot are known for certain.
   return GetCompletedTransferSize();
 }
 
@@ -272,6 +428,11 @@ void ESP32USBEndpoint::ResetHardwareState()
 
 void ESP32USBEndpoint::HandleInInterrupt(bool in_isr)
 {
+  // 停止时序未完成时先推进它（PENDING 由中断确认后调 OnHardwareStopped）。
+  // Advance the stop sequence first while it is still pending (PENDING becomes a
+  // confirmed stop through OnHardwareStopped).
+  AdvanceStop(in_isr);
+
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   usb_dwc_diepint_reg_t intr = {};
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
@@ -329,6 +490,8 @@ void ESP32USBEndpoint::FinishPendingEp0InStatus(bool in_isr)
 
 void ESP32USBEndpoint::HandleOutInterrupt(bool in_isr)
 {
+  AdvanceStop(in_isr);
+
   const uint8_t ep_num = EPNumberToInt8(GetNumber());
   usb_dwc_doepint_reg_t intr = {};
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
