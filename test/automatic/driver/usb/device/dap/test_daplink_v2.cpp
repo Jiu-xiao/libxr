@@ -241,7 +241,7 @@ void TestBatchWithDelay()
   queue.insert(queue.end(), info_cmd, info_cmd + sizeof(info_cmd));
   queue.push_back(static_cast<uint8_t>(sizeof(delay_cmd)));
   queue.insert(queue.end(), delay_cmd, delay_cmd + sizeof(delay_cmd));
-  Send(f, queue);
+  f.out.HostSends(queue);
   TEST_ASSERT(
       f.in.Last().data ==
       std::vector<uint8_t>({static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 0x00}));
