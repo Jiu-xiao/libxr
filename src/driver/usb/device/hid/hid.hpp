@@ -180,10 +180,9 @@ class HID : public DeviceClass
           RX_REPORT_LEN, ep_out_->LargestPacketSize(Endpoint::Type::INTERRUPT)));
       // receive_size 与包长一致：每个租约恰是一条报告。
       // receive_size equals one packet: one report per lease.
-      (void)ep_out_->Configure(
-          {Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT, packet,
-           Endpoint::Mult::ONE, 1, packet},
-          in_isr);
+      (void)ep_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::INTERRUPT,
+                                packet, Endpoint::Mult::ONE, 1, packet},
+                               in_isr);
     }
 
     // 填充接口描述符
@@ -638,18 +637,29 @@ class HID : public DeviceClass
       return ErrorCode::ARG_ERR;
     }
     Memory::FastCopy(slot.data.addr_, report.addr_, report.size_);
+    // 阴影副本先于 Submit 写：空闲重发在 SOF 上下文里读 last_input_，若在
+    // Submit 之后才写，重发可能读到撕裂的半份报告。
+    // Write the shadow copy before Submit: the idle resend reads last_input_ from
+    // the SOF context, and writing it only after Submit lets the resend observe a
+    // torn half of the report.
+    Memory::FastCopy(last_input_, report.addr_, report.size_);
+    last_input_length_ = report.size_;
+
     ans = ep->Submit(slot, report.size_, false, in_isr);
     if (ans != ErrorCode::OK)
     {
-      // ABORTED：槽在解绑前借出，报告从未到达主机；SIZE_ERR 等其余失败同理。
-      // ABORTED: the slot was lent across an unbind and the report never reached the
-      // host; other failures are handled the same way.
-      ep->ReleaseSlot(slot, in_isr);
+      // ABORTED：槽在解绑/停止时已被核心收回，再 Release 是双重释放；其余失败
+      // （SIZE_ERR 等）槽仍在手里，正常归还。
+      // ABORTED: the core already reclaimed the slot on unbind/stop, so releasing
+      // again would be a double release; other failures (SIZE_ERR etc.) leave the
+      // slot in our hands and are returned normally.
+      if (ans != ErrorCode::ABORTED)
+      {
+        ep->ReleaseSlot(slot, in_isr);
+      }
       input_in_flight_.store(0U, std::memory_order_release);
       return ErrorCode::FAILED;
     }
-    Memory::FastCopy(last_input_, report.addr_, report.size_);
-    last_input_length_ = report.size_;
     return ErrorCode::OK;
   }
 
@@ -686,7 +696,14 @@ class HID : public DeviceClass
   ConstRawData LastInputReport() const { return {last_input_, last_input_length_}; }
 
  public:
-  bool WantsBusTime() const override { return true; }
+  // 只有确实需要 SOF 做空闲重发时才通知 owner（未绑定、未开空闲或没有历史报告
+  // 时都不需要），不再每个 SOF 都叫醒 owner。
+  // Notify the owner on SOF only when an idle resend is actually possible (bound,
+  // non-zero idle rate, and a previous report exists) instead of on every SOF.
+  bool WantsBusTime() const override
+  {
+    return inited_ && idle_rate_ != 0U && last_input_length_ != 0U;
+  }
   size_t GetControlReceiveCapacity() const override
   {
     return LibXR::max<size_t>(64U, LibXR::max<size_t>(TX_REPORT_LEN, RX_REPORT_LEN));
@@ -776,8 +793,8 @@ class HID : public DeviceClass
 
   std::atomic<uint32_t> input_in_flight_{
       0};  ///< 单条在途标志 / One input report in flight
-  std::atomic<Endpoint*>
-      in_ep_ref_{nullptr};  ///< SendInputReport 的 IN 端点 / IN endpoint doorbell
+  std::atomic<Endpoint*> in_ep_ref_{
+      nullptr};  ///< SendInputReport 的 IN 端点 / IN endpoint doorbell
   uint8_t last_input_[TX_REPORT_LEN]{};  ///< 最近一次发出的报告 / Last published report
   size_t last_input_length_ = 0;         ///< 上述报告长度 / Its length
   uint32_t last_report_ms_ = 0;          ///< 主机最近取走报告的时刻 / Last completion ms
