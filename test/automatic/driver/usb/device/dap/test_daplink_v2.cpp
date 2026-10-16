@@ -257,12 +257,17 @@ void TestBatchWithDelay()
   Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
   TEST_ASSERT(f.in.active);
   const auto& batch = f.in.Last().data;
+  // INFO 响应：[INFO, len=7, "XRobot" + NUL]，共 9 字节（批内 [1..9]）；DELAY
+  // 响应 [DELAY, 0x00] 跟在 [10..11]，批总长 12。
+  // INFO response: [INFO, len=7, "XRobot" + NUL], 9 bytes total (batch [1..9]);
+  // the DELAY response [DELAY, 0x00] follows at [10..11], batch length 12.
   TEST_ASSERT(batch[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
   TEST_ASSERT(batch[1] == static_cast<uint8_t>(CommandId::INFO));
-  TEST_ASSERT(batch[2] == 7U);  // "XRobot" incl. NUL
-  TEST_ASSERT(batch[9] == DELAY);
-  TEST_ASSERT(batch[10] == 0x00);  // DAP_OK
-  TEST_ASSERT(f.in.Last().length == 11U);
+  TEST_ASSERT(batch[2] == 7U);    // "XRobot" incl. NUL
+  TEST_ASSERT(batch[9] == 0x00);  // NUL of "XRobot"
+  TEST_ASSERT(batch[10] == DELAY);
+  TEST_ASSERT(batch[11] == 0x00);  // DAP_OK
+  TEST_ASSERT(f.in.Last().length == 12U);
   f.in.Complete();
 
   // 批后 OUT 重新挂接收。
