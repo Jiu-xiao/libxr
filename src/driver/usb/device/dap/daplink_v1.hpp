@@ -12,8 +12,8 @@
 #include "libxr_def.hpp"
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
-#include "timer.hpp"
 #include "timebase.hpp"
+#include "timer.hpp"
 
 namespace LibXR::USB
 {
@@ -87,16 +87,15 @@ class DapLinkV1Class
                      bool in_isr) override;
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override;
 
-  void OnDataOutComplete(bool in_isr,
-                         const Endpoint::Completion& completion) override;
+  void OnDataOutComplete(bool in_isr, const Endpoint::Completion& completion) override;
 
  private:
   /// 命令状态机 / Command state machine
-  static constexpr uint32_t CMD_IDLE = 0U;         ///< 无命令 / No command
-  static constexpr uint32_t CMD_PENDING = 1U;      ///< 已收请求待处理 / Request received
-  static constexpr uint32_t CMD_PROCESSING = 2U;   ///< 命令执行中 / Command running
-  static constexpr uint32_t CMD_RESPONDING = 3U;   ///< 响应就绪待提交 / Response ready
-  static constexpr uint32_t CMD_SUBMITTING = 4U;   ///< 响应提交中 / Response submitting
+  static constexpr uint32_t CMD_IDLE = 0U;        ///< 无命令 / No command
+  static constexpr uint32_t CMD_PENDING = 1U;     ///< 已收请求待处理 / Request received
+  static constexpr uint32_t CMD_PROCESSING = 2U;  ///< 命令执行中 / Command running
+  static constexpr uint32_t CMD_RESPONDING = 3U;  ///< 响应就绪待提交 / Response ready
+  static constexpr uint32_t CMD_SUBMITTING = 4U;  ///< 响应提交中 / Response submitting
 
  public:
   /**
@@ -257,9 +256,9 @@ class DapLinkV1Class
   // the held OUT lease until the response is submitted (backpressure); command
   // processing never runs in the owner (MODEL_USB §3.1).
   std::atomic<uint32_t> cmd_state_{CMD_IDLE};
-  Endpoint::Slot out_lease_{};       ///< 保留的 OUT 租约 / Held OUT lease
-  uint8_t resp_buf_[MAX_RESP]{};     ///< 响应缓冲 / Response buffer
-  uint16_t resp_len_ = 0;            ///< 响应长度 / Response length
+  Endpoint::Slot out_lease_{};    ///< 保留的 OUT 租约 / Held OUT lease
+  uint8_t resp_buf_[MAX_RESP]{};  ///< 响应缓冲 / Response buffer
+  uint16_t resp_len_ = 0;         ///< 响应长度 / Response length
   Timer::TimerHandle timer_task_ = nullptr;
 
   bool inited_ = false;
@@ -463,7 +462,8 @@ void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr,
   // thread observe an empty lease and get stuck.
   Endpoint::Slot pending_lease = completion.slot;
   uint32_t expected = CMD_IDLE;
-  if (!cmd_state_.compare_exchange_strong(expected, CMD_PENDING, std::memory_order_acq_rel))
+  if (!cmd_state_.compare_exchange_strong(expected, CMD_PENDING,
+                                          std::memory_order_acq_rel))
   {
     const uint32_t state = cmd_state_.load(std::memory_order_acquire);
     if (state != CMD_PENDING)
@@ -525,10 +525,9 @@ void DapLinkV1Class<SwdPort>::ProcessPending(bool in_isr)
   // thread context (§10.3-a) while the lease keeps the backpressure.
   Memory::FastSet(resp_buf_, 0, MAX_RESP);
   uint16_t length = 0;
-  const auto result =
-      ProcessOneCommand(in_isr, static_cast<const uint8_t*>(out_lease_.data.addr_),
-                        static_cast<uint16_t>(out_lease_.data.size_), resp_buf_,
-                        MAX_RESP, length);
+  const auto result = ProcessOneCommand(
+      in_isr, static_cast<const uint8_t*>(out_lease_.data.addr_),
+      static_cast<uint16_t>(out_lease_.data.size_), resp_buf_, MAX_RESP, length);
   UNUSED(result);
   REQUIRE(length <= MAX_RESP);
   resp_len_ = length;
