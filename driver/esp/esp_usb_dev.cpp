@@ -580,6 +580,12 @@ void ESP32USBDevice::UpdateSetupState(const uint8_t* setup)
 
 void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 {
+  // InterruptScope 先构造、后析构：它析构时才执行延后的类服务（DAP 命令等可能很长），
+  // 那时守卫已经释放。
+  // The InterruptScope is constructed first and destroyed last: the deferred class
+  // service (DAP commands may run long) only runs when it is destroyed, by which time
+  // the guard has been released.
+  USB::EndpointPool::InterruptScope interrupt_scope(*this);
   // 中断也持有硬件守卫：任务侧的 HardwareScope 在另一个核上时只靠本核关中断挡不住
   // 中断，两边会交错访问寄存器。守卫可重入，中断里的回调再进 HardwareScope 没问题。
   // The interrupt holds the hardware guard too: when a task-side HardwareScope runs on
@@ -592,7 +598,6 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
     explicit IsrGuard(portMUX_TYPE* m) : mux(m) { portENTER_CRITICAL_SAFE(mux); }
     ~IsrGuard() { portEXIT_CRITICAL_SAFE(mux); }
   } isr_guard(&hardware_mux_);
-  USB::EndpointPool::InterruptScope interrupt_scope(*this);
   // 统一从 gintsts & gintmsk 取当前批次待处理中断，并在有限 guard 内排空 / Pull one
   // interrupt batch from gintsts & gintmsk and drain it under a bounded guard.
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
