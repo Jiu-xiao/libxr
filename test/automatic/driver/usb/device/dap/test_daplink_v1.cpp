@@ -188,12 +188,15 @@ void TestBusyOutReportsAfterHalt()
       {static_cast<uint8_t>(CommandId::INFO), static_cast<uint8_t>(InfoId::PRODUCT)});
   f.out.HostSends(product);
 
-  // 后到者胜：处理的是第二条，响应正常提交。
-  // Last one wins: the second report is processed and the response submitted.
+  // 后到者胜：处理的是第二条（PRODUCT，"DAPLinkV1"），而不是第一条（VENDOR，
+  // "XRobot"）。INFO 响应是 [cmd, len, 字符串...]，data[1] 是长度字节。
+  // Last one wins: the second report (PRODUCT, "DAPLinkV1") is processed, not the
+  // first one (VENDOR, "XRobot"). An INFO response is [cmd, len, string...], so
+  // data[1] is the length byte.
   dap.ProcessPending(false);
-  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::INFO) &&
-              f.in.Last().data[1] == static_cast<uint8_t>(InfoId::PRODUCT));
-  TEST_ASSERT(std::memcmp(&f.in.Last().data[2], "XRobot", 7) == 0);
+  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::INFO));
+  TEST_ASSERT(f.in.Last().data[1] == 9U);  // "DAPLinkV1" = 9 bytes incl. NUL
+  TEST_ASSERT(std::memcmp(&f.in.Last().data[2], "DAPLinkV1", 9) == 0);
   f.in.Complete();
   TEST_ASSERT(f.out.active && f.out.starts.size() == 4);
 }
