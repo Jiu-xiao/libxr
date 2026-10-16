@@ -230,17 +230,20 @@ void TestBatchWithDelay()
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // QUEUE_COMMANDS：两条命令入队——DAP_Info 与一个 2 ms 的 DAP_Delay。
-  // QUEUE_COMMANDS: enqueue two commands - DAP_Info and a 2 ms DAP_Delay.
-  // Wire format: [QUEUE_COMMANDS, count, len, cmd...], len covers the command bytes.
-  std::vector<uint8_t> queue{static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 2u};
-  const uint8_t info_cmd[] = {static_cast<uint8_t>(CommandId::INFO),
-                              static_cast<uint8_t>(InfoId::VENDOR)};
-  const uint8_t delay_cmd[] = {DELAY, 0xD0, 0x07};  // 2000 us little-endian
-  queue.push_back(static_cast<uint8_t>(sizeof(info_cmd)));
-  queue.insert(queue.end(), info_cmd, info_cmd + sizeof(info_cmd));
-  queue.push_back(static_cast<uint8_t>(sizeof(delay_cmd)));
-  queue.insert(queue.end(), delay_cmd, delay_cmd + sizeof(delay_cmd));
+  // QUEUE_COMMANDS：两条命令入队——DAP_Info 与一个 2 ms 的 DAP_Delay。线格式是
+  // 命令直接拼接（长度由命令 ID 决定，无前缀）。
+  // QUEUE_COMMANDS: enqueue two commands - DAP_Info and a 2 ms DAP_Delay. The wire
+  // format is plain concatenation (each command's length follows from its ID, no
+  // prefix).
+  std::vector<uint8_t> queue{
+      static_cast<uint8_t>(CommandId::QUEUE_COMMANDS),
+      2u,
+      static_cast<uint8_t>(CommandId::INFO),
+      static_cast<uint8_t>(InfoId::VENDOR),
+      DELAY,
+      0xD0,
+      0x07,  // 2000 us little-endian
+  };
   f.out.HostSends(queue);
   TEST_ASSERT(
       f.in.Last().data ==
