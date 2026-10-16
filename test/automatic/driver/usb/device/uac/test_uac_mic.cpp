@@ -351,20 +351,21 @@ void TestUacFailedRecovery()
   TEST_ASSERT(f.uac.SetAltSetting(1, 1) == ErrorCode::OK);
   TEST_ASSERT(f.iso.active && f.iso.starts.size() == 1);
 
-  // 等时请求 FAILED：结束待决请求、重新 Configure、立即续传。
-  // The isochronous request FAILED: end the pending requests, re-Configure, resume.
+  // 等时请求 FAILED：完成路径只置待决标志（§2.7 不做生命周期操作），Close 与
+  // 重新 Configure 由下一拍非中断 SOF 的 ActivateStreaming 执行。
+  // The isochronous request FAILED: the completion only raises the pending flag
+  // (§2.7 forbids lifecycle ops there); the next non-ISR SOF runs Close and the
+  // re-Configure via ActivateStreaming.
+  BusTime tick;
   f.iso.CompleteWith(10, ErrorCode::FAILED);
   TEST_ASSERT(f.uac.MissedTransferCount() == 1);
+  f.uac.OnBusTime(false, tick);
   TEST_ASSERT(f.iso.GetState() == State::IDLE && f.iso.active &&
               f.iso.starts.size() == 2);
   f.iso.Complete();
   TEST_ASSERT(f.iso.sent.back() == Zeros(32));
   TEST_ASSERT(!f.iso.active);
 
-  // 停止未确认：恢复挂起；停止确认后没有回调可唤醒，等下一拍（SOF）继续。
-  // The stop is unconfirmed: the recovery waits. No callback fires after the
-  // confirmation; the next tick resumes the stream.
-  BusTime tick;
   // 完成不会自动投下一帧：先用一拍把下一帧放上线，才有请求可以 FAILED。
   // A completion does not submit the next frame: arm one with a tick, otherwise
   // there is no request left to fail.
