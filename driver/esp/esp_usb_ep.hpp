@@ -37,12 +37,15 @@ class ESP32USBEndpoint : public USB::Endpoint
     NONE = 0,
     SNAK_WAIT,
     DIS_WAIT,
-    EP0_SNAK_WAIT,
   };
 
   /// 由 IN/OUT 中断调用，推进停止时序 / Called from the IN/OUT interrupts to
   /// advance the stop sequence
   void AdvanceStop(bool in_isr);
+
+  /// 控制器复位升级路径：收掉软件状态并确认停止（不再碰寄存器）/ Controller-reset
+  /// escalation: drop the software state and confirm the stop (no register access)
+  void ForceStop(bool in_isr);
 
   size_t MaxPacketSizeLimit(Type type) const override;
 
@@ -81,10 +84,6 @@ class ESP32USBEndpoint : public USB::Endpoint
   uint32_t transfer_tag_ = 0U;
   bool transfer_active_ = false;
   StopPhase stop_phase_ = StopPhase::NONE;
-  uint32_t stop_deadline_ms_ = 0U;
-  /// 停止确认的最长等待，超时按已停止交付 / Longest wait for the stop
-  /// confirmation; on timeout the stop is reported as done
-  static constexpr uint32_t STOP_TIMEOUT_MS = 20U;
   /// EP0 OUT 停止后的 DMA 落点，避免仍指向被借出的槽 / DMA target after an EP0
   /// OUT stop so it no longer points at the lent slot
   uint8_t ep0_scratch_[64] =
@@ -92,7 +91,6 @@ class ESP32USBEndpoint : public USB::Endpoint
   size_t transfer_actual_size_ = 0U;
   size_t transfer_queued_size_ = 0U;
   bool transfer_uses_shadow_ = false;
-  size_t transfer_direct_sync_size_ = 0U;
   size_t dma_rx_status_bytes_ = 0U;
   bool dma_rx_status_seen_ = false;
   Ep0OutPhase ep0_out_phase_ = Ep0OutPhase::SETUP;

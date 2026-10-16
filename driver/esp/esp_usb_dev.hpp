@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <initializer_list>
 
+#include "driver_async_condition.hpp"
 #include "esp_def.hpp"
 #include "esp_intr_alloc.h"
 #include "freertos/FreeRTOS.h"
@@ -117,6 +118,13 @@ class ESP32USBDevice : public USB::EndpointPool,
    * @brief 停止 USB device controller / Stop the USB device controller
    */
   void Stop(bool in_isr) override;
+
+  /**
+   * @brief 停止超时（核心按 1 ms 帧计数后调用）：升级为控制器复位
+   *        Stop timeout (the core calls this after counting 1 ms frames): escalate to a
+   *        controller reset
+   */
+  void OnStopTimeout(bool in_isr) override;
 
  private:
   friend class ESP32USBEndpoint;
@@ -293,6 +301,26 @@ class ESP32USBDevice : public USB::EndpointPool,
    * for the current endpoint need
    */
   bool EnsureRxFifo(uint16_t packet_size);
+
+  /// 复位 core 寄存器（含自清的短等待）/ Reset the core registers (short self-clearing
+  /// waits only)
+  void ResetCoreRegisters();
+  /// 重建寄存器基线（复位之后）/ Rebuild the register baseline (after a reset)
+  void RebuildCoreRegisters();
+  /// 确认所有等待中的停止（控制器复位路径）/ Confirm every waiting stop (the
+  /// controller-reset path)
+  void ForceStopAll(bool in_isr);
+  /// 复位链的条件：单段，节拍上直接执行 / Reset-chain condition: one stage, runs on the
+  /// tick directly
+  static bool ResetCheck(void* arg);
+  /// 复位链的完成：复位并重连 / Reset-chain completion: reset and reconnect
+  static void ResetDone(void* arg, ErrorCode result);
+
+  /// 复位确认的最长等待 / Longest wait for the reset to confirm
+  static constexpr uint32_t RESET_STEP_TIMEOUT_MS = 20U;
+  /// 停止超时后的控制器复位链（毫秒节拍驱动）/ Controller-reset chain after a stop
+  /// timeout (driven by the millisecond tick)
+  DriverAsyncCondition reset_wait_;
 
   portMUX_TYPE hardware_mux_ = portMUX_INITIALIZER_UNLOCKED;
   EndpointMap endpoint_map_ = {};  ///< Endpoint 所有权映射表 / Endpoint ownership map

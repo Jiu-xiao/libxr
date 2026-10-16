@@ -32,7 +32,8 @@ ESP32USBDevice::ESP32USBDevice(
     : USB::EndpointPool(ep_cfgs.size() * 2U),
       USB::DeviceCore<USB::FullSpeedCapabilities>(*this, USB::USBSpec::USB_2_1,
                                                   USB::Speed::FULL, packet_size, vid, pid,
-                                                  bcd, lang_list, configs, uid)
+                                                  bcd, lang_list, configs, uid),
+      reset_wait_(ResetCheck, ResetDone, this)
 {
   SetHardwareGuard(
       this,
@@ -248,6 +249,12 @@ void ESP32USBDevice::InitializeCore()
   // 这里直接重建 DWC2 device-mode 寄存器基线：先停总中断，复位 core，再重建 FIFO/中断
   // mask / Rebuild the DWC2 device-mode register baseline directly: stop global
   // interrupts, reset the core, then rebuild FIFO and interrupt masks.
+  ResetCoreRegisters();
+  RebuildCoreRegisters();
+}
+
+void ESP32USBDevice::ResetCoreRegisters()
+{
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   dev->gahbcfg_reg.glbllntrmsk = 0;
@@ -271,6 +278,11 @@ void ESP32USBDevice::InitializeCore()
   while (!dev->grstctl_reg.ahbidle)
   {
   }
+}
+
+void ESP32USBDevice::RebuildCoreRegisters()
+{
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   dev->pcgcctl_reg.stoppclk = 0;
   dev->pcgcctl_reg.gatehclk = 0;
@@ -303,6 +315,90 @@ void ESP32USBDevice::InitializeCore()
   dev->gintmsk_reg.iepintmsk = 1;
   dev->gintmsk_reg.otgintmsk = 1;
   if (WantsBusTime()) dev->gintmsk_reg.val |= 1U << 3U;
+}
+
+void ESP32USBDevice::OnStopTimeout(bool in_isr)
+{
+  // 停止没有等到硬件确认：控制器状态未知（DMA 仍可能写槽）。离开总线、确认所有
+  // 等待中的停止，然后在毫秒节拍上复位控制器并重连，让主机重新枚举——与 STM32 OTG
+  // 同样的升级路径，区别只在本核的复位步骤是有界自清等待，一段就够。
+  // The stop never confirmed and the controller is in an unknown state (the DMA may
+  // still be writing a slot). Leave the bus, confirm every waiting stop, then reset
+  // the controller on the millisecond tick and reconnect so the host enumerates
+  // again — the same escalation as the STM32 OTG backend; only the reset steps here
+  // are bounded self-clearing waits, so one stage suffices.
+  {
+    auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+    dev->gahbcfg_reg.glbllntrmsk = 0;
+    dev->gintmsk_reg.val = 0U;
+    dev->dctl_reg.sftdiscon = 1;
+  }
+  ForceStopAll(in_isr);
+
+  if (reset_wait_.Wait(0U, RESET_STEP_TIMEOUT_MS) != ErrorCode::OK)
+  {
+    // 复位链没排上（上一次还在跑）：保持断开，主机看到设备消失。
+    // The reset chain could not be armed (a previous one is still running): stay
+    // disconnected and the host sees the device disappear.
+    runtime_.started = false;
+  }
+  OnDisconnect(in_isr);
+}
+
+bool ESP32USBDevice::ResetCheck(void* /*arg*/)
+{
+  // 单段复位：条件立即成立，复位动作在 ResetDone 里一次做完（都是有界的寄存器
+  // 自清等待，不依赖总线事件）。
+  // One-stage reset: the condition holds at once and ResetDone performs the whole
+  // reset (bounded self-clearing register waits, no bus-dependent event).
+  return true;
+}
+
+void ESP32USBDevice::ResetDone(void* arg, ErrorCode result)
+{
+  auto* self = static_cast<ESP32USBDevice*>(arg);
+  if (self == nullptr)
+  {
+    return;
+  }
+  if (result != ErrorCode::OK)
+  {
+    // 节拍上没能复位：留在总线下，等用户重新 Init/Start。
+    // The reset did not happen on the tick: stay off the bus until Init/Start runs
+    // again.
+    self->runtime_.started = false;
+    return;
+  }
+
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  dev->gahbcfg_reg.glbllntrmsk = 0;
+  dev->gintmsk_reg.val = 0U;
+  dev->dctl_reg.sftdiscon = 1;
+
+  // 复位 core 并重建基线，然后重连：主机重新枚举，端点在下一次 Configure 里重新
+  // 分配 FIFO（ForceStop 已清掉记账）。
+  // Reset the core, rebuild the baseline, then reconnect: the host enumerates again
+  // and the endpoints re-allocate their FIFOs on the next Configure (ForceStop
+  // cleared the bookkeeping).
+  self->ResetCoreRegisters();
+  self->RebuildCoreRegisters();
+  dev->dctl_reg.sftdiscon = 0;
+  self->runtime_.started = true;
+}
+
+void ESP32USBDevice::ForceStopAll(bool in_isr)
+{
+  for (size_t i = 0U; i < ESP32USBDevice::ENDPOINT_COUNT; ++i)
+  {
+    if (endpoint_map_.in[i] != nullptr)
+    {
+      static_cast<ESP32USBEndpoint*>(endpoint_map_.in[i])->ForceStop(in_isr);
+    }
+    if (endpoint_map_.out[i] != nullptr)
+    {
+      static_cast<ESP32USBEndpoint*>(endpoint_map_.out[i])->ForceStop(in_isr);
+    }
+  }
 }
 
 void ESP32USBDevice::ClearTxFifoRegisters()
