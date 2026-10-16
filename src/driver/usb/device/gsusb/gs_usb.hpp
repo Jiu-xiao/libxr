@@ -395,6 +395,7 @@ class GsUsbClass : public DeviceClass
       ep_data_out_->ReleaseSlot(out_hold_slot_, in_isr);
       out_hold_ = false;
     }
+    out_armed_ = false;
 
     for (uint8_t i = 0; i < can_count_; ++i)
     {
@@ -1118,6 +1119,9 @@ class GsUsbClass : public DeviceClass
   // Echo backpressure: the OUT lease is held with the frame stashed until the service
   // pushes it and returns the lease.
   bool out_hold_ = false;
+  // 是否有一条 Bulk OUT 接收在途（RearmOut 幂等用）/ Whether a Bulk OUT receive is in
+  // flight (keeps RearmOut idempotent)
+  bool out_armed_ = false;
   Endpoint::Slot out_hold_slot_{};
   QueueItem out_hold_item_{};
 
@@ -1353,11 +1357,24 @@ class GsUsbClass : public DeviceClass
    */
   void RearmOut(bool in_isr)
   {
-    if (!inited_ || ep_data_out_ == nullptr || out_hold_)
+    // out_hold_ 表示背压中（租约在手里），out_armed_ 表示已经有一条接收在途：
+    // HALT 后的 ABORTED 重挂与 ENDPOINT_RESUMED 重挂可能同时发生，没有在途
+    // 判断就会挂出第二条接收，两个租约同时在途时后到的完成会覆盖
+    // out_hold_slot_（前一个槽泄漏、echo 丢失）。
+    // out_hold_ means backpressured (lease held), out_armed_ means a receive is
+    // already in flight: the ABORTED rearm after a HALT and the ENDPOINT_RESUMED
+    // rearm can both fire, and without the in-flight check a second receive is
+    // armed; the later completion then overwrites out_hold_slot_ (leaking the
+    // earlier slot and losing the echo).
+    if (!inited_ || ep_data_out_ == nullptr || out_hold_ || out_armed_)
     {
       return;
     }
-    (void)ep_data_out_->Receive(ep_data_out_->GetGranted().slot_capacity, in_isr);
+    if (ep_data_out_->Receive(ep_data_out_->GetGranted().slot_capacity, in_isr) ==
+        ErrorCode::OK)
+    {
+      out_armed_ = true;
+    }
   }
 
   // ================= 业务处理函数 / Handlers =================
@@ -1687,6 +1704,11 @@ class GsUsbClass : public DeviceClass
    */
   void OnDataOutComplete(bool in_isr, const Endpoint::Completion& completion)
   {
+    // 这一条接收已经结束（无论成功与否）：清掉在途标记，RearmOut 才能再挂。
+    // This receive is over either way: clear the in-flight flag so RearmOut can
+    // arm again.
+    out_armed_ = false;
+
     if (completion.result != ErrorCode::OK)
     {
       // 异常完成（ABORTED 等）没有可用租约；保持 OUT 可收。
