@@ -101,7 +101,10 @@ class UAC1MicrophoneQ : public DeviceClass
         pcm_queue_(queue_bytes)
   {
     REQUIRE(sr_hz_ != 0U && sr_hz_ <= 0xffffffU);
-    RecomputeTiming();
+    // 构造期采样率是编译期决策：不可行是模板参数错误，保持 fatal。
+    // The construction-time rate is a compile-time decision: an infeasible one is
+    // a template-argument error and stays fatal.
+    REQUIRE(RecomputeTiming());
     // 缓存端点采样率（3 字节小端） / Cache current sampling frequency (3-byte LE)
     sf_cur_[0] = static_cast<uint8_t>(sr_hz_ & 0xFF);
     sf_cur_[1] = static_cast<uint8_t>((sr_hz_ >> 8) & 0xFF);
@@ -805,7 +808,10 @@ class UAC1MicrophoneQ : public DeviceClass
   }
 
   // ===== SOF 节拍 / Bus tick =====
-  bool WantsBusTime() const override { return true; }
+  // 绑定后即需要 SOF（帧节奏、挂起激活推进都靠它）；未绑定不再空转。
+  // SOF is needed while bound (frame pacing and deferred activation rely on it);
+  // an unbound device no longer wakes the owner.
+  bool WantsBusTime() const override { return inited_; }
 
   void OnBusTime(bool in_isr, const BusTime& time) override
   {
@@ -894,24 +900,25 @@ class UAC1MicrophoneQ : public DeviceClass
     }
     if (completion.result == ErrorCode::ABORTED)
     {
-      // 解绑或恢复流程中的请求结束；停止确认后在这里或下一拍继续激活。
-      // A request ended by an unbind or a recovery; the activation continues here or
-      // on the next tick once the stop is confirmed.
-      TryActivate(in_isr);
+      // 解绑或恢复流程中的请求结束；下一拍非中断 SOF 继续激活。
+      // A request ended by an unbind or a recovery; the next non-ISR SOF tick
+      // continues the activation.
+      activate_pending_ = true;
       return;
     }
 
-    // 等时请求未完成（FAILED / OUT_OF_RANGE）：结束待决请求后重新 Configure
-    // （MODEL_USB §4.6）。
-    // The isochronous request did not finish (FAILED / OUT_OF_RANGE): end the pending
-    // requests and re-Configure (MODEL_USB §4.6).
+    // 等时请求未完成（FAILED / OUT_OF_RANGE，MODEL_USB §4.6）：只置待决标志。
+    // §2.7 禁止在完成上下文里做生命周期操作（Close/Configure），恢复由下一拍
+    // 非中断 SOF 经 ActivateStreaming 执行。
+    // The isochronous request did not finish (FAILED / OUT_OF_RANGE, MODEL_USB
+    // §4.6): only raise the pending flag. §2.7 forbids lifecycle operations
+    // (Close/Configure) from the completion context, so the recovery runs from the
+    // next non-ISR SOF via ActivateStreaming.
     transport_misses_.fetch_add(1U, std::memory_order_relaxed);
     active_ = false;
     acc_rem_ = 0;
     micro_debt_ = 0;
     activate_pending_ = true;
-    ep_iso_in_->Close(in_isr);
-    (void)ActivateStreaming(in_isr);
   }
 
   /**
@@ -939,6 +946,15 @@ class UAC1MicrophoneQ : public DeviceClass
     if (!inited_ || ep_iso_in_ == nullptr)
     {
       return ErrorCode::FAILED;
+    }
+    // 恢复所需的生命周期操作（Close）在这里做：本函数只从 owner 上下文（非中
+    // 断 SOF 或 SET_INTERFACE）进入，满足 §2.7。
+    // The lifecycle op the recovery needs (Close) happens here: this function is
+    // only entered from the owner context (a non-ISR SOF or SET_INTERFACE), which
+    // satisfies §2.7.
+    if (!ep_iso_in_->IsStopping() && ep_iso_in_->GetState() != Endpoint::State::DISABLED)
+    {
+      ep_iso_in_->Close(in_isr);
     }
     if (ep_iso_in_->IsStopping() || ep_iso_in_->GetState() != Endpoint::State::DISABLED)
     {
@@ -1027,9 +1043,9 @@ class UAC1MicrophoneQ : public DeviceClass
    * @brief 统一重算时序与包长（运行时 MPS 钳制到描述符宣告值）
    *        Recompute timing and packet sizing (runtime MPS clamped to descriptor)
    */
-  void RecomputeTiming()
+  bool RecomputeTiming()
   {
-    REQUIRE(interval_ >= 1U && interval_ <= 16U);
+    if (interval_ < 1U || interval_ > 16U) return false;
     const uint32_t ticks = speed_ == Speed::HIGH ? (1U << (interval_ - 1U)) : 1U;
     service_denominator_ = speed_ == Speed::HIGH ? 8000U : 1000U;
     const uint64_t numerator = static_cast<uint64_t>(sr_hz_) * ticks;
@@ -1041,9 +1057,10 @@ class UAC1MicrophoneQ : public DeviceClass
     const uint64_t maximum =
         (static_cast<uint64_t>(base_frames_per_service_) + 1U) * FRAME_BYTES;
     const uint32_t limit = speed_ == Speed::HIGH ? 1024U : 1023U;
-    REQUIRE(maximum <= limit);
+    if (maximum > limit) return false;
     w_max_packet_size_ = static_cast<uint16_t>(maximum);
     acc_rem_ = 0;
+    return true;
   }
 
   // 端点与接口状态。
