@@ -1,15 +1,16 @@
 /**
  * @file test_daplink_v2.cpp
- * @brief DAP v2 设备类（槽模型）主机测试 / Host tests for the DAP v2 device class.
+ * @brief DAP v2 设备类（借用模式）主机测试 / Host tests for the DAP v2 device class in
+ *        borrow mode.
  *
- * 覆盖 5B 迁移改动的路径：OUT 用拷贝模式 Read 一次收一条完整命令、IN 用拷贝模式 Write
- * 发队头响应（超过一个 USB 包的响应跨多个包）、响应环保持主机侧在途深度、以及延时命令
- * 不在 owner 里忙等而是把响应槽留给 1 ms Timer 路径续做。
- * Covers the paths the 5B migration changed: OUT receives one whole command per copy-mode
- * Read, IN writes the head response through a copy-mode Write (a response above the wire
- * packet size spans several packets), the response ring keeps the host-visible
- * outstanding depth, and a delayed command does not busy-wait in the owner but reserves
- * its response slot for the 1 ms Timer path.
+ * OUT 方向把每个收到的包借给回调、拷进命令池后立即归还，两个槽交替接收；命令按自己的长度
+ * 判断结束，补零的传输整段丢弃。IN 方向把响应原地写进端点的槽再提交。命令由 Step() 线程
+ * 执行，延时命令在线程里睡到到期。
+ * The OUT side lends each received packet to the callback, copies it into the command
+ * pool and gives it back at once, so the two slots alternate; a command ends by its own
+ * length and a zero-padded transfer is dropped as a whole. The IN side writes the
+ * response in place into an endpoint slot and submits it. Commands run in the Step()
+ * thread, and a delayed command sleeps there until it is due.
  */
 
 #include <algorithm>
@@ -100,9 +101,14 @@ class TestDap2 : public DapV2
   using DapV2::UnbindEndpoints;
 };
 
-/// The class, its SWD probe and the composition that gives it a class-service pool.
-struct DapFixture : Fixture
+/// The class, its SWD probe and the composition that gives it a class-service pool. The
+/// endpoint blocks hold two 1024 byte slots per direction, as on a real board.
+struct DapFixture
 {
+  Block<2048> in_storage, out_storage;
+  EndpointPool pool{4};
+  MockEndpoint in{Number::EP1, Direction::IN, in_storage.Raw()};
+  MockEndpoint out{Number::EP2, Direction::OUT, out_storage.Raw()};
   FakeSwd swd;
   TestDap2 dap;
   DeviceComposition composition;
@@ -113,6 +119,8 @@ struct DapFixture : Fixture
         dap(Number::EP1, Number::EP2, swd),
         composition(pool, {&TEST_LANGUAGE}, {{&dap}})
   {
+    TEST_ASSERT(pool.Put(&in) == ErrorCode::OK);
+    TEST_ASSERT(pool.Put(&out) == ErrorCode::OK);
     // Stand-in for DeviceCore's class-service dispatch.
     handler = Callback<uint32_t>::Create(
         [](bool in_isr, DeviceClass* self, uint32_t events)
@@ -124,8 +132,8 @@ struct DapFixture : Fixture
   }
 };
 
-/// Send one whole DAP command; a short packet ends the copy-mode Read.
-/// Run every command that has arrived, the way the application's DAP thread would.
+/// Run every command that has arrived, the way the application's DAP thread would. A
+/// command that waits for an IN slot makes Step(0) time out and ends the loop.
 void Run(DapFixture& f)
 {
   while (f.dap.Step(0) == ErrorCode::OK)
@@ -133,7 +141,8 @@ void Run(DapFixture& f)
   }
 }
 
-/// The host sends bytes; the commands they complete are then executed by Step().
+/// The host completes the request that is armed with these bytes; the commands that
+/// completes are then executed by Step().
 void Host(DapFixture& f, const std::vector<uint8_t>& bytes)
 {
   f.out.HostSends(bytes);
@@ -145,27 +154,32 @@ void Send(DapFixture& f, std::initializer_list<uint8_t> bytes)
   Host(f, std::vector<uint8_t>(bytes));
 }
 
+/// Complete every hardware request of one response; count bytes and zero-length tails.
+void Drain(DapFixture& f, size_t& bytes, unsigned& tails)
+{
+  bytes = 0;
+  tails = 0;
+  while (f.in.active)
+  {
+    if (f.in.Last().length == 0)
+      ++tails;
+    else
+      bytes += f.in.Last().length;
+    f.in.Complete();
+    Run(f);
+  }
+}
+
 void TestCommandRoundTrip()
 {
   FreshTimerList();
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // The OUT endpoint is armed with one wire packet of a whole DAP packet.
-  TEST_ASSERT(f.out.active && f.out.Last().length == 64 && f.out.starts.size() == 1);
+  // Binding arms both OUT slots with one endpoint packet each; only one request is on
+  // the hardware at a time.
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   TEST_ASSERT(f.in.starts.empty());
-
-  // DAP_Info(PACKET_SIZE) answers the host-visible packet size (1024 by default).
-  Send(f, {INFO, PACKET_SIZE_ID});
-  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
-  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({INFO, 2, 0x00, 0x04}));
-  // The response was accepted, so the OUT receive re-armed behind it.
-  TEST_ASSERT(f.out.active && f.out.starts.size() == 2);
-
-  f.in.Complete();
-  // The next command's Read was already armed when the first one was consumed, so the
-  // OUT endpoint does not start again here.
-  TEST_ASSERT(f.out.active && f.out.starts.size() == 2);
 
   // DAP_Info(PACKET_COUNT) answers the effective outstanding depth.
   Send(f, {INFO, PACKET_COUNT_ID});
@@ -180,31 +194,37 @@ void TestCommandRoundTrip()
               f.in.Last().data[1] == static_cast<uint8_t>(Port::SWD));
   TEST_ASSERT(f.swd.enters == 1 && f.swd.clock_hz == 1000000u);
   f.in.Complete();
+
+  // The OUT side keeps two requests armed throughout.
+  TEST_ASSERT(f.out.active);
 }
 
+/// Two IN slots and two command slots make four commands in flight, the advertised depth;
+/// the response of the third waits for an IN slot until the host has taken a response.
 void TestPipelineKeepsAdvertisedDepth()
 {
   FreshTimerList();
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // The advertised packet count is four; four commands are accepted back to back.
   for (unsigned i = 0; i < 4; ++i)
   {
     Send(f, {INFO, PACKET_SIZE_ID});
   }
-  TEST_ASSERT(f.in.starts.size() == 1);   // one response on the wire at a time
-  TEST_ASSERT(f.out.starts.size() == 4);  // three re-arms plus the initial one
-  // The fourth response filled the outstanding window: OUT is not re-armed.
-  TEST_ASSERT(!f.out.active);
+  // One response is on the wire, a second is queued behind it; the third command holds
+  // its command slot while it waits for an IN slot and the fourth sits in the other one.
+  TEST_ASSERT(f.in.starts.size() == 1);
 
-  // Retiring one response opens the window again.
-  f.in.Complete();
-  TEST_ASSERT(f.in.starts.size() == 2 && f.out.active && f.out.starts.size() == 5);
-  f.in.Complete();
-  f.in.Complete();
-  f.in.Complete();
+  // Each response the host takes frees an IN slot and lets the next command run.
+  for (unsigned i = 0; i < 4; ++i)
+  {
+    TEST_ASSERT(f.in.active);
+    f.in.Complete();
+    Run(f);
+  }
   TEST_ASSERT(!f.in.active);
+  TEST_ASSERT(f.in.sent.size() == 4);
+  TEST_ASSERT(f.out.active);
 }
 
 void TestDelayedCommand()
@@ -214,7 +234,7 @@ void TestDelayedCommand()
   f.dap.BindEndpoints(f.pool, 0, false);
 
   // A delay command is only received by the USB side; nothing is executed or answered
-  // until the DAP thread steps, and the next receive is already armed.
+  // until the DAP thread steps, and the OUT slots keep receiving.
   f.out.HostSends({DELAY, 0x10, 0x27});  // 10000 us
   TEST_ASSERT(f.in.starts.empty());
   TEST_ASSERT(f.out.active);
@@ -231,7 +251,6 @@ void TestDelayedCommand()
   f.in.Complete();
 }
 
-/// 批命令里包含延时命令：延时在 Step 线程里睡完，批响应一次完整发出。
 /// A batch that contains a delay command: the delay is slept out in the Step thread and
 /// the batch response goes out whole.
 void TestBatchWithDelay()
@@ -240,11 +259,8 @@ void TestBatchWithDelay()
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // QUEUE_COMMANDS：两条命令入队——DAP_Info 与一个 2 ms 的 DAP_Delay。线格式是
-  // 命令直接拼接（长度由命令 ID 决定，无前缀）。
-  // QUEUE_COMMANDS: enqueue two commands - DAP_Info and a 2 ms DAP_Delay. The wire
-  // format is plain concatenation (each command's length follows from its ID, no
-  // prefix).
+  // QUEUE_COMMANDS: enqueue two commands - DAP_Info and a 2 ms DAP_Delay. The wire format
+  // is plain concatenation (each command's length follows from its ID, no prefix).
   std::vector<uint8_t> queue{
       static_cast<uint8_t>(CommandId::QUEUE_COMMANDS),
       2u,
@@ -260,18 +276,14 @@ void TestBatchWithDelay()
       std::vector<uint8_t>({static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 0x00}));
   f.in.Complete();
 
-  // EXECUTE_COMMANDS：批内的延时命令让 Step 睡到到期，整条批响应一次完整到达：
-  // [EXECUTE, INFO 响应, DELAY 响应]，没有第二条多余响应。
   // EXECUTE_COMMANDS: the delay inside the batch makes Step sleep until it is due, and
   // the whole batch response arrives at once: [EXECUTE, INFO response, DELAY response],
   // with no second stray response.
   Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
   TEST_ASSERT(f.in.active);
   const auto& batch = f.in.Last().data;
-  // INFO 响应：[INFO, len=7, "XRobot" + NUL]，共 9 字节（批内 [1..9]）；DELAY
-  // 响应 [DELAY, 0x00] 跟在 [10..11]，批总长 12。
-  // INFO response: [INFO, len=7, "XRobot" + NUL], 9 bytes total (batch [1..9]);
-  // the DELAY response [DELAY, 0x00] follows at [10..11], batch length 12.
+  // INFO response: [INFO, len=7, "XRobot" + NUL], 9 bytes total (batch [1..9]); the DELAY
+  // response [DELAY, 0x00] follows at [10..11], batch length 12.
   TEST_ASSERT(batch[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
   TEST_ASSERT(batch[1] == static_cast<uint8_t>(CommandId::INFO));
   TEST_ASSERT(batch[2] == 7U);    // "XRobot" incl. NUL
@@ -280,13 +292,9 @@ void TestBatchWithDelay()
   TEST_ASSERT(batch[11] == 0x00);  // DAP_OK
   TEST_ASSERT(f.in.Last().length == 12U);
   f.in.Complete();
-
-  // 批后 OUT 重新挂接收。
-  // The OUT endpoint is rearmed after the batch.
   TEST_ASSERT(f.out.active);
 }
 
-/// 下一条命令在上一条执行（这里是延时）期间就已收下，按序在它之后执行。
 /// The next command is received while the previous one executes (here: a delay) and runs
 /// after it, in order.
 void TestNextCommandReceivedDuringDelay()
@@ -299,8 +307,8 @@ void TestNextCommandReceivedDuringDelay()
   std::thread dap_thread([&f]() { (void)f.dap.Step(1000); });
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
-  // The host sends the next command while the delay is pending: it is received (the
-  // USB side does not wait for the DAP thread) but not executed, and nothing answers.
+  // The host sends the next command while the delay is pending: it is received (the USB
+  // side does not wait for the DAP thread) but not executed, and nothing answers.
   f.out.HostSends({INFO, PACKET_SIZE_ID});
   dap_thread.join();
 
@@ -313,32 +321,15 @@ void TestNextCommandReceivedDuringDelay()
   TEST_ASSERT(!f.in.active && f.out.active);
 }
 
-/// 响应恰好等于 DAP 包长时主机的包长缓冲读满即结束，不补零长包；补了会留下一个主机不取的
-/// 零长包，占住响应队列的一个位置。短于包长的端点包长整数倍响应仍要补零长包收尾。
 /// A response exactly as long as the DAP packet needs no ZLP (the host's packet-sized
-/// read ends when full); one would stay armed on the endpoint and keep a response-queue
-/// slot occupied. A response shorter than the DAP packet that is a multiple of the
-/// endpoint packet size still ends with a ZLP.
+/// read ends when full); one would stay armed on the endpoint and keep an IN slot
+/// occupied. A response shorter than the DAP packet that is a multiple of the endpoint
+/// packet size still ends with a ZLP.
 void TestZlpOnlyBelowDapPacketSize()
 {
   FreshTimerList();
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
-
-  // Complete every hardware request of one response; count bytes and zero-length tails.
-  auto drain = [&f](size_t& bytes, unsigned& tails)
-  {
-    bytes = 0;
-    tails = 0;
-    while (f.in.active)
-    {
-      if (f.in.Last().length == 0)
-        ++tails;
-      else
-        bytes += f.in.Last().length;
-      f.in.Complete();
-    }
-  };
   size_t bytes;
   unsigned tails;
 
@@ -348,18 +339,17 @@ void TestZlpOnlyBelowDapPacketSize()
   info.vendor = vendor.c_str();
   f.dap.SetInfoStrings(info);
   Send(f, {INFO, static_cast<uint8_t>(InfoId::VENDOR)});
-  drain(bytes, tails);
+  Drain(f, bytes, tails);
   TEST_ASSERT(bytes == 64 && tails == 1);
 
   // 1024 bytes = the DAP packet size (a 255-word block read): no ZLP.
   Send(f, {CONNECT, static_cast<uint8_t>(Port::SWD)});
-  drain(bytes, tails);
+  Drain(f, bytes, tails);
   Send(f, {static_cast<uint8_t>(CommandId::TRANSFER_BLOCK), 0x00, 0xFF, 0x00, 0x0F});
-  drain(bytes, tails);
+  Drain(f, bytes, tails);
   TEST_ASSERT(bytes == 1024 && tails == 0);
 }
 
-/// 命令长度恰为端点包长的整数倍、主机不补零长包：按命令自己的长度结束，不等到超时。
 /// A command whose length is a multiple of the endpoint packet size and no ZLP from the
 /// host: it ends by the command's own length instead of waiting for a timeout.
 void TestCommandOnPacketBoundaryEndsWithoutZlp()
@@ -379,8 +369,8 @@ void TestCommandOnPacketBoundaryEndsWithoutZlp()
 
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   Host(f, std::vector<uint8_t>(queue.begin(), queue.begin() + 64));
-  // The first packet does not complete the command: exactly the missing 64 bytes are
-  // asked for, and nothing has been answered.
+  // The first packet does not complete the command; the second slot is already armed for
+  // the second packet. Nothing has been answered.
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   TEST_ASSERT(f.in.starts.empty());
   Host(f, std::vector<uint8_t>(queue.begin() + 64, queue.end()));
@@ -389,9 +379,9 @@ void TestCommandOnPacketBoundaryEndsWithoutZlp()
   TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::QUEUE_COMMANDS));
 }
 
-/// 主机把传输补零到 DAP 包长：补零部分不当作命令，命令只执行一次。
 /// The host pads its transfer with zeros to the DAP packet size: the padding is not taken
-/// for commands and the command runs once.
+/// for commands, it is asked for in as few requests as the content allows, and the
+/// command runs once.
 void TestZeroPaddedTransferIsDropped()
 {
   FreshTimerList();
@@ -404,17 +394,14 @@ void TestZeroPaddedTransferIsDropped()
   Host(f, first);  // the command is complete inside the first packet
   TEST_ASSERT(f.in.active && f.in.starts.size() == 1);
   f.in.Complete();
-  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
 
-  // The next whole packet is all zero: padding. The rest of the 1024 byte transfer is
-  // asked for in one receive and dropped.
+  // The next whole packet is all zero: padding. The rest of the 1024 byte transfer (896
+  // bytes) is asked for in one request on top of the packet that is already queued.
   Host(f, std::vector<uint8_t>(64, 0));
-  // The remaining 896 bytes arrive as 14 packets of the one receive; no command starts.
-  for (unsigned i = 0; i < 14; ++i)
-  {
-    TEST_ASSERT(f.out.active);
-    Host(f, std::vector<uint8_t>(64, 0));
-  }
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);  // the queued padding packet
+  Host(f, std::vector<uint8_t>(64, 0));
+  TEST_ASSERT(f.out.active && f.out.Last().length == 1024 - 192);  // the rest at once
+  Host(f, std::vector<uint8_t>(1024 - 192, 0));
   TEST_ASSERT(f.out.active && f.out.Last().length == 64);
   TEST_ASSERT(f.in.starts.size() == 1);  // no response to padding
 
@@ -424,9 +411,7 @@ void TestZeroPaddedTransferIsDropped()
   f.in.Complete();
 }
 
-/// DAP_TransferAbort 没有响应，也不占命令环；接收继续。
-/// DAP_TransferAbort has no response and does not take a command-ring place; reception
-/// goes on.
+/// DAP_TransferAbort has no response and does not take a command slot; reception goes on.
 void TestTransferAbortHasNoResponse()
 {
   FreshTimerList();
@@ -447,7 +432,6 @@ void TestTransferAbortHasNoResponse()
   f.in.Complete();
 }
 
-/// EXECUTE_COMMANDS 自带的命令和已排队的命令一起执行。
 /// The commands carried by EXECUTE_COMMANDS run together with the queued ones.
 void TestExecuteCommandsWithInlineCommands()
 {
@@ -467,75 +451,43 @@ void TestExecuteCommandsWithInlineCommands()
   f.in.Complete();
 }
 
-/// 补零到 DAP 包长的请求，窗口里放满 4 条命令：第 4 条的补零也要收完，否则主机的写
-/// 无法结束，也就不会去读响应，设备和主机互相等。
-/// Zero-padded requests with the window filled to four commands: the padding of the
-/// fourth must still be taken, or the host's write cannot finish, it never reads the
-/// responses, and device and host wait for each other.
-void TestPaddedRequestsFillTheWindowWithoutStalling()
+/// Padded requests with the slots full: the padding of the last admitted request is still
+/// taken (it needs no command slot), so the host's write finishes, it reads the responses
+/// and everything drains. A fifth command's first packet waits as a lease until a command
+/// slot is free.
+void TestPaddedRequestsAndAFifthCommandDrain()
 {
   FreshTimerList();
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  for (unsigned request = 0; request < 4; ++request)
+  auto padded = [&f]()
   {
     std::vector<uint8_t> first(64, 0);
     first[0] = INFO;
     first[1] = PACKET_SIZE_ID;
-    TEST_ASSERT(f.out.active);
     Host(f, first);
-    // The padding that follows is taken whether or not the window is full.
-    for (unsigned packet = 1; packet < 16; ++packet)
-    {
-      TEST_ASSERT(f.out.active);
-      Host(f, std::vector<uint8_t>(64, 0));
-    }
-  }
-  // Four commands outstanding: the window is full, one response is on the wire.
-  TEST_ASSERT(!f.out.active);
-  TEST_ASSERT(f.in.starts.size() == 1);
-
-  // Retiring the responses opens the window again and reception resumes.
-  for (unsigned i = 0; i < 4; ++i)
-  {
-    TEST_ASSERT(f.in.active);
-    f.in.Complete();
-  }
-  TEST_ASSERT(!f.in.active && f.out.active);
-}
-
-/// 窗口满时，探针里收到的下一条命令不能挤进来（执行时会没有响应槽）：它留着，等一个
-/// 响应发送完、窗口空出来才放进命令池。
-/// With the window full, the next command received through the probe must not squeeze
-/// in (it would find no response slot when it runs): it waits until a response has been
-/// sent and the window has a place.
-void TestCommandBeyondTheWindowWaitsInTheProbe()
-{
-  FreshTimerList();
-  DapFixture f;
-  f.dap.BindEndpoints(f.pool, 0, false);
-
-  // Four commands, each exactly one whole packet (INFO then zeros, no padding after).
-  std::vector<uint8_t> command(64, 0);
-  command[0] = INFO;
-  command[1] = PACKET_SIZE_ID;
-  std::vector<uint8_t> next_command(64, 0x11);  // a fifth, non-zero first packet
-  next_command[0] = INFO;
-  next_command[1] = PACKET_SIZE_ID;
+    Host(f, std::vector<uint8_t>(64, 0));  // detects the padding
+    // The rest arrives as one request on top of what is queued.
+    Host(f, std::vector<uint8_t>(64, 0));
+    Host(f, std::vector<uint8_t>(1024 - 192, 0));
+  };
   for (unsigned i = 0; i < 4; ++i)
   {
     TEST_ASSERT(f.out.active);
-    Host(f, command);
+    padded();
   }
-  // The fifth command's first packet arrives through the probe; the window is full, so it
-  // is held there and nothing more is received or answered.
+  TEST_ASSERT(f.in.starts.size() == 1);  // one response on the wire, the rest wait
   TEST_ASSERT(f.out.active);
-  Host(f, next_command);
-  TEST_ASSERT(!f.out.active);
+
+  // A fifth command: its first packet is kept as a lease, no command slot is free.
+  std::vector<uint8_t> fifth(64, 0x11);
+  fifth[0] = INFO;
+  fifth[1] = PACKET_SIZE_ID;
+  Host(f, fifth);
   TEST_ASSERT(f.in.starts.size() == 1);
 
-  // A response goes out: the window opens and the held command runs.
+  // The host reads: every response goes out, the fifth command runs last.
   unsigned answered = 0;
   while (f.in.active)
   {
@@ -543,11 +495,10 @@ void TestCommandBeyondTheWindowWaitsInTheProbe()
     Run(f);
     ++answered;
   }
-  TEST_ASSERT(answered == 5);  // 4 + the held fifth
+  TEST_ASSERT(answered == 5);
   TEST_ASSERT(f.out.active);
 }
 
-/// 单功能设备用设备级 MS OS 2.0 描述符集（Windows 对非复合设备不看功能子集头）。
 /// A single-function device uses the device-level MS OS 2.0 descriptor set (Windows
 /// ignores the function subset header on a non-composite device).
 void TestStandaloneDeviceUsesDeviceLevelWinUsbSet()
@@ -595,10 +546,10 @@ int main()
   TestZeroPaddedTransferIsDropped();
   TestTransferAbortHasNoResponse();
   TestExecuteCommandsWithInlineCommands();
-  TestPaddedRequestsFillTheWindowWithoutStalling();
-  TestCommandBeyondTheWindowWaitsInTheProbe();
+  TestPaddedRequestsAndAFifthCommandDrain();
   TestStandaloneDeviceUsesDeviceLevelWinUsbSet();
   TestUnbind();
   std::puts(
-      "DAP v2 class: copy-mode Read/Write, response depth and deferred delay passed");
+      "DAP v2 class: borrow-mode receive and submit, response depth and deferred delay "
+      "passed");
 }

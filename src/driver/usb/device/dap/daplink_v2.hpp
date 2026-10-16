@@ -149,7 +149,7 @@ class DapLinkV2Class : public DeviceClass
   bool IsInited() const { return inited_; }
 
   /**
-   * @brief Whether IN endpoint is busy (a copy-mode Write is in flight)
+   * @brief Whether IN endpoint is busy
    *
    * @return true
    * @return false
@@ -157,12 +157,11 @@ class DapLinkV2Class : public DeviceClass
   bool EpInBusy()
   {
     auto ep = ep_data_in_;
-    return (ep != nullptr && ep->GetState() != Endpoint::State::IDLE) ||
-           response_write_active_;
+    return ep != nullptr && ep->GetState() != Endpoint::State::IDLE;
   }
 
   /**
-   * @brief Whether OUT endpoint is busy (a copy-mode Read is in flight)
+   * @brief Whether OUT endpoint is busy
    *
    * @return true
    * @return false
@@ -170,8 +169,7 @@ class DapLinkV2Class : public DeviceClass
   bool EpOutBusy()
   {
     auto ep = ep_data_out_;
-    return (ep != nullptr && ep->GetState() != Endpoint::State::IDLE) ||
-           command_read_active_;
+    return ep != nullptr && ep->GetState() != Endpoint::State::IDLE;
   }
 
   /**
@@ -248,31 +246,63 @@ class DapLinkV2Class : public DeviceClass
    */
   ErrorCode Step(uint32_t timeout_ms = UINT32_MAX)
   {
-    step_epoch_ = epoch_.load(std::memory_order_acquire);
     if (pending_action_.load(std::memory_order_acquire) !=
         static_cast<uint8_t>(PendingAction::NONE))
     {
       RunPendingAction();
       return ErrorCode::OK;
     }
-    size_t slot = SLOT_NONE;
-    if (cmd_pool_.Take(slot) != ErrorCode::OK)
+    if (cur_cmd_ == SLOT_NONE)
     {
-      if (cmd_sem_.Wait(timeout_ms) != ErrorCode::OK)
+      size_t slot = SLOT_NONE;
+      if (cmd_pool_.Take(slot) != ErrorCode::OK)
+      {
+        if (cmd_sem_.Wait(timeout_ms) != ErrorCode::OK)
+        {
+          return ErrorCode::TIMEOUT;
+        }
+        if (cmd_pool_.Take(slot) != ErrorCode::OK)
+        {
+          return ErrorCode::OK;  // woken by a bind/unbind, nothing to execute
+        }
+      }
+      cur_cmd_ = slot;
+      cur_epoch_ = epoch_.load(std::memory_order_acquire);
+    }
+    Endpoint* const in_ep = step_in_ep_.load(std::memory_order_acquire);
+    if (!inited_ || in_ep == nullptr)
+    {
+      AbandonCurrent();
+      return ErrorCode::OK;
+    }
+    // 响应直接写进 IN 端点的槽：两个槽都被还没被主机取走的响应占着时，在这里等一个槽
+    // 放出来；命令继续由本线程持有，超时返回后下一次 Step 接着等。
+    // The response is written straight into an IN endpoint slot: while both slots hold
+    // responses the host has not taken, wait here for one to come back. The command stays
+    // with this thread; after a timeout the next Step goes on waiting.
+    while (!cur_in_.Valid())
+    {
+      const ErrorCode ec = in_ep->AcquireSlot(cur_in_, false);
+      if (ec == ErrorCode::OK)
+      {
+        break;
+      }
+      if (ec != ErrorCode::BUSY)
+      {
+        AbandonCurrent();
+        return ErrorCode::OK;
+      }
+      if (slot_sem_.Wait(timeout_ms) != ErrorCode::OK)
       {
         return ErrorCode::TIMEOUT;
       }
-      if (cmd_pool_.Take(slot) != ErrorCode::OK)
+      if (!inited_)
       {
-        return ErrorCode::OK;  // woken by a bind/unbind, nothing to execute
+        AbandonCurrent();
+        return ErrorCode::OK;
       }
     }
-    if (!inited_)
-    {
-      cmd_pool_.Release(slot);
-      return ErrorCode::OK;
-    }
-    ProcessReceivedCommand(slot, false);
+    ExecuteCurrent(false);
     // 延时类命令在这里睡到到期并发布响应，一次 Step 就把一条命令做完。
     // A delay-type command sleeps until it is due and publishes its response here, so
     // one Step finishes one command.
@@ -314,15 +344,27 @@ class DapLinkV2Class : public DeviceClass
 
     // Configure endpoints with the largest packet size the slots and the controller
     // hold at the current speed (0 when there is none). A failed Configure leaves the
-    // endpoint in ERROR and the composition rejects the configuration. Commands and
-    // responses move in copy mode (Read/Write), so the wire packet size may be smaller
-    // than a DAP packet and the logical command storage stays independent from it.
+    // endpoint in ERROR and the composition rejects the configuration. Both directions
+    // work in borrow mode: the OUT slots lend each received packet to the callback, and
+    // the response is written straight into an IN slot.
     const uint16_t out_packet = ep_data_out_->LargestPacketSize(Endpoint::Type::BULK);
     const uint16_t in_packet = ep_data_in_->LargestPacketSize(Endpoint::Type::BULK);
     (void)ep_data_out_->Configure(
         {Endpoint::Direction::OUT, Endpoint::Type::BULK, out_packet}, in_isr);
     (void)ep_data_in_->Configure(
         {Endpoint::Direction::IN, Endpoint::Type::BULK, in_packet}, in_isr);
+
+    // 通告给主机的 DAP 包长不能超过 IN 槽：响应原地写在槽里。
+    // The DAP packet size announced to the host cannot exceed an IN slot: the response is
+    // written in place.
+    {
+      const size_t in_capacity = ep_data_in_->GetGranted().slot_capacity;
+      const uint16_t configured = ConfiguredDapPacketSize();
+      dap_packet_size_.store((in_capacity != 0U && in_capacity < configured)
+                                 ? static_cast<uint16_t>(in_capacity)
+                                 : configured,
+                             std::memory_order_release);
+    }
 
     // Hook completion callbacks (they run in the owner and must stay shallow).
     ep_data_out_->SetOnComplete(on_data_out_cb_);
@@ -378,12 +420,11 @@ class DapLinkV2Class : public DeviceClass
     ResetQueuedCommandState();
     ResetJtagChainState();
     ResetChannels();
-    command_read_active_ = false;
-    response_write_active_ = false;
     CancelPendingAction();
 
+    step_in_ep_.store(ep_data_in_, std::memory_order_release);
     inited_ = true;
-    ArmOutTransferIfIdle(in_isr);
+    TopUpReceives(in_isr);
   }
 
   /**
@@ -407,9 +448,12 @@ class DapLinkV2Class : public DeviceClass
     // copy transfers arrive synchronously inside Close, where the callback entry
     // ignores them because inited_ is already false.
     ResetChannels();
-    command_read_active_ = false;
-    response_write_active_ = false;
     CancelPendingAction();
+    step_in_ep_.store(nullptr, std::memory_order_release);
+    // 叫醒可能在等命令或等 IN 槽的 Step 线程。
+    // Wake a Step thread that may be waiting for a command or for an IN slot.
+    cmd_sem_.PostFromCallback(in_isr);
+    slot_sem_.PostFromCallback(in_isr);
 
     if (ep_data_in_)
     {
@@ -540,11 +584,11 @@ class DapLinkV2Class : public DeviceClass
     {
       return;
     }
-    // 服务上下文只做 USB 侧的事：把已完成的响应发出去，补挂接收。命令由 Step() 执行。
-    // The service context only does the USB side: send finished responses and re-arm the
-    // receive. Commands are executed by Step().
-    KickResponse(in_isr);
-    ArmOutTransferIfIdle(in_isr);
+    // 服务上下文只做 USB 侧的事：处理被留住的包，补挂接收。命令由 Step() 执行。
+    // The service context only does the USB side: handle packets that were held and
+    // re-arm the receives. Commands are executed by Step().
+    DrainHeldPackets(in_isr);
+    TopUpReceives(in_isr);
   }
 
  private:
@@ -712,161 +756,161 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief OUT 完成回调：浅操作。一条命令已完整落进命令环，登记后
-   *        请求类服务执行；命令处理不在回调里做。
-   *        OUT completion: shallow. One whole command has landed in the command ring;
-   *        record it and ask the class service to run it. Commands never execute
-   *        inside the completion callback.
+   * @brief OUT 完成回调：借出一个槽，里面是刚收到的一个（或几个）包。
+   *        OUT completion: one slot is lent, holding the packet (or packets) just
+   *        received.
+   *
+   * 包按命令拼装进命令池的槽里，拼完的命令发布给 Step 线程。槽立刻归还，另一个槽一直
+   * 在收下一个包，所以两个槽交替，不用等回调处理完。命令池没有空槽时，这个包不拷走，
+   * 租约留着（最多两个），端点没有可用的槽就会 NAK，等 Step 线程放出命令槽后再处理。
+   * Packets are assembled into slots of the command pool and a finished command is
+   * published to the Step thread. The slot is given back at once and the other slot is
+   * already receiving the next packet, so the two alternate and the callback's work does
+   * not delay the wire. With no free command slot the packet is not copied: the lease is
+   * kept (two at most) and the endpoint NAKs for lack of a slot until the Step thread
+   * gives a command slot back.
    */
   void OnDataOutComplete(bool in_isr, const Endpoint::Completion& completion)
   {
     if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
-    command_read_active_ = false;
+    if (armed_n_ > 0u)
+    {
+      armed_sz_[0] = armed_sz_[1];
+      --armed_n_;
+    }
     if (completion.result != ErrorCode::OK)
     {
-      // ABORTED 只在解绑时出现（回调入口已按 inited_ 拦截）；SIZE_ERR 表示主机
-      // 超过 DAP 包长超发、命令流不完整，丢弃这一段并重新挂接收。
-      // ABORTED only appears while unbinding (the entry guard filtered it through
-      // inited_); SIZE_ERR means the host overran the DAP packet size and the
-      // command stream is incomplete: drop the fragment and re-arm the receive.
-      ResetOutAssembly();
-      ArmOutTransferIfIdle(in_isr);
+      // ABORTED 只在解绑时出现（回调入口已按 inited_
+      // 拦截）；其它错误意味着字节流失去同步， 丢弃正在拼装的命令重新开始。 ABORTED only
+      // appears while unbinding (the entry guard filtered it through inited_); any other
+      // error means the byte stream lost sync: drop the command being assembled and start
+      // over.
+      ResetStream();
+      TopUpReceives(in_isr);
       return;
     }
-
-    const size_t n = completion.actual;
-    if (rx_discard_)
+    const uint16_t size = static_cast<uint16_t>(completion.actual);
+    if (held_n_ > 0u || !ConsumePacket(completion.slot, size, in_isr))
     {
-      // 补零部分已收完，丢弃。
-      // The zero padding has been taken; drop it.
-      ResetOutAssembly();
-      ArmOutTransferIfIdle(in_isr);
-      return;
+      REQUIRE(held_n_ < 2u);
+      held_[held_n_++] = {completion.slot, size};
     }
-    if (rx_probe_active_)
-    {
-      rx_probe_active_ = false;
-      HandleProbe(n, in_isr);
-      return;
-    }
-    HandleChunk(n, in_isr);
+    TopUpReceives(in_isr);
   }
 
-  /// 解绑/重新绑定：放掉 USB 侧持有的槽，排空两个池里已就绪的槽，窗口清零。Step
-  /// 线程手里的 槽由它自己放（见 AbandonCurrent），epoch 让它知道自己的命令已经作废。
-  /// Unbind/bind: give back the slots the USB side holds, drain the ready slots of both
-  /// pools and clear the window. The slots in the Step thread's hands are given back by
-  /// it (see AbandonCurrent); the epoch tells it that its command has been voided.
+  /// IN 完成：一个槽回到空闲，叫醒在等 IN 槽的 Step 线程 / IN completion: a slot is free
+  /// again, wake a Step thread waiting for one
+  void OnDataInComplete(bool in_isr, const Endpoint::Completion& completion)
+  {
+    UNUSED(completion);
+    if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
+    slot_sem_.PostFromCallback(in_isr);
+  }
+
+  /// 解绑/重新绑定：放掉 USB 侧持有的东西，排空命令池里已就绪的槽。Step 线程手里的槽由它
+  /// 自己放（见 AbandonCurrent），epoch 让它知道自己的命令已经作废。
+  /// Unbind/bind: give back what the USB side holds and drain the ready slots of the
+  /// command pool. The slots in the Step thread's hands are given back by it (see
+  /// AbandonCurrent); the epoch tells it that its command has been voided.
   void ResetChannels()
   {
     epoch_.fetch_add(1u, std::memory_order_acq_rel);
-    ResetOutAssembly();
-    if (send_slot_ != SLOT_NONE)
-    {
-      resp_pool_.Release(send_slot_);
-      send_slot_ = SLOT_NONE;
-    }
+    ResetStream();
+    held_n_ = 0u;
+    armed_n_ = 0u;
     size_t slot = SLOT_NONE;
     while (cmd_pool_.Take(slot) == ErrorCode::OK)
     {
       cmd_pool_.Release(slot);
     }
-    while (resp_pool_.Take(slot) == ErrorCode::OK)
-    {
-      resp_pool_.Release(slot);
-    }
-    outstanding_.store(0u, std::memory_order_release);
   }
 
-  /// 探针接收：上一条命令以整包结束后，紧接着的那一包先收进探针缓冲，不占命令环，也
-  /// 不受响应窗口限制——它可能是同一次主机传输的补零，不收走主机就写不完。
-  /// Probe receive: after a command ended on a whole packet, the packet that follows is
-  /// taken into the probe buffer. It uses no ring place and is not held back by the
-  /// response window, because it may be padding of the same host transfer, which the
-  /// host cannot finish writing unless it is taken.
-  void StartProbeRead(size_t size, bool in_isr)
+  /// 字节流状态归零：放掉正在拼装的命令槽 / Reset the byte-stream state: give back the
+  /// command slot being assembled
+  void ResetStream()
   {
-    if (ep_data_out_->Read({rx_probe_, size}, in_isr) == ErrorCode::OK)
+    if (rx_slot_ != SLOT_NONE)
     {
-      command_read_active_ = true;
-      rx_probe_active_ = true;
-    }
-  }
-
-  void HandleProbe(size_t n, bool in_isr)
-  {
-    const uint16_t mps = OutChunkSize();
-    const uint16_t packet = GetDapPacketSize();
-    if (n == 0u)
-    {
-      rx_pad_base_ = 0u;
-      ArmOutTransferIfIdle(in_isr);
-      return;
-    }
-    // 整包全零不是命令（命令号 0 后面跟信息 ID 0 不是合法命令）：它是补零，连同这次
-    // 传输剩下的补零一起丢弃。
-    // An all-zero whole packet is not a command (command 0 with info ID 0 is not valid):
-    // it is padding, dropped together with the rest of this transfer's padding.
-    if (n == mps && rx_pad_base_ != 0u && IsAllZero(rx_probe_, n))
-    {
-      const size_t used = static_cast<size_t>(rx_pad_base_) + n;
-      rx_pad_base_ = 0u;
-      if (used < packet)
-      {
-        rx_discard_ = true;
-        StartProbeRead(static_cast<size_t>(packet) - used, in_isr);
-      }
-      else
-      {
-        ArmOutTransferIfIdle(in_isr);
-      }
-      return;
-    }
-    rx_pad_base_ = 0u;
-    // 下一条命令的第一包。窗口由主机遵守（它不会超过宣称的命令数），但命令环可能暂时
-    // 满着：先留在探针里，环里腾出位置后再放进去。
-    // The first packet of the next command. The host keeps to the advertised command
-    // count, but the ring may be full for the moment: keep it in the probe and move it
-    // into the ring once a place frees.
-    rx_probe_len_ = static_cast<uint16_t>(n);
-    rx_probe_stashed_ = true;
-    DeliverStashedProbe(in_isr);
-  }
-
-  void DeliverStashedProbe(bool in_isr)
-  {
-    if (!rx_probe_stashed_ || command_read_active_)
-    {
-      return;
-    }
-    // 窗口满时留在探针里：探针只是用来不卡住补零，不能让一个超窗口的命令挤进来，那样
-    // 执行时会没有响应槽。
-    // With the window full it stays in the probe: the probe exists so padding does not
-    // block the host, and it must not let a command beyond the window in, which would
-    // find no response slot when it runs.
-    if (outstanding_.load(std::memory_order_acquire) >= MAX_OUTSTANDING_RESPONSES)
-    {
-      return;
-    }
-    if (rx_slot_ == SLOT_NONE && cmd_pool_.Acquire(rx_slot_) != ErrorCode::OK)
-    {
+      cmd_pool_.Release(rx_slot_);
       rx_slot_ = SLOT_NONE;
-      return;  // 命令池满：等有槽放出来再放进去 / pool full: wait for a slot to come back
     }
-    rx_probe_stashed_ = false;
-    Memory::FastCopy(cmd_pool_.At(rx_slot_).data, rx_probe_, rx_probe_len_);
-    HandleChunk(rx_probe_len_, in_isr);
+    rx_off_ = 0u;
+    known_total_ = 0u;
+    pad_base_ = 0u;
+    pad_skip_ = 0u;
   }
 
-  /// 装配中的命令又收到 n 字节 / n more bytes of the command being assembled
-  void HandleChunk(size_t n, bool in_isr)
+  /// 一个收到的包（或几个包）：拷进命令槽、判断命令是否收齐，租约在拷完后立刻归还。返回
+  /// false 表示命令池没有空槽，什么都没动，租约要留着。
+  /// One received chunk: copy it into the command slot, decide whether the command is
+  /// complete, and give the lease back right after the copy. Returns false when the
+  /// command pool has no free slot: nothing was touched and the lease must be kept.
+  bool ConsumePacket(const Endpoint::Slot& slot, uint16_t n, bool in_isr)
   {
     const uint16_t mps = OutChunkSize();
     const uint16_t packet = GetDapPacketSize();
-    CommandSlot& command = cmd_pool_.At(rx_slot_);
-    uint8_t* const buffer = command.data;
+    const uint8_t* data = static_cast<const uint8_t*>(slot.data.addr_);
 
+    // 上一条命令的传输被主机补零到 DAP 包长：补零部分整段丢弃，不需要命令槽，也不受命令池
+    // 是否有空槽限制，否则主机的写结束不了。
+    // The previous command's transfer was padded by the host to the DAP packet size: the
+    // padding is dropped without a command slot and regardless of whether the command
+    // pool has a free slot, or the host's write could not finish.
+    if (pad_skip_ > 0u && n <= pad_skip_)
+    {
+      pad_skip_ = static_cast<uint16_t>(pad_skip_ - n);
+      ep_data_out_->ReleaseSlot(slot, in_isr);
+      return true;
+    }
+    // 上一条命令以整包结束后紧接着的整包全零不是命令（命令号 0 后面跟信息 ID 0 不是合法
+    // 命令）：它是补零，这次传输还剩的字节数记在 pad_skip_ 里。
+    // An all-zero whole packet right after a command that ended on a whole packet is not
+    // a command (command 0 with info ID 0 is not valid): it is padding, and the bytes
+    // this transfer still has are kept in pad_skip_.
+    if (rx_off_ == 0u && pad_skip_ == 0u && pad_base_ != 0u && n == mps &&
+        IsAllZero(data, n))
+    {
+      const uint16_t used = static_cast<uint16_t>(pad_base_ + n);
+      pad_skip_ = used < packet ? static_cast<uint16_t>(packet - used) : 0u;
+      pad_base_ = 0u;
+      ep_data_out_->ReleaseSlot(slot, in_isr);
+      return true;
+    }
+
+    // 从这里起要把字节拷进命令槽；没有空槽就什么都不动。
+    // From here the bytes go into a command slot; with no free one nothing is touched.
+    if (rx_slot_ == SLOT_NONE)
+    {
+      if (cmd_pool_.Acquire(rx_slot_) != ErrorCode::OK)
+      {
+        rx_slot_ = SLOT_NONE;
+        return false;
+      }
+      rx_off_ = 0u;
+      known_total_ = 0u;
+    }
+    if (pad_skip_ > 0u)
+    {
+      // 补零之后紧跟着下一条命令的字节。
+      // The padding is followed by the bytes of the next command.
+      data += pad_skip_;
+      n = static_cast<uint16_t>(n - pad_skip_);
+      pad_skip_ = 0u;
+    }
+    pad_base_ = 0u;
+
+    CommandSlot& command = cmd_pool_.At(rx_slot_);
+    if (static_cast<size_t>(rx_off_) + n > MAX_DAP_PACKET_SIZE)
+    {
+      // 超出命令槽：这条命令无法保留，丢弃并重新开始。
+      // Beyond the command slot: the command cannot be kept, drop it and start over.
+      ep_data_out_->ReleaseSlot(slot, in_isr);
+      ResetStream();
+      return true;
+    }
+    Memory::FastCopy(command.data + rx_off_, data, n);
     rx_off_ = static_cast<uint16_t>(rx_off_ + n);
+    ep_data_out_->ReleaseSlot(slot, in_isr);
 
     // 主机传输的结束：短包、零长包，或收满 DAP 包长。恰好整包结束的命令没有这些提示
     // （OpenOCD 的 bulk 写在整倍数长度时不补零长包），所以整包到来后按命令自己的长度
@@ -878,11 +922,10 @@ class DapLinkV2Class : public DeviceClass
     // only for the missing part.
     bool done = (n == 0u) || (n % mps != 0u) || (rx_off_ >= packet);
     bool padded_candidate = false;
-    size_t next = 0u;
     if (!done)
     {
       uint16_t length = 0u;
-      const CommandScan scan = ScanCommand(buffer, rx_off_, length);
+      const CommandScan scan = ScanCommand(command.data, rx_off_, length);
       if (scan == CommandScan::COMPLETE && length <= rx_off_)
       {
         done = true;
@@ -890,93 +933,116 @@ class DapLinkV2Class : public DeviceClass
       }
       else if (scan == CommandScan::COMPLETE)
       {
-        next = std::min<size_t>(length - rx_off_, packet - rx_off_);
+        known_total_ = std::min<uint16_t>(length, packet);
       }
       else if (scan == CommandScan::NEED_MORE)
       {
-        next = std::min<size_t>(mps, packet - rx_off_);
+        known_total_ = 0u;
       }
       else
       {
         // 长度未知的命令（JTAG、厂商命令）：按包长收，靠短包或收满结束。
         // Length unknown (JTAG, vendor commands): receive up to the packet size and rely
         // on a short packet or a full buffer.
-        next = packet - rx_off_;
+        known_total_ = packet;
       }
     }
-
     if (!done)
     {
-      StartOutRead(buffer, rx_off_, next, in_isr);
-      return;
+      return true;
     }
 
-    if (buffer[0] == ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT))
+    if (rx_off_ == 0u)
     {
-      // DAP_TransferAbort 收到即生效、没有响应：不进命令环。接收回调和命令执行在同一个
-      // owner 里时，它要等当前传输执行完才会被收到，此时标志在下一条传输开始时清掉；
-      // 命令在别的上下文执行（ExecuteExternal）时，正在执行的传输下一次检查标志即中止。
-      // DAP_TransferAbort takes effect on reception and has no response: it does not join
-      // the command ring. When the receive callback and the command execution share one
-      // owner it is only received after the current transfer finished, and the flag is
-      // cleared when the next transfer starts; when commands run in another context
-      // (ExecuteExternal) the transfer being executed aborts at its next flag check.
+      cmd_pool_.Release(rx_slot_);  // 空传输（只有零长包）不是命令 / an empty transfer
+    }
+    else if (command.data[0] == ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT))
+    {
+      // DAP_TransferAbort 收到即生效、没有响应：不进命令池。Step 线程正在执行传输时下一次
+      // 检查标志即中止。
+      // DAP_TransferAbort takes effect on reception and has no response: it does not
+      // join the command pool. A transfer the Step thread is executing aborts at its
+      // next flag check.
       SetTransferAbortFlag(true);
       cmd_pool_.Release(rx_slot_);
-      rx_slot_ = SLOT_NONE;
-      rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
-      rx_off_ = 0u;
-      if (padded_candidate)
-      {
-        StartProbeRead(mps, in_isr);
-      }
-      else
-      {
-        ArmOutTransferIfIdle(in_isr);
-      }
-      return;
-    }
-    command.len = rx_off_;
-    rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
-    rx_off_ = 0u;
-    // 发布命令：槽里的数据和长度写好后发布，Step() 线程 Take 到它。窗口计数在这里加一，
-    // 到这条命令的响应发送完成才减。
-    // Publish the command: with the data and length written, the Step() thread Takes it.
-    // The window count goes up here and down when this command's response has been sent.
-    outstanding_.fetch_add(1u, std::memory_order_acq_rel);
-    cmd_pool_.Publish(rx_slot_);
-    rx_slot_ = SLOT_NONE;
-    cmd_sem_.PostFromCallback(in_isr);
-    if (padded_candidate)
-    {
-      // 命令在整包处完整：主机可能还在补零，紧接着那一包不受响应窗口限制。
-      // The command is complete on a whole packet: the host may still be padding, so the
-      // packet that follows is not held back by the response window.
-      StartProbeRead(mps, in_isr);
     }
     else
     {
-      ArmOutTransferIfIdle(in_isr);
+      command.len = rx_off_;
+      cmd_pool_.Publish(rx_slot_);
+      cmd_sem_.PostFromCallback(in_isr);
+    }
+    rx_slot_ = SLOT_NONE;
+    pad_base_ = padded_candidate ? rx_off_ : 0u;
+    rx_off_ = 0u;
+    known_total_ = 0u;
+    return true;
+  }
+
+  /// 命令槽放出来之后，处理被留住的包（按到达顺序）/ After a command slot came back,
+  /// handle the packets that were held (in arrival order)
+  void DrainHeldPackets(bool in_isr)
+  {
+    while (held_n_ > 0u)
+    {
+      if (!ConsumePacket(held_[0].slot, held_[0].size, in_isr))
+      {
+        return;
+      }
+      held_[0] = held_[1];
+      --held_n_;
     }
   }
 
-  /**
-   * @brief IN 完成回调：退役已发出的响应（Write 借用的队头），继续发下一条，
-   *        并按并发深度补挂 OUT 接收。
-   *        IN completion: retire the sent response (the queue head borrowed by the
-   *        Write), send the next one, and re-arm OUT while the response depth allows.
-   */
-  void OnDataInComplete(bool in_isr, const Endpoint::Completion& completion)
+  /// 保持两个槽都在收：下一个请求的大小按已知情况定，见 PlanNextSize。
+  /// Keep both slots receiving; the size of the next request depends on what is known,
+  /// see PlanNextSize.
+  void TopUpReceives(bool in_isr)
   {
-    UNUSED(completion);
-    if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
-    response_write_active_ = false;
-    REQUIRE(send_slot_ != SLOT_NONE);
-    resp_pool_.Release(send_slot_);
-    send_slot_ = SLOT_NONE;
-    outstanding_.fetch_sub(1u, std::memory_order_acq_rel);
-    KickResponse(in_isr);
-    ArmOutTransferIfIdle(in_isr);
+    if (!inited_ || !ep_data_out_) return;
+    while (armed_n_ < 2u)
+    {
+      const size_t size = PlanNextSize();
+      if (ep_data_out_->Receive(size, in_isr) != ErrorCode::OK)
+      {
+        break;
+      }
+      armed_sz_[armed_n_++] = size;
+    }
+  }
+
+  /// 下一个接收请求要多大。已经确定属于当前传输的字节一次要完（补零的剩余部分、已知长度
+  /// 的命令的剩余部分），扣掉已排队请求会收走的；否则只要一个端点包，收到后再看内容。
+  /// How large the next receive request is. Bytes known to belong to the current
+  /// transfer (the rest of the padding, the rest of a command of known length) are
+  /// asked for at once, minus what the requests already queued will take; otherwise one
+  /// endpoint packet, and the content decides after it arrives.
+  size_t PlanNextSize() const
+  {
+    const size_t mps = OutChunkSize();
+    size_t cap = ep_data_out_->GetGranted().slot_capacity;
+    cap -= cap % mps;
+    if (cap < mps) cap = mps;
+    size_t committed = 0u;
+    for (uint8_t i = 0u; i < armed_n_; ++i)
+    {
+      committed += armed_sz_[i];
+    }
+    size_t want = 0u;
+    if (pad_skip_ > committed)
+    {
+      want = pad_skip_ - committed;
+    }
+    else if (rx_off_ > 0u && known_total_ > rx_off_ + committed)
+    {
+      want = known_total_ - rx_off_ - committed;
+    }
+    if (want == 0u)
+    {
+      return mps;
+    }
+    want = ((want + mps - 1u) / mps) * mps;
+    return std::min(want, cap);
   }
 
   /// 延时命令：睡到到期再续做；每毫秒检查一次，解绑时提前结束。
@@ -1003,38 +1069,31 @@ class DapLinkV2Class : public DeviceClass
     }
   }
 
-  /// 执行 Take 到的这条命令（Step 线程）：命令槽和一个响应槽都由本线程持有，到响应发布
-  /// 才放出。延时命令（size 为 0）一直持有它们，续做完成后才发布。
-  /// Execute the command just Taken (Step thread): the command slot and a response slot
-  /// are held by this thread until the response is published. A delayed command (size 0)
-  /// keeps holding them and is published once it is carried on to completion.
-  void ProcessReceivedCommand(size_t command_slot, bool in_isr)
+  /// 执行手里的这条命令（Step 线程）：命令槽和一个 IN
+  /// 槽都由本线程持有，到响应提交才放出。 延时命令（size 为
+  /// 0）一直持有它们，续做完成后才提交。 Execute the command in hand (Step thread): the
+  /// command slot and an IN slot are held by this thread until the response is submitted.
+  /// A delayed command (size 0) keeps holding them and is submitted once it is carried on
+  /// to completion.
+  void ExecuteCurrent(bool in_isr)
   {
-    cur_cmd_ = command_slot;
-    // 窗口保证响应槽够用：每条在途命令最多占一个响应槽，窗口等于响应池大小。
-    // The window guarantees a response slot: every command in flight takes at most one,
-    // and the window equals the response pool size.
-    REQUIRE(resp_pool_.Acquire(cur_resp_) == ErrorCode::OK);
     CommandSlot& command = cmd_pool_.At(cur_cmd_);
-    ResponseSlot& response = resp_pool_.At(cur_resp_);
+    uint8_t* const resp = static_cast<uint8_t*>(cur_in_.data.addr_);
+    const uint16_t cap = static_cast<uint16_t>(
+        std::min<size_t>(cur_in_.data.size_, static_cast<size_t>(RESP_SLOT_SIZE)));
     uint16_t size = 0;
-    const auto result = ProcessOneCommand(in_isr, command.data, command.len,
-                                          response.payload, RESP_SLOT_SIZE, size);
+    const auto result =
+        ProcessOneCommand(in_isr, command.data, command.len, resp, cap, size);
     UNUSED(result);
     if (size == 0u)
     {
       if (pending_action_.load(std::memory_order_acquire) ==
           static_cast<uint8_t>(PendingAction::NONE))
       {
-        // 没有响应的命令：不发布，放出两个槽并让出窗口名额，USB 侧继续接收。
-        // A command without a response: nothing is published, both slots are given back
-        // together with the window place, and the USB side goes on receiving.
-        const bool current = StepStillBound();
+        // 没有响应的命令：不提交，放出两个槽，USB 侧可以继续处理被留住的包。
+        // A command without a response: nothing is submitted, both slots are given back
+        // and the USB side can go on with the packets it held.
         AbandonCurrent();
-        if (current)
-        {
-          outstanding_.fetch_sub(1u, std::memory_order_acq_rel);
-        }
         RequestClassService(false);
         return;
       }
@@ -1043,24 +1102,27 @@ class DapLinkV2Class : public DeviceClass
       // action is registered and Step() carries it on.
       return;
     }
-    REQUIRE(size <= RESP_SLOT_SIZE);
+    REQUIRE(size <= cap);
     CompleteResponse(size, in_isr);
   }
 
-  /// 这次 Step 开始以来没有发生解绑/重新绑定 / No unbind/bind since this Step began
+  /// 这条命令开始以来没有发生解绑/重新绑定 / No unbind/bind since this command began
   bool StepStillBound() const
   {
-    return inited_ && step_epoch_ == epoch_.load(std::memory_order_acquire);
+    return inited_ && cur_epoch_ == epoch_.load(std::memory_order_acquire);
   }
 
-  /// 放出本线程持有的命令槽和响应槽（不发布） / Give back the command and response
-  /// slots this thread holds (without publishing)
+  /// 放出本线程持有的命令槽和 IN 槽（不提交） / Give back the command slot and the IN
+  /// slot this thread holds (without submitting)
   void AbandonCurrent()
   {
-    if (cur_resp_ != SLOT_NONE)
+    if (cur_in_.Valid())
     {
-      resp_pool_.Release(cur_resp_);
-      cur_resp_ = SLOT_NONE;
+      if (Endpoint* const in_ep = step_in_ep_.load(std::memory_order_acquire))
+      {
+        in_ep->ReleaseSlot(cur_in_, false);
+      }
+      cur_in_ = Endpoint::Slot{};
     }
     if (cur_cmd_ != SLOT_NONE)
     {
@@ -1069,30 +1131,41 @@ class DapLinkV2Class : public DeviceClass
     }
   }
 
-  /// 发布响应槽，放出命令槽，并让 USB 侧去发送；延时的响应在续做完成后也从这里发布。
-  /// Publish the response slot, give back the command slot and let the USB side send;
-  /// a deferred response is published here once its continuation completes.
+  /// 提交 IN 槽里的响应，放出命令槽；延时的响应在续做完成后也从这里提交。
+  /// Submit the response in the IN slot and give back the command slot; a deferred
+  /// response is submitted here once its continuation completes.
   void CompleteResponse(uint16_t size, bool in_isr)
   {
     UNUSED(in_isr);
     if (external_active_)
     {
-      // ExecuteExternal 自己交付响应，不进 USB 响应池。
-      // ExecuteExternal delivers the response itself; it does not join the USB pool.
+      // ExecuteExternal 自己交付响应，不进 USB。
+      // ExecuteExternal delivers the response itself; it does not go to USB.
       external_size_ = size;
       return;
     }
-    if (!StepStillBound())
+    Endpoint* const in_ep = step_in_ep_.load(std::memory_order_acquire);
+    if (!StepStillBound() || in_ep == nullptr)
     {
-      // 命令执行期间发生了解绑/重新绑定：这条响应作废，窗口已被清零，不用再减。
-      // Unbound or rebound while the command ran: the response is void and the window
-      // was already cleared.
+      // 命令执行期间发生了解绑/重新绑定：这条响应作废。
+      // Unbound or rebound while the command ran: the response is void.
       AbandonCurrent();
       return;
     }
-    resp_pool_.At(cur_resp_).len = size;
-    resp_pool_.Publish(cur_resp_);
-    cur_resp_ = SLOT_NONE;
+    // 响应恰好等于 DAP 包长时主机读满 DAP 包长缓冲就结束，不补零长包；补了会留下一个
+    // 主机不取的零长包，占住 IN 槽，深流水下把命令流堵死。
+    // A response exactly as long as the DAP packet needs no ZLP: the host's
+    // DAP-packet-sized read completes when the buffer is full. A ZLP would stay armed,
+    // keeping an IN slot occupied, which stalls the command stream under a deep pipeline.
+    const size_t mps = in_ep->MaxPacketSize();
+    const bool need_zlp =
+        (mps != 0U) && (size % mps == 0U) && (size < GetDapPacketSize());
+    const ErrorCode ec = in_ep->Submit(cur_in_, size, need_zlp, false);
+    if (ec != ErrorCode::OK && ec != ErrorCode::ABORTED)
+    {
+      in_ep->ReleaseSlot(cur_in_, false);
+    }
+    cur_in_ = Endpoint::Slot{};
     cmd_pool_.Release(cur_cmd_);
     cur_cmd_ = SLOT_NONE;
     RequestClassService(false);
@@ -1181,6 +1254,13 @@ class DapLinkV2Class : public DeviceClass
    * @brief Get effective DAP packet size
    */
   uint16_t GetDapPacketSize() const
+  {
+    return dap_packet_size_.load(std::memory_order_acquire);
+  }
+
+  /// 配置给出的 DAP 包长（还没有按 IN 槽收敛） / The DAP packet size the configuration
+  /// gives (before it is limited by the IN slot)
+  static constexpr uint16_t ConfiguredDapPacketSize()
   {
     constexpr uint16_t OPENOCD_SAFE_PS = static_cast<uint16_t>((255u * 5u) + 4u);
     constexpr uint16_t RAW_PS =
@@ -1595,62 +1675,13 @@ class DapLinkV2Class : public DeviceClass
     return true;
   }
 
-  void ArmOutTransferIfIdle(bool in_isr)
-  {
-    if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_) return;
-    if (rx_probe_stashed_)
-    {
-      // 探针里留着下一条命令的第一包：先把它放进命令池，不再挂新的接收。
-      // The probe holds the first packet of the next command: move it into the command
-      // pool first, no new receive is armed.
-      DeliverStashedProbe(in_isr);
-      return;
-    }
-    // 窗口：设备宣称的在途命令数；命令池满时也要等 Step 线程放出一个槽。
-    // The window is the command count the device advertises; with the command pool full
-    // the receive also waits until the Step thread gives a slot back.
-    if (outstanding_.load(std::memory_order_acquire) >= MAX_OUTSTANDING_RESPONSES) return;
-    if (rx_slot_ == SLOT_NONE && cmd_pool_.Acquire(rx_slot_) != ErrorCode::OK)
-    {
-      rx_slot_ = SLOT_NONE;
-      return;
-    }
-    // 拷贝模式 Read：先要一个端点包，整包到来后按命令长度决定还要多少。
-    // Copy-mode Read: one endpoint packet first; once it arrives the command's length
-    // decides how much more is needed.
-    StartOutRead(cmd_pool_.At(rx_slot_).data, 0u, OutChunkSize(), in_isr);
-  }
-
-  /// 命令的第一次接收只要一个端点包：整包到来后再按命令长度决定还要多少。
-  /// The first receive of a command asks for one endpoint packet only; once it arrives
-  /// the command's length decides how much more is needed.
+  /// 一个端点包的大小；端点包长还没确定时用 DAP 包长。
+  /// One endpoint packet; the DAP packet size while the endpoint packet size is not set.
   uint16_t OutChunkSize() const
   {
-    const uint16_t mps = ep_data_out_->MaxPacketSize();
+    const uint16_t mps = ep_data_out_ ? ep_data_out_->MaxPacketSize() : 0u;
     const uint16_t packet = GetDapPacketSize();
     return (mps == 0u || mps > packet) ? packet : mps;
-  }
-
-  void StartOutRead(uint8_t* buffer, size_t offset, size_t size, bool in_isr)
-  {
-    if (ep_data_out_->Read({buffer + offset, size}, in_isr) == ErrorCode::OK)
-    {
-      command_read_active_ = true;
-    }
-  }
-
-  void ResetOutAssembly()
-  {
-    if (rx_slot_ != SLOT_NONE)
-    {
-      cmd_pool_.Release(rx_slot_);
-      rx_slot_ = SLOT_NONE;
-    }
-    rx_off_ = 0u;
-    rx_pad_base_ = 0u;
-    rx_discard_ = false;
-    rx_probe_active_ = false;
-    rx_probe_stashed_ = false;
   }
 
   static bool IsAllZero(const uint8_t* data, size_t size)
@@ -1726,45 +1757,6 @@ class DapLinkV2Class : public DeviceClass
     if (!IsScannableCommand(id)) return CommandScan::UNKNOWN;
     return ParseQueuedCommandLength(req, avail, length) ? CommandScan::COMPLETE
                                                         : CommandScan::NEED_MORE;
-  }
-
-  /// 把队头响应交给拷贝模式 Write 发送；无响应或已在发送时不动作。
-  /// Hand the head response to a copy-mode Write; no-op when empty or already
-  /// sending. A 512 B response spans multiple wire packets on full speed.
-  void KickResponse(bool in_isr)
-  {
-    if (!inited_ || !ep_data_in_ || response_write_active_) return;
-    // 取最早发布的响应来发；Write 没起来时槽留在 send_slot_ 里，下次再试。
-    // Take the earliest published response; if the Write did not start the slot stays in
-    // send_slot_ for the next attempt.
-    if (send_slot_ == SLOT_NONE && resp_pool_.Take(send_slot_) != ErrorCode::OK)
-    {
-      send_slot_ = SLOT_NONE;
-      return;
-    }
-    const ResponseSlot& response = resp_pool_.At(send_slot_);
-    REQUIRE(response.len != 0U);
-    // 长度恰为包长整数倍时必须补一个零长包收尾，否则没有短包提示结束，按
-    // PACKET_SIZE 读的主机会一直等到超时（USB 的分段结束规则）。
-    // A response whose length is an exact multiple of the packet size needs a
-    // zero-length packet to terminate it: without the short packet the host has
-    // no end-of-transfer hint and a PACKET_SIZE-sized read times out (the USB
-    // end-of-transfer rule).
-    const size_t mps = ep_data_in_->MaxPacketSize();
-    // 响应恰好等于 DAP 包长时，主机的 DAP 包长缓冲读满即结束，不需要 ZLP；此时补 ZLP 会
-    // 留下一个主机不取的零长包，把响应队列的一个位置占住直到下一次读，深流水下会把
-    // 命令流堵死。
-    // A response exactly as long as the DAP packet needs no ZLP: the host's
-    // DAP-packet-sized read completes when the buffer is full. Appending one would leave
-    // a zero-length packet the host never takes, keeping a response-queue slot occupied
-    // until the next read, which stalls the command stream under a deep pipeline.
-    const bool need_zlp =
-        (mps != 0U) && (response.len % mps == 0U) && (response.len < GetDapPacketSize());
-    if (ep_data_in_->Write({response.payload, response.len}, need_zlp, in_isr) ==
-        ErrorCode::OK)
-    {
-      response_write_active_ = true;
-    }
   }
 
  private:
@@ -4749,7 +4741,6 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint8_t PACKET_COUNT_ADVERTISED = AdvertisedPacketCount;
   static constexpr uint8_t PACKET_COUNT_EFFECTIVE =
       (PACKET_COUNT_ADVERTISED > 4u) ? 4u : PACKET_COUNT_ADVERTISED;
-  static constexpr uint8_t MAX_OUTSTANDING_RESPONSES = PACKET_COUNT_EFFECTIVE;
   // OpenOCD 0.12 computes pending_queue_len = (packet_size - 4) / 5 for CMD_DAP_TFER.
   // CMD_DAP_TFER transfer_count is u8, so cap host-visible packet size to avoid
   // transfer_count > 255 and "expected X, got Y" mismatch.
@@ -4762,7 +4753,6 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint16_t QUEUED_REQ_BUFFER_SIZE = QueuedRequestBufferSize;
   static constexpr uint16_t QUEUED_CMD_COUNT_MAX = QueuedCommandCountMax;
   static constexpr uint16_t RESP_SLOT_SIZE = MAX_DAP_PACKET_SIZE;
-  static constexpr uint8_t RESP_QUEUE_DEPTH = PACKET_COUNT_EFFECTIVE;
   static constexpr uint16_t QUEUED_REQ_BUFFER_ALLOC_SIZE = QUEUED_REQ_BUFFER_SIZE;
   static_assert(PACKET_COUNT_ADVERTISED > 0u, "PACKET_COUNT_ADVERTISED must be > 0");
   static_assert(PACKET_COUNT_EFFECTIVE > 0u, "PACKET_COUNT_EFFECTIVE must be > 0");
@@ -4776,8 +4766,6 @@ class DapLinkV2Class : public DeviceClass
   static_assert(QUEUED_CMD_COUNT_MAX > 0u, "QUEUED_CMD_COUNT_MAX must be > 0");
   static_assert(RESP_SLOT_SIZE >= DEFAULT_DAP_PACKET_SIZE,
                 "RESP_SLOT_SIZE must cover FS bulk packet size");
-  static_assert((RESP_QUEUE_DEPTH & (RESP_QUEUE_DEPTH - 1u)) == 0u,
-                "Response queue depth must be power-of-two");
 
   static constexpr uint8_t WINUSB_VENDOR_CODE = 0x20;  ///< WinUSB vendor code
 
@@ -4786,12 +4774,6 @@ class DapLinkV2Class : public DeviceClass
   static constexpr uint16_t GUID_MULTI_SZ_UTF_16_BYTES =
       static_cast<uint16_t>(LibXR::USB::WinUsbMsOs20::GUID_STR_UTF16_BYTES +
                             2);  ///< extra UTF-16 NUL for REG_MULTI_SZ end
-
-  struct ResponseSlot
-  {
-    uint16_t len = 0u;
-    uint8_t payload[RESP_SLOT_SIZE] = {};
-  };
 
   struct CommandSlot
   {
@@ -4823,47 +4805,57 @@ class DapLinkV2Class : public DeviceClass
   // Copy-mode transfer state / 拷贝模式传输状态
   // ---------------------------------------------------------------------------
 
-  /// 命令池：USB 服务上下文 Acquire、写入、Publish，Step 线程 Take、执行、Release。
-  /// Command pool: the USB service context Acquires, writes and Publishes; the Step
+  /// 命令池：USB 服务上下文 Acquire、拷入、Publish，Step 线程 Take、执行、Release。
+  /// Command pool: the USB service context Acquires, copies in and Publishes; the Step
   /// thread Takes, executes and Releases.
   LibXR::SlotPool<CommandSlot> cmd_pool_{CMD_SLOT_COUNT};
-  /// 响应池：Step 线程 Acquire、写入、Publish，USB 服务上下文 Take、发送、Release。
-  /// Response pool: the Step thread Acquires, writes and Publishes; the USB service
-  /// context Takes, sends and Releases.
-  LibXR::SlotPool<ResponseSlot> resp_pool_{RESP_QUEUE_DEPTH};
-  /// 在途命令数（已发布但响应还没发送完成的）：窗口，由 USB 服务上下文加减。
-  /// Commands in flight (published, response not yet sent): the window.
-  std::atomic<uint8_t> outstanding_{0u};
-  size_t rx_slot_ = SLOT_NONE;  ///< USB 侧正在装配的命令槽 / Command slot being assembled
-  size_t send_slot_ = SLOT_NONE;  ///< USB 侧正在发送的响应槽 / Response slot being sent
+  size_t rx_slot_ = SLOT_NONE;  ///< USB 侧正在拼装的命令槽 / Command slot being assembled
   size_t cur_cmd_ =
       SLOT_NONE;  ///< Step 线程持有的命令槽 / Command slot the Step thread holds
-  size_t cur_resp_ =
-      SLOT_NONE;  ///< Step 线程持有的响应槽 / Response slot the Step thread holds
+  Endpoint::Slot cur_in_{};  ///< Step 线程持有的 IN 槽 / IN slot the Step thread holds
   /// 每发布一条命令发一次，Step() 在它上面等 / Posted per published command, Step() waits
   /// on it
   LibXR::Semaphore cmd_sem_{0};
+  /// 每个 IN 传输完成发一次（一个 IN 槽空出来），Step() 等 IN 槽时在它上面等
+  /// Posted per finished IN transfer (an IN slot came free); Step() waits on it for a
+  /// slot
+  LibXR::Semaphore slot_sem_{0};
   /// 解绑/重新绑定时加一：Step 线程用它丢弃跨越重绑的响应 / Bumped on unbind/bind: the
   /// Step thread drops a response that spans a rebind
   std::atomic<uint32_t> epoch_{0u};
-  uint32_t step_epoch_ =
-      0u;  ///< Step 线程开始本次工作时的 epoch_ / epoch_ when this Step began
-  std::atomic<bool> transfer_abort_{false};  ///< DAP_TransferAbort 标志 / Abort flag
+  uint32_t cur_epoch_ =
+      0u;  ///< 手里这条命令开始时的 epoch_ / epoch_ when the command in hand began
+  /// Step 线程用的 IN 端点指针（解绑时清空） / The IN endpoint the Step thread uses
+  /// (cleared on unbind)
+  std::atomic<Endpoint*> step_in_ep_{nullptr};
+  /// 通告给主机的 DAP 包长：不超过配置值，也不超过 IN 槽 / The DAP packet size announced
+  /// to the host: not above the configured one and not above an IN slot
+  std::atomic<uint16_t> dap_packet_size_{ConfiguredDapPacketSize()};
+
+  // OUT 字节流状态，只在 USB 服务上下文里访问 / OUT byte-stream state, USB service
+  // context only
+  struct HeldPacket
+  {
+    Endpoint::Slot slot;
+    uint16_t size = 0u;
+  };
+  HeldPacket held_[2] =
+      {};  ///< 命令池满时留住的租约 / Leases kept while the pool is full
+  uint8_t held_n_ = 0u;
+  size_t armed_sz_[2] = {};  ///< 已排队接收请求的大小，按到达顺序 / Sizes of the queued
+                             ///< receive requests in arrival order
+  uint8_t armed_n_ = 0u;
   uint16_t rx_off_ =
-      0u;  ///< 正在接收的命令已收字节数 / Bytes of the command in reception
-  /// 上一条命令以整包结束时的字节数，其后的整包全零视为补零 / Bytes of the previous
+      0u;  ///< 正在拼装的命令已收字节数 / Bytes of the command being assembled
+  uint16_t known_total_ = 0u;  ///< 由内容得知的命令总长，0 为未知 / Total length known
+                               ///< from the content, 0 when unknown
+  /// 上一条命令以整包结束时的字节数；其后的整包全零视为补零 / Bytes of the previous
   /// command when it ended on a whole packet; a following all-zero whole packet is
   /// padding
-  uint16_t rx_pad_base_ = 0u;
-  bool rx_discard_ = false;       ///< 正在丢弃补零 / Dropping zero padding
-  bool rx_probe_active_ = false;  ///< 探针接收在途 / A probe receive is in flight
-  /// 探针里留着下一条命令的第一包 / The probe holds the first packet of the next command
-  bool rx_probe_stashed_ = false;
-  uint16_t rx_probe_len_ = 0u;  ///< 探针里的字节数 / Bytes in the probe
-  /// 探针与丢弃缓冲 / Probe and drop buffer
-  uint8_t rx_probe_[MAX_DAP_PACKET_SIZE] = {};
-  bool command_read_active_ = false;    ///< OUT 拷贝 Read 在途 / OUT copy Read in flight
-  bool response_write_active_ = false;  ///< IN 拷贝 Write 在途 / IN copy Write in flight
+  uint16_t pad_base_ = 0u;
+  uint16_t pad_skip_ =
+      0u;  ///< 这次传输还剩的补零字节 / Padding bytes this transfer still has
+  std::atomic<bool> transfer_abort_{false};  ///< DAP_TransferAbort 标志 / Abort flag
 
   // §10.3-a：延时命令状态。pending_action_ 由 owner 写、Timer 线程读（只读它来
   // 按门铃）；deadline 与响应 stash 在 store（release）之前写好，owner 续做时在
