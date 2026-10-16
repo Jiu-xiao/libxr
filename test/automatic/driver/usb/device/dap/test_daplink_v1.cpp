@@ -148,6 +148,56 @@ void TestInfoRoundTrip()
   TEST_ASSERT(!f.in.active);
 }
 
+/// HALT 之后连发两个 OUT 报告：第一条还在 PENDING 时第二条到达（模拟 RESUMED
+/// 重挂后的双完成），旧实现会 REQUIRE fatal；现在后到者胜、响应正常发出。
+/// Two OUT reports back to back after a HALT: the second one arrives while the
+/// first is still PENDING (the double completion after a RESUMED rearm). The old
+/// implementation died on REQUIRE; the newest report now wins and the response is
+/// sent normally.
+void TestBusyOutReportsAfterHalt()
+{
+  FakeSwd swd;
+  Fixture f;
+  TestDap dap(Number::EP1, Number::EP2, swd);
+  dap.BindEndpoints(f.pool, 0, false);
+
+  // HALT 中止在途接收；ABORTED 不重挂（等 RESUMED）。
+  // The HALT aborts the in-flight receive; ABORTED does not rearm (waits for the
+  // RESUMED event).
+  f.out.CompleteWith(0, ErrorCode::ABORTED);
+  TEST_ASSERT(!f.out.active);
+
+  // RESUMED 重挂接收，主机发来第一条报告并被登记（PENDING，租约在手）。
+  // The RESUMED rearm fires and the first report is recorded (PENDING, lease
+  // held).
+  dap.OnDeviceEvent(false, DeviceEvent::ENDPOINT_RESUMED,
+                    static_cast<uint8_t>(Number::EP2));
+  TEST_ASSERT(f.out.active);
+  const auto vendor = Report(
+      {static_cast<uint8_t>(CommandId::INFO), static_cast<uint8_t>(InfoId::VENDOR)});
+  f.out.HostSends(vendor);
+  TEST_ASSERT(!f.out.active && f.in.starts.empty());
+
+  // 第二条报告（再次 RESUMED 重挂后完成）：旧代码在这里 REQUIRE fatal。
+  // A second report (completed after another RESUMED rearm): the old code died on
+  // REQUIRE right here.
+  dap.OnDeviceEvent(false, DeviceEvent::ENDPOINT_RESUMED,
+                    static_cast<uint8_t>(Number::EP2));
+  TEST_ASSERT(f.out.active);
+  const auto product = Report(
+      {static_cast<uint8_t>(CommandId::INFO), static_cast<uint8_t>(InfoId::PRODUCT)});
+  f.out.HostSends(product);
+
+  // 后到者胜：处理的是第二条，响应正常提交。
+  // Last one wins: the second report is processed and the response submitted.
+  dap.ProcessPending(false);
+  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::INFO) &&
+              f.in.Last().data[1] == static_cast<uint8_t>(InfoId::PRODUCT));
+  TEST_ASSERT(std::memcmp(&f.in.Last().data[2], "XRobot", 7) == 0);
+  f.in.Complete();
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 4);
+}
+
 void TestConnectDelayAndUnknown()
 {
   FakeSwd swd;
@@ -266,6 +316,7 @@ int main()
   LibXR::Timer::list_ = &timer_list;
 
   TestInfoRoundTrip();
+  TestBusyOutReportsAfterHalt();
   TestConnectDelayAndUnknown();
   TestPipelineAndSlotExhaustionRetry();
   TestUnbindWhilePending();
