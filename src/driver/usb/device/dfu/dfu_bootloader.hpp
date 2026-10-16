@@ -1129,6 +1129,18 @@ class DFUClass : public DfuInterfaceClassBase
       return ErrorCode::OK;
     }
 
+    // 数据阶段长度必须与 SETUP 里承诺的 wLength 一致：短包意味着主机发的是
+    // 截断的块，按整块暂存会把垃圾尾部一起写进 flash。
+    // The data stage length must match the wLength promised by the SETUP: a short
+    // packet means the host sent a truncated block, and staging it as a full
+    // block would write the garbage tail into flash as well.
+    if (data.size_ != pending_dnload_length_)
+    {
+      pending_dnload_length_ = 0u;
+      state_ = DFUState::DFU_ERROR;
+      return ErrorCode::ARG_ERR;
+    }
+
     uint32_t poll_timeout_ms = 0u;
     auto status = backend_.DfuDownload(current_alt_setting_, pending_block_num_, data,
                                        poll_timeout_ms);
