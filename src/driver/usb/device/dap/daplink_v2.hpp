@@ -15,6 +15,7 @@
 #include "libxr_mem.hpp"
 #include "libxr_type.hpp"
 #include "semaphore.hpp"
+#include "structure/slot_pool.hpp"
 #include "thread.hpp"
 #include "timebase.hpp"
 #include "timer.hpp"
@@ -254,18 +255,24 @@ class DapLinkV2Class : public DeviceClass
       RunPendingAction();
       return ErrorCode::OK;
     }
-    if (CommandCount() == 0u)
+    size_t slot = SLOT_NONE;
+    if (cmd_pool_.Take(slot) != ErrorCode::OK)
     {
       if (cmd_sem_.Wait(timeout_ms) != ErrorCode::OK)
       {
         return ErrorCode::TIMEOUT;
       }
+      if (cmd_pool_.Take(slot) != ErrorCode::OK)
+      {
+        return ErrorCode::OK;  // woken by a bind/unbind, nothing to execute
+      }
     }
-    if (!inited_ || CommandCount() == 0u)
+    if (!inited_)
     {
-      return ErrorCode::OK;  // woken by a bind/unbind, nothing to execute
+      cmd_pool_.Release(slot);
+      return ErrorCode::OK;
     }
-    ProcessReceivedCommand(false);
+    ProcessReceivedCommand(slot, false);
     // 延时类命令在这里睡到到期并发布响应，一次 Step 就把一条命令做完。
     // A delay-type command sleeps until it is due and publishes its response here, so
     // one Step finishes one command.
@@ -368,11 +375,9 @@ class DapLinkV2Class : public DeviceClass
     swj_shadow_ = static_cast<uint8_t>(DapLinkV2Def::DAP_SWJ_SWDIO_TMS |
                                        DapLinkV2Def::DAP_SWJ_NRESET);
 
-    ResetResponseQueue();
     ResetQueuedCommandState();
     ResetJtagChainState();
-    ResetCommandRing();
-    ResetOutAssembly();
+    ResetChannels();
     command_read_active_ = false;
     response_write_active_ = false;
     CancelPendingAction();
@@ -389,7 +394,6 @@ class DapLinkV2Class : public DeviceClass
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool in_isr) override
   {
     inited_ = false;
-    ResetResponseQueue();
     ResetQueuedCommandState();
 
     dap_state_.debug_port = LibXR::USB::DapLinkV2Def::DebugPort::DISABLED;
@@ -402,8 +406,7 @@ class DapLinkV2Class : public DeviceClass
     // Lent slots are voided by the unbind; the ABORTED completions of the in-flight
     // copy transfers arrive synchronously inside Close, where the callback entry
     // ignores them because inited_ is already false.
-    ResetCommandRing();
-    ResetOutAssembly();
+    ResetChannels();
     command_read_active_ = false;
     response_write_active_ = false;
     CancelPendingAction();
@@ -749,26 +752,30 @@ class DapLinkV2Class : public DeviceClass
     HandleChunk(n, in_isr);
   }
 
-  /// 命令缓冲环里正在装配的那一个 / The ring buffer a command is being assembled in
-  uint8_t* AssemblyBuffer() { return command_buffers_[AssemblyIndex()]; }
-  uint8_t AssemblyIndex() const
+  /// 解绑/重新绑定：放掉 USB 侧持有的槽，排空两个池里已就绪的槽，窗口清零。Step
+  /// 线程手里的 槽由它自己放（见 AbandonCurrent），epoch 让它知道自己的命令已经作废。
+  /// Unbind/bind: give back the slots the USB side holds, drain the ready slots of both
+  /// pools and clear the window. The slots in the Step thread's hands are given back by
+  /// it (see AbandonCurrent); the epoch tells it that its command has been voided.
+  void ResetChannels()
   {
-    return static_cast<uint8_t>(cmd_wr_.load(std::memory_order_relaxed) &
-                                (CMD_BUFFER_COUNT - 1u));
-  }
-
-  /// 已收到、还没执行完的命令数 / Commands received and not yet finished
-  uint8_t CommandCount() const
-  {
-    return static_cast<uint8_t>(cmd_wr_.load(std::memory_order_acquire) -
-                                cmd_rd_.load(std::memory_order_acquire));
-  }
-
-  void ResetCommandRing()
-  {
-    cmd_rd_.store(0u, std::memory_order_release);
-    cmd_wr_.store(0u, std::memory_order_release);
     epoch_.fetch_add(1u, std::memory_order_acq_rel);
+    ResetOutAssembly();
+    if (send_slot_ != SLOT_NONE)
+    {
+      resp_pool_.Release(send_slot_);
+      send_slot_ = SLOT_NONE;
+    }
+    size_t slot = SLOT_NONE;
+    while (cmd_pool_.Take(slot) == ErrorCode::OK)
+    {
+      cmd_pool_.Release(slot);
+    }
+    while (resp_pool_.Take(slot) == ErrorCode::OK)
+    {
+      resp_pool_.Release(slot);
+    }
+    outstanding_.store(0u, std::memory_order_release);
   }
 
   /// 探针接收：上一条命令以整包结束后，紧接着的那一包先收进探针缓冲，不占命令环，也
@@ -828,12 +835,17 @@ class DapLinkV2Class : public DeviceClass
 
   void DeliverStashedProbe(bool in_isr)
   {
-    if (!rx_probe_stashed_ || CommandCount() >= CMD_BUFFER_COUNT || command_read_active_)
+    if (!rx_probe_stashed_ || command_read_active_)
     {
       return;
     }
+    if (rx_slot_ == SLOT_NONE && cmd_pool_.Acquire(rx_slot_) != ErrorCode::OK)
+    {
+      rx_slot_ = SLOT_NONE;
+      return;  // 命令池满：等有槽放出来再放进去 / pool full: wait for a slot to come back
+    }
     rx_probe_stashed_ = false;
-    Memory::FastCopy(AssemblyBuffer(), rx_probe_, rx_probe_len_);
+    Memory::FastCopy(cmd_pool_.At(rx_slot_).data, rx_probe_, rx_probe_len_);
     HandleChunk(rx_probe_len_, in_isr);
   }
 
@@ -842,8 +854,8 @@ class DapLinkV2Class : public DeviceClass
   {
     const uint16_t mps = OutChunkSize();
     const uint16_t packet = GetDapPacketSize();
-    const uint8_t index = AssemblyIndex();
-    uint8_t* const buffer = command_buffers_[index];
+    CommandSlot& command = cmd_pool_.At(rx_slot_);
+    uint8_t* const buffer = command.data;
 
     rx_off_ = static_cast<uint16_t>(rx_off_ + n);
 
@@ -901,6 +913,8 @@ class DapLinkV2Class : public DeviceClass
       // cleared when the next transfer starts; when commands run in another context
       // (ExecuteExternal) the transfer being executed aborts at its next flag check.
       SetTransferAbortFlag(true);
+      cmd_pool_.Release(rx_slot_);
+      rx_slot_ = SLOT_NONE;
       rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
       rx_off_ = 0u;
       if (padded_candidate)
@@ -913,14 +927,16 @@ class DapLinkV2Class : public DeviceClass
       }
       return;
     }
-    cmd_len_[index] = rx_off_;
+    command.len = rx_off_;
     rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
     rx_off_ = 0u;
-    // 发布命令：缓冲和长度先写好，再推进写下标，Step() 线程以 acquire 读到。
-    // Publish the command: buffer and length are written first, then the write index
-    // advances, which the Step() thread reads with acquire.
-    cmd_wr_.store(static_cast<uint8_t>(cmd_wr_.load(std::memory_order_relaxed) + 1u),
-                  std::memory_order_release);
+    // 发布命令：槽里的数据和长度写好后发布，Step() 线程 Take 到它。窗口计数在这里加一，
+    // 到这条命令的响应发送完成才减。
+    // Publish the command: with the data and length written, the Step() thread Takes it.
+    // The window count goes up here and down when this command's response has been sent.
+    outstanding_.fetch_add(1u, std::memory_order_acq_rel);
+    cmd_pool_.Publish(rx_slot_);
+    rx_slot_ = SLOT_NONE;
     cmd_sem_.PostFromCallback(in_isr);
     if (padded_candidate)
     {
@@ -946,10 +962,10 @@ class DapLinkV2Class : public DeviceClass
     UNUSED(completion);
     if (!inited_ || !ep_data_in_ || !ep_data_out_) return;
     response_write_active_ = false;
-    REQUIRE(!IsResponseQueueEmpty());
-    resp_q_rd_.store(
-        static_cast<uint8_t>(resp_q_rd_.load(std::memory_order_relaxed) + 1u),
-        std::memory_order_release);
+    REQUIRE(send_slot_ != SLOT_NONE);
+    resp_pool_.Release(send_slot_);
+    send_slot_ = SLOT_NONE;
+    outstanding_.fetch_sub(1u, std::memory_order_acq_rel);
     KickResponse(in_isr);
     ArmOutTransferIfIdle(in_isr);
   }
@@ -965,6 +981,7 @@ class DapLinkV2Class : public DeviceClass
       if (!inited_)
       {
         CancelPendingAction();
+        AbandonCurrent();
         return;
       }
       ServicePendingAction(false);
@@ -977,78 +994,98 @@ class DapLinkV2Class : public DeviceClass
     }
   }
 
-  /// 处理命令环里最早的一条完整命令（Step 线程）；响应发布给 USB 侧去发送。延时命令把
-  /// 队尾响应槽保留下来（size 为 0），续做完成后才发布，命令在那之前留在环里。
-  /// Process the oldest whole command in the command ring (Step thread); the response is
-  /// published for the USB side to send. A delayed command reserves the tail response
-  /// slot (size 0) and is published once it is carried on to completion; the command
-  /// stays in the ring until then.
-  void ProcessReceivedCommand(bool in_isr)
+  /// 执行 Take 到的这条命令（Step 线程）：命令槽和一个响应槽都由本线程持有，到响应发布
+  /// 才放出。延时命令（size 为 0）一直持有它们，续做完成后才发布。
+  /// Execute the command just Taken (Step thread): the command slot and a response slot
+  /// are held by this thread until the response is published. A delayed command (size 0)
+  /// keeps holding them and is published once it is carried on to completion.
+  void ProcessReceivedCommand(size_t command_slot, bool in_isr)
   {
-    REQUIRE(!IsResponseQueueFull());
-    const uint8_t index = static_cast<uint8_t>(cmd_rd_.load(std::memory_order_acquire) &
-                                               (CMD_BUFFER_COUNT - 1u));
-    auto& response =
-        resp_q_[resp_q_wr_.load(std::memory_order_relaxed) & (RESP_QUEUE_DEPTH - 1u)];
+    cur_cmd_ = command_slot;
+    // 窗口保证响应槽够用：每条在途命令最多占一个响应槽，窗口等于响应池大小。
+    // The window guarantees a response slot: every command in flight takes at most one,
+    // and the window equals the response pool size.
+    REQUIRE(resp_pool_.Acquire(cur_resp_) == ErrorCode::OK);
+    CommandSlot& command = cmd_pool_.At(cur_cmd_);
+    ResponseSlot& response = resp_pool_.At(cur_resp_);
     uint16_t size = 0;
-    const auto result =
-        ProcessOneCommand(in_isr, command_buffers_[index], cmd_len_[index],
-                          response.payload, RESP_SLOT_SIZE, size);
+    const auto result = ProcessOneCommand(in_isr, command.data, command.len,
+                                          response.payload, RESP_SLOT_SIZE, size);
     UNUSED(result);
     if (size == 0u)
     {
       if (pending_action_.load(std::memory_order_acquire) ==
           static_cast<uint8_t>(PendingAction::NONE))
       {
-        // 没有响应的命令：不发布响应，让出名额，USB 侧继续接收。
-        // A command without a response: nothing is published, its place is given back
-        // and the USB side goes on receiving.
-        RetireCommand();
+        // 没有响应的命令：不发布，放出两个槽并让出窗口名额，USB 侧继续接收。
+        // A command without a response: nothing is published, both slots are given back
+        // together with the window place, and the USB side goes on receiving.
+        const bool current = StepStillBound();
+        AbandonCurrent();
+        if (current)
+        {
+          outstanding_.fetch_sub(1u, std::memory_order_acq_rel);
+        }
         RequestClassService(false);
         return;
       }
-      // 延时命令的响应未就绪；槽已保留，pending_action_ 已登记，Step() 会续做。
-      // The delayed command's response is not ready; the slot is reserved and the
-      // pending action is registered, Step() carries it on.
+      // 延时命令的响应未就绪；两个槽继续持有，pending_action_ 已登记，Step() 会续做。
+      // The delayed command's response is not ready; both slots stay held, the pending
+      // action is registered and Step() carries it on.
       return;
     }
     REQUIRE(size <= RESP_SLOT_SIZE);
     CompleteResponse(size, in_isr);
   }
 
-  /// 命令执行完：把它从环里取走 / The command is finished: take it out of the ring
-  void RetireCommand()
+  /// 这次 Step 开始以来没有发生解绑/重新绑定 / No unbind/bind since this Step began
+  bool StepStillBound() const
   {
-    if (step_epoch_ != epoch_.load(std::memory_order_acquire))
-    {
-      return;  // 解绑/重新绑定期间，环已被重置 / the ring was reset by an unbind/bind
-    }
-    cmd_rd_.store(static_cast<uint8_t>(cmd_rd_.load(std::memory_order_relaxed) + 1u),
-                  std::memory_order_release);
+    return inited_ && step_epoch_ == epoch_.load(std::memory_order_acquire);
   }
 
-  /// 发布队尾响应槽，并让 USB 侧去发送；延时的响应在续做完成后也从这里发布。
-  /// Publish the tail response slot and let the USB side send it; a deferred response is
-  /// published here once its continuation completes.
+  /// 放出本线程持有的命令槽和响应槽（不发布） / Give back the command and response
+  /// slots this thread holds (without publishing)
+  void AbandonCurrent()
+  {
+    if (cur_resp_ != SLOT_NONE)
+    {
+      resp_pool_.Release(cur_resp_);
+      cur_resp_ = SLOT_NONE;
+    }
+    if (cur_cmd_ != SLOT_NONE)
+    {
+      cmd_pool_.Release(cur_cmd_);
+      cur_cmd_ = SLOT_NONE;
+    }
+  }
+
+  /// 发布响应槽，放出命令槽，并让 USB 侧去发送；延时的响应在续做完成后也从这里发布。
+  /// Publish the response slot, give back the command slot and let the USB side send;
+  /// a deferred response is published here once its continuation completes.
   void CompleteResponse(uint16_t size, bool in_isr)
   {
     UNUSED(in_isr);
     if (external_active_)
     {
-      // ExecuteExternal 自己交付响应，不进 USB 响应队列。
-      // ExecuteExternal delivers the response itself; it does not join the USB queue.
+      // ExecuteExternal 自己交付响应，不进 USB 响应池。
+      // ExecuteExternal delivers the response itself; it does not join the USB pool.
       external_size_ = size;
       return;
     }
-    if (step_epoch_ != epoch_.load(std::memory_order_acquire))
+    if (!StepStillBound())
     {
-      return;  // 命令执行期间发生了解绑/重新绑定：这条响应作废 / unbound meanwhile:
-               // dropped
+      // 命令执行期间发生了解绑/重新绑定：这条响应作废，窗口已被清零，不用再减。
+      // Unbound or rebound while the command ran: the response is void and the window
+      // was already cleared.
+      AbandonCurrent();
+      return;
     }
-    const uint8_t wr = resp_q_wr_.load(std::memory_order_relaxed);
-    resp_q_[wr & (RESP_QUEUE_DEPTH - 1u)].len = size;
-    resp_q_wr_.store(static_cast<uint8_t>(wr + 1u), std::memory_order_release);
-    RetireCommand();
+    resp_pool_.At(cur_resp_).len = size;
+    resp_pool_.Publish(cur_resp_);
+    cur_resp_ = SLOT_NONE;
+    cmd_pool_.Release(cur_cmd_);
+    cur_cmd_ = SLOT_NONE;
     RequestClassService(false);
   }
 
@@ -1162,27 +1199,6 @@ class DapLinkV2Class : public DeviceClass
     }
     return len;
   }
-
-  static constexpr uint8_t NextRespQueueIndex(uint8_t idx)
-  {
-    return static_cast<uint8_t>((idx + 1u) & (RESP_QUEUE_DEPTH - 1u));
-  }
-
-  void ResetResponseQueue()
-  {
-    resp_q_rd_.store(0u, std::memory_order_release);
-    resp_q_wr_.store(0u, std::memory_order_release);
-  }
-
-  uint8_t ResponseCount() const
-  {
-    return static_cast<uint8_t>(resp_q_wr_.load(std::memory_order_acquire) -
-                                resp_q_rd_.load(std::memory_order_acquire));
-  }
-
-  bool IsResponseQueueEmpty() const { return ResponseCount() == 0u; }
-
-  bool IsResponseQueueFull() const { return ResponseCount() >= RESP_QUEUE_DEPTH; }
 
   void ResetQueuedCommandState()
   {
@@ -1570,35 +1586,30 @@ class DapLinkV2Class : public DeviceClass
     return true;
   }
 
-  uint8_t OutstandingResponseCount() const
-  {
-    // 响应队列里的（含正由拷贝 Write 发送的那条，它要到完成回调才出队）加上命令环里
-    // 还没执行完的。延时命令执行完之前一直留在命令环里，所以不再单独计延时保留槽。
-    // Responses in the queue (including the one the copy Write is sending, which leaves
-    // only in the completion callback) plus the commands in the ring that are not
-    // finished. A delayed command stays in the ring until it is done, so the reserved
-    // slot is not counted separately.
-    return static_cast<uint8_t>(ResponseCount() + CommandCount());
-  }
-
   void ArmOutTransferIfIdle(bool in_isr)
   {
     if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_) return;
     if (rx_probe_stashed_)
     {
-      // 探针里留着下一条命令的第一包：先把它放进命令环，不再挂新的接收。
-      // The probe holds the first packet of the next command: move it into the ring
-      // first, no new receive is armed.
+      // 探针里留着下一条命令的第一包：先把它放进命令池，不再挂新的接收。
+      // The probe holds the first packet of the next command: move it into the command
+      // pool first, no new receive is armed.
       DeliverStashedProbe(in_isr);
       return;
     }
-    if (CommandCount() >= CMD_BUFFER_COUNT || IsResponseQueueFull() ||
-        OutstandingResponseCount() >= MAX_OUTSTANDING_RESPONSES)
+    // 窗口：设备宣称的在途命令数；命令池满时也要等 Step 线程放出一个槽。
+    // The window is the command count the device advertises; with the command pool full
+    // the receive also waits until the Step thread gives a slot back.
+    if (outstanding_.load(std::memory_order_acquire) >= MAX_OUTSTANDING_RESPONSES) return;
+    if (rx_slot_ == SLOT_NONE && cmd_pool_.Acquire(rx_slot_) != ErrorCode::OK)
+    {
+      rx_slot_ = SLOT_NONE;
       return;
-    // 拷贝模式 Read：一条命令一次接收，短包或收满（DAP 包长）即完成。
-    // Copy-mode Read: one command per receive; a short packet or a full buffer (the
-    // DAP packet size) ends it.
-    StartOutRead(AssemblyBuffer(), 0u, OutChunkSize(), in_isr);
+    }
+    // 拷贝模式 Read：先要一个端点包，整包到来后按命令长度决定还要多少。
+    // Copy-mode Read: one endpoint packet first; once it arrives the command's length
+    // decides how much more is needed.
+    StartOutRead(cmd_pool_.At(rx_slot_).data, 0u, OutChunkSize(), in_isr);
   }
 
   /// 命令的第一次接收只要一个端点包：整包到来后再按命令长度决定还要多少。
@@ -1621,6 +1632,11 @@ class DapLinkV2Class : public DeviceClass
 
   void ResetOutAssembly()
   {
+    if (rx_slot_ != SLOT_NONE)
+    {
+      cmd_pool_.Release(rx_slot_);
+      rx_slot_ = SLOT_NONE;
+    }
     rx_off_ = 0u;
     rx_pad_base_ = 0u;
     rx_discard_ = false;
@@ -1708,10 +1724,16 @@ class DapLinkV2Class : public DeviceClass
   /// sending. A 512 B response spans multiple wire packets on full speed.
   void KickResponse(bool in_isr)
   {
-    if (!inited_ || !ep_data_in_ || response_write_active_ || IsResponseQueueEmpty())
+    if (!inited_ || !ep_data_in_ || response_write_active_) return;
+    // 取最早发布的响应来发；Write 没起来时槽留在 send_slot_ 里，下次再试。
+    // Take the earliest published response; if the Write did not start the slot stays in
+    // send_slot_ for the next attempt.
+    if (send_slot_ == SLOT_NONE && resp_pool_.Take(send_slot_) != ErrorCode::OK)
+    {
+      send_slot_ = SLOT_NONE;
       return;
-    const auto& response =
-        resp_q_[resp_q_rd_.load(std::memory_order_relaxed) & (RESP_QUEUE_DEPTH - 1u)];
+    }
+    const ResponseSlot& response = resp_pool_.At(send_slot_);
     REQUIRE(response.len != 0U);
     // 长度恰为包长整数倍时必须补一个零长包收尾，否则没有短包提示结束，按
     // PACKET_SIZE 读的主机会一直等到超时（USB 的分段结束规则）。
@@ -4762,7 +4784,17 @@ class DapLinkV2Class : public DeviceClass
     uint8_t payload[RESP_SLOT_SIZE] = {};
   };
 
-  ResponseSlot resp_q_[RESP_QUEUE_DEPTH] = {};
+  struct CommandSlot
+  {
+    uint16_t len = 0u;
+    uint8_t data[MAX_DAP_PACKET_SIZE] = {};
+  };
+
+  static constexpr size_t SLOT_NONE = static_cast<size_t>(-1);
+  /// 命令池两个槽：一个在执行，另一个接收下一条命令，两者重叠。
+  /// Two command slots: one executes while the other receives the next command, so the
+  /// two overlap.
+  static constexpr size_t CMD_SLOT_COUNT = 2u;
 
   uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
   uint16_t queued_request_length_ = 0u;
@@ -4782,26 +4814,24 @@ class DapLinkV2Class : public DeviceClass
   // Copy-mode transfer state / 拷贝模式传输状态
   // ---------------------------------------------------------------------------
 
-  /// 命令缓冲：拷贝模式 Read 的目标，一次收一条完整命令。
-  /// Command buffer: the copy-mode Read target, one whole command at a time.
-  /// 命令缓冲环：一个在执行时另一个接收下一条命令，两者重叠。
-  /// Command buffer ring: one executes while the other receives the next command, so
-  /// the two overlap.
-  static constexpr uint8_t CMD_BUFFER_COUNT = 2u;
-  uint8_t command_buffers_[CMD_BUFFER_COUNT][MAX_DAP_PACKET_SIZE] = {};
-  uint16_t cmd_len_[CMD_BUFFER_COUNT] = {};  ///< 各缓冲里的命令长度 / Command lengths
-  /// 命令环的读写下标（自由计数，按 CMD_BUFFER_COUNT 取模）：写下标由 USB
-  /// 服务上下文推进， 读下标由 Step 线程推进。 Read and write indices of the command ring
-  /// (free-running, taken modulo CMD_BUFFER_COUNT): the USB service context advances the
-  /// write index, the Step thread the read index.
-  std::atomic<uint8_t> cmd_rd_{0u};
-  std::atomic<uint8_t> cmd_wr_{0u};
-  /// 响应队列的读写下标：Step 线程发布（写），USB 服务上下文发送并退役（读）。
-  /// Response-queue indices: the Step thread publishes (write), the USB service context
-  /// sends and retires (read).
-  std::atomic<uint8_t> resp_q_rd_{0u};
-  std::atomic<uint8_t> resp_q_wr_{0u};
-  /// 每收到一条命令发一次，Step() 在它上面等 / Posted per received command, Step() waits
+  /// 命令池：USB 服务上下文 Acquire、写入、Publish，Step 线程 Take、执行、Release。
+  /// Command pool: the USB service context Acquires, writes and Publishes; the Step
+  /// thread Takes, executes and Releases.
+  LibXR::SlotPool<CommandSlot> cmd_pool_{CMD_SLOT_COUNT};
+  /// 响应池：Step 线程 Acquire、写入、Publish，USB 服务上下文 Take、发送、Release。
+  /// Response pool: the Step thread Acquires, writes and Publishes; the USB service
+  /// context Takes, sends and Releases.
+  LibXR::SlotPool<ResponseSlot> resp_pool_{RESP_QUEUE_DEPTH};
+  /// 在途命令数（已发布但响应还没发送完成的）：窗口，由 USB 服务上下文加减。
+  /// Commands in flight (published, response not yet sent): the window.
+  std::atomic<uint8_t> outstanding_{0u};
+  size_t rx_slot_ = SLOT_NONE;  ///< USB 侧正在装配的命令槽 / Command slot being assembled
+  size_t send_slot_ = SLOT_NONE;  ///< USB 侧正在发送的响应槽 / Response slot being sent
+  size_t cur_cmd_ =
+      SLOT_NONE;  ///< Step 线程持有的命令槽 / Command slot the Step thread holds
+  size_t cur_resp_ =
+      SLOT_NONE;  ///< Step 线程持有的响应槽 / Response slot the Step thread holds
+  /// 每发布一条命令发一次，Step() 在它上面等 / Posted per published command, Step() waits
   /// on it
   LibXR::Semaphore cmd_sem_{0};
   /// 解绑/重新绑定时加一：Step 线程用它丢弃跨越重绑的响应 / Bumped on unbind/bind: the
