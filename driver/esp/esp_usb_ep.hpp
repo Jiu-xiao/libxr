@@ -79,8 +79,7 @@ class ESP32USBEndpoint : public USB::Endpoint
   uint8_t* transfer_hw_buffer_ = nullptr;
   size_t transfer_request_size_ = 0U;
   uint32_t transfer_tag_ = 0U;
-  bool transfer_active_ =
-      false;
+  bool transfer_active_ = false;
   StopPhase stop_phase_ = StopPhase::NONE;
   uint32_t stop_deadline_ms_ = 0U;
   /// 停止确认的最长等待，超时按已停止交付 / Longest wait for the stop
@@ -88,7 +87,8 @@ class ESP32USBEndpoint : public USB::Endpoint
   static constexpr uint32_t STOP_TIMEOUT_MS = 20U;
   /// EP0 OUT 停止后的 DMA 落点，避免仍指向被借出的槽 / DMA target after an EP0
   /// OUT stop so it no longer points at the lent slot
-  uint8_t ep0_scratch_[64] = {};  ///< 在途请求由后端自持 / In-flight tracked by the backend
+  uint8_t ep0_scratch_[64] =
+      {};  ///< 在途请求由后端自持 / In-flight tracked by the backend
   size_t transfer_actual_size_ = 0U;
   size_t transfer_queued_size_ = 0U;
   bool transfer_uses_shadow_ = false;
