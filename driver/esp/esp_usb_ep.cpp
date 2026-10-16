@@ -290,9 +290,9 @@ void ESP32USBEndpoint::AdvanceStop(bool in_isr)
   {
     if (stop_phase_ == StopPhase::SNAK_WAIT)
     {
-      const bool nak_effective = (ep_num == 0U)
-                                     ? (dev->diepint0_reg.inepnakeff != 0U)
-                                     : (dev->in_eps[ep_num - 1U].diepint_reg.inepnakeff != 0U);
+      const bool nak_effective =
+          (ep_num == 0U) ? (dev->diepint0_reg.inepnakeff != 0U)
+                         : (dev->in_eps[ep_num - 1U].diepint_reg.inepnakeff != 0U);
       if (!nak_effective) return;
       if (ep_num == 0U)
       {
