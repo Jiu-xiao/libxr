@@ -5,8 +5,7 @@
 
 using namespace LibXR;
 
-// Legacy OTG FS endpoint, see LIBXR_CH32_USB_OTG_LEGACY in ch32_usb_endpoint.hpp.
-#if defined(USBFSD) && defined(LIBXR_CH32_USB_OTG_LEGACY)
+#if defined(USBFSD)
 
 // NOLINTBEGIN
 

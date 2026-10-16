@@ -5,8 +5,7 @@
 
 using namespace LibXR;
 
-// Legacy OTG HS endpoint, see LIBXR_CH32_USB_OTG_LEGACY in ch32_usb_endpoint.hpp.
-#if defined(USBHSD) && defined(LIBXR_CH32_USB_OTG_LEGACY)
+#if defined(USBHSD)
 
 // NOLINTBEGIN
 static inline volatile uint8_t* get_tx_control_addr(USB::Endpoint::EPNumber ep_num)

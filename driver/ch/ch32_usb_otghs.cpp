@@ -8,8 +8,7 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
-// Legacy OTG HS backend, see LIBXR_CH32_USB_OTG_LEGACY in ch32_usb_endpoint.hpp.
-#if defined(USBHSD) && defined(LIBXR_CH32_USB_OTG_LEGACY)
+#if defined(USBHSD)
 
 namespace
 {
