@@ -250,11 +250,21 @@ void TestBatchWithDelay()
       std::vector<uint8_t>({static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 0x00}));
   f.in.Complete();
 
-  // EXECUTE_COMMANDS：批响应一次完整到达（[EXECUTE, info 响应..., DELAY 响应...]），
-  // 不需要 Timer 到期，也没有第二条多余响应。
-  // EXECUTE_COMMANDS: the batch response arrives at once ([EXECUTE, info response...,
-  // DELAY response...]) with no Timer wait and no second stray response.
+  // EXECUTE_COMMANDS：批内的延时命令让批处理挂起——owner 不忙等，响应槽保留，
+  // 此刻还没有响应发出，OUT 也没有重挂。
+  // EXECUTE_COMMANDS: the delay command suspends the batch — the owner does not
+  // busy-wait, the response slot stays reserved, and nothing has been sent yet.
   Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
+  TEST_ASSERT(f.in.starts.empty());
+  TEST_ASSERT(!f.out.active);
+
+  // 延时到期（Timer 路径续做）后，整条批响应一次完整到达：
+  // [EXECUTE, INFO 响应, DELAY 响应]，没有第二条多余响应。
+  // Once the delay elapses (the Timer path resumes), the whole batch response
+  // arrives at once: [EXECUTE, INFO response, DELAY response], with no second stray
+  // response.
+  std::this_thread::sleep_for(std::chrono::milliseconds(15));
+  Timer::Refresh();
   TEST_ASSERT(f.in.active);
   const auto& batch = f.in.Last().data;
   // INFO 响应：[INFO, len=7, "XRobot" + NUL]，共 9 字节（批内 [1..9]）；DELAY
