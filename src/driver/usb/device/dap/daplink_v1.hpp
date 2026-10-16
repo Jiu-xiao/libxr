@@ -561,6 +561,18 @@ bool DapLinkV1Class<SwdPort>::TrySubmitResponse(bool in_isr)
     return false;
   }
 
+  // 槽容量必须装得下整个响应：装不下就放弃这次提交（保留状态等下次），不能
+  // 越界拷贝。
+  // The slot must hold the whole response: if it does not, give up this
+  // submission attempt (state stays for a retry) instead of copying out of
+  // bounds.
+  if (slot.data.size_ < MAX_RESP)
+  {
+    ep_in_->ReleaseSlot(slot, in_isr);
+    cmd_state_.store(CMD_RESPONDING, std::memory_order_release);
+    return false;
+  }
+
   Memory::FastCopy(slot.data.addr_, resp_buf_, MAX_RESP);
   if (ep_in_->Submit(slot, MAX_RESP, false, in_isr) != ErrorCode::OK)
   {
