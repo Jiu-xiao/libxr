@@ -747,6 +747,14 @@ class DapLinkV2Class : public DeviceClass
   {
     pending_action_.store(static_cast<uint8_t>(PendingAction::NONE),
                           std::memory_order_release);
+    if (batch_active_)
+    {
+      // 批处理里的延时命令：响应已写进保留的槽，继续跑剩下的命令。
+      // A delay command inside a batch: its response is already in the reserved
+      // slot, so carry on with the rest of the batch.
+      ContinueBatch(size, in_isr);
+      return;
+    }
     REQUIRE(size != 0U && size <= deferred_resp_cap_);
     CompleteResponse(size, in_isr);
   }
@@ -989,88 +997,109 @@ class DapLinkV2Class : public DeviceClass
    * @return false execute failure
    */
   /**
-   * @brief 就地完成被延时的命令（仅用于批执行）/ Finish a deferred command inline
-   *        (batched execution only)
+   * @brief 批处理游标（非阻塞续做）/ Batch cursor (resumed without blocking)
    *
-   * 批处理里的延时命令不能挂起：挂起会让 EXECUTE_COMMANDS 带着"半个响应"返回，
-   * 延时到期后 Timer 路径再往已经发出去的响应缓冲里补写，主机收到多余响应、
-   * 批响应缺字节。批内的延时通常很短，就地等完再继续下一条。
-   * A deferred command inside a batch cannot be suspended: suspending lets
-   * EXECUTE_COMMANDS return with a half-built response, and when the delay
-   * elapses the Timer path writes into a buffer that was already sent, so the
-   * host gets an extra response and the batch response is short. Delays inside a
-   * batch are short, so finish it here and carry on with the next command.
+   * 批执行里遇到延时命令时保存游标后返回，响应槽保持保留；延时到期由 Timer 路径
+   * 经 ContinueBatch 从游标处继续，全部完成后才入队。这样 owner 路径不忙等，秒级
+   * 的 SWJ_Pins 等待也不会拖住 USB 服务。
+   * When a batch hits a delay command it saves the cursor and returns with the
+   * response slot still reserved; once the delay elapses the Timer path resumes from
+   * the cursor through ContinueBatch and only queues the response when the whole
+   * batch is done. The owner path never busy-waits, so even a seconds-long SWJ_Pins
+   * wait cannot stall USB service.
    */
-  bool RunDeferredInline(uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
+  void ContinueBatch(uint16_t last_cmd_size, bool in_isr)
   {
-    out_len = 0u;
-    if (resp == nullptr || resp_cap < 2u)
+    uint16_t req_off = batch_req_off_;
+    uint16_t resp_off = static_cast<uint16_t>(batch_resp_off_ + last_cmd_size);
+    uint16_t remaining = batch_remaining_;
+    uint8_t* resp = batch_resp_;
+    const uint16_t resp_cap = batch_resp_cap_;
+
+    // 跳过刚完成的那条命令，游标指向它之后。
+    // Skip the command that just finished; the cursor points past it.
+    uint16_t cmd_len = 0u;
+    if (remaining == 0u ||
+        !ParseQueuedCommandLength(&queued_request_buffer_[req_off],
+                                  static_cast<uint16_t>(queued_request_length_ - req_off),
+                                  cmd_len) ||
+        cmd_len == 0u)
     {
-      CancelPendingAction();
-      return false;
+      FinishBatch(false, in_isr);
+      return;
+    }
+    req_off = static_cast<uint16_t>(req_off + cmd_len);
+    --remaining;
+
+    while (remaining > 0u)
+    {
+      if (req_off >= queued_request_length_ ||
+          !ParseQueuedCommandLength(
+              &queued_request_buffer_[req_off],
+              static_cast<uint16_t>(queued_request_length_ - req_off), cmd_len) ||
+          cmd_len == 0u || resp_off >= resp_cap)
+      {
+        FinishBatch(false, in_isr);
+        return;
+      }
+
+      uint16_t cmd_out = 0u;
+      const ErrorCode ans = ProcessOneCommand(
+          in_isr, &queued_request_buffer_[req_off], cmd_len, &resp[resp_off],
+          static_cast<uint16_t>(resp_cap - resp_off), cmd_out);
+      UNUSED(ans);
+
+      if (pending_action_.load(std::memory_order_acquire) !=
+          static_cast<uint8_t>(PendingAction::NONE))
+      {
+        // 又一条延时命令：更新游标继续挂起，等下一次续做。
+        // Another delay command: update the cursor, stay suspended and resume later.
+        batch_req_off_ = req_off;
+        batch_resp_off_ = resp_off;
+        batch_remaining_ = remaining;
+        return;
+      }
+
+      if (cmd_out == 0u ||
+          static_cast<uint32_t>(resp_off) + static_cast<uint32_t>(cmd_out) >
+              static_cast<uint32_t>(resp_cap))
+      {
+        FinishBatch(false, in_isr);
+        return;
+      }
+
+      req_off = static_cast<uint16_t>(req_off + cmd_len);
+      resp_off = static_cast<uint16_t>(resp_off + cmd_out);
+      --remaining;
     }
 
-    for (uint32_t stage = 0u; stage < 4u; ++stage)
+    FinishBatch(true, in_isr, resp_off);
+  }
+
+  /// 结束批处理：ok 时入队已建好的响应，否则回 DAP_ERROR（2 字节）。
+  /// Finish the batch: queue the built response when ok, otherwise answer DAP_ERROR
+  /// (2 bytes).
+  void FinishBatch(bool ok, bool in_isr, uint16_t size = 0u)
+  {
+    uint8_t* resp = batch_resp_;
+    batch_active_ = false;
+    batch_req_off_ = 0u;
+    batch_resp_off_ = 0u;
+    batch_remaining_ = 0u;
+    batch_resp_ = nullptr;
+    batch_resp_cap_ = 0u;
+    ResetQueuedCommandState();
+
+    if (!ok)
     {
-      const auto action =
-          static_cast<PendingAction>(pending_action_.load(std::memory_order_acquire));
-      if (action == PendingAction::NONE) break;
-
-      uint32_t poll = 0u;
-      while (
-          static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
-                               action_deadline_ms_) < 0)
+      if (resp != nullptr && batch_resp_cap_ >= 2u)
       {
-        // 批内延时很短；设上限避免异常时钟下卡死。
-        // Delays inside a batch are short; cap the spin so a broken clock cannot
-        // hang the device.
-        if (++poll > 1000000u) break;
+        resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS);
+        resp[1] = DAP_ERROR;
       }
-
-      if (action == PendingAction::RESET_LOW)
-      {
-        DriveReset(true);
-        BeginDeferredAction(PendingAction::RESET_HIGH, 1u, resp, resp_cap);
-        continue;
-      }
-      if (action == PendingAction::SWJ_PINS)
-      {
-        const uint8_t pin_in = ReadSwjPins();
-        const bool matched =
-            swj_pin_sel_ != 0u && (pin_in & swj_pin_sel_) == swj_pin_expect_;
-        const bool expired =
-            static_cast<int32_t>(
-                static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
-                action_deadline_ms_) >= 0;
-        if (!matched && !expired) continue;
-        resp[1] = pin_in;
-        out_len = 2u;
-        CancelPendingAction();
-        return true;
-      }
-      if (action == PendingAction::RESET_HIGH)
-      {
-        if (resp_cap < 3u)
-        {
-          CancelPendingAction();
-          return false;
-        }
-        resp[1] = DAP_OK;
-        resp[2] = 1u;
-        out_len = 3u;
-        CancelPendingAction();
-        return true;
-      }
-
-      // DELAY
-      resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
-      out_len = 2u;
-      CancelPendingAction();
-      return true;
+      size = 2u;
     }
-
-    CancelPendingAction();
-    return false;
+    CompleteResponse(size, in_isr);
   }
 
   bool TryExecuteQueuedCommandStream(bool in_isr, uint8_t* resp, uint16_t resp_cap,
@@ -1119,18 +1148,23 @@ class DapLinkV2Class : public DeviceClass
           static_cast<uint16_t>(resp_cap - resp_off), cmd_out);
       UNUSED(ans);
 
-      // 命令挂起了（含延时的 DAP_Delay / ResetTarget / SWJ_Pins）：就地完成，
-      // 不能让批处理带着半个响应返回。
+      // 命令挂起了（含延时的 DAP_Delay / ResetTarget / SWJ_Pins）：保存批游标
+      // 后返回，响应槽保持保留，延时到期由 Timer 路径续做——owner 不忙等。
       // The command suspended itself (DAP_Delay / ResetTarget / SWJ_Pins with a
-      // wait): finish it here so the batch cannot return a half-built response.
+      // wait): save the batch cursor and return with the response slot still
+      // reserved; the Timer path resumes once the delay elapses, so the owner never
+      // busy-waits.
       if (pending_action_.load(std::memory_order_acquire) !=
           static_cast<uint8_t>(PendingAction::NONE))
       {
-        if (!RunDeferredInline(&resp[resp_off],
-                               static_cast<uint16_t>(resp_cap - resp_off), cmd_out))
-        {
-          return false;
-        }
+        batch_active_ = true;
+        batch_req_off_ = req_off;
+        batch_resp_off_ = resp_off;
+        batch_remaining_ = static_cast<uint16_t>(queued_command_count_ - i);
+        batch_resp_ = resp;
+        batch_resp_cap_ = resp_cap;
+        out_len = 0u;
+        return true;
       }
 
       // 每条命令至少要有 [cmd, status] 两个字节；0 字节会破坏响应流对齐。
@@ -2382,6 +2416,17 @@ class DapLinkV2Class : public DeviceClass
                                   uint16_t& out_len)
   {
     const bool ok = TryExecuteQueuedCommandStream(in_isr, resp, resp_cap, out_len);
+
+    if (batch_active_)
+    {
+      // 批内命令挂起：响应未就绪（out_len == 0），入队状态与响应槽都保留，
+      // 由 Timer 路径续做后入队。
+      // A command inside the batch suspended: the response is not ready (out_len ==
+      // 0); the queued state and the response slot stay reserved for the Timer-path
+      // continuation.
+      return ErrorCode::OK;
+    }
+
     ResetQueuedCommandState();
 
     if (!ok)
@@ -4233,6 +4278,16 @@ class DapLinkV2Class : public DeviceClass
   uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
   uint16_t queued_request_length_ = 0u;
   uint16_t queued_command_count_ = 0u;
+
+  // 批处理续做状态（非阻塞：延时命令挂起后由 Timer 路径从游标继续）
+  // Batch continuation state (non-blocking: a delay command suspends and the Timer
+  // path resumes from the cursor)
+  bool batch_active_ = false;
+  uint16_t batch_req_off_ = 0u;
+  uint16_t batch_resp_off_ = 0u;
+  uint16_t batch_remaining_ = 0u;
+  uint8_t* batch_resp_ = nullptr;
+  uint16_t batch_resp_cap_ = 0u;
 
   // ---------------------------------------------------------------------------
   // Copy-mode transfer state / 拷贝模式传输状态
