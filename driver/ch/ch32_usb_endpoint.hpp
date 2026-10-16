@@ -40,9 +40,24 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
   uint32_t transfer_tag_ = 0;
   bool transfer_active_ = false;
+  // 硬件是否为本请求报过完成（ReapProgress 据此判断能否算成功）。
+  // Whether the hardware reported a completion for this request (ReapProgress
+  // uses it to decide whether the request can count as successful).
+  bool hw_completed_ = false;
   size_t transfer_requested_ = 0;
   size_t transfer_accumulated_ = 0;
   uint8_t* transfer_cursor_ = nullptr;
+  // IN 分包：剩余未发出的字节数（0 表示本请求只剩最后一包）。
+  // IN splitting: bytes of the request not sent yet (0 = last packet in flight).
+  size_t transfer_remaining_ = 0;
+  // 共享双向端点的块基址：硬件 OUT 用 [base, base+64)，IN 固定用 [base+64,
+  // base+128)，UEPn_DMA 必须一直是 base。IN 端点对象从构造参数拿到的是
+  // base+64（TX 列表项），故这里回退 64 得到块基址。
+  // Block base of a shared bidirectional endpoint: the hardware uses [base,
+  // base+64) for OUT and always [base+64, base+128) for IN, so UEPn_DMA must
+  // stay at base. The IN endpoint object is given base+64 (its TX list entry),
+  // so step back to the block base.
+  uint8_t* block_dma_base_ = nullptr;
 
   // IRQ 分发（自由函数）需要经端点对象读取槽内存（EP0 setup 包）。
   // The IRQ dispatch (free functions) reads slot memory through the endpoint
@@ -50,6 +65,7 @@ class CH32EndpointOtgFs : public USB::Endpoint
   using USB::Endpoint::SlotMemory;
 
   static constexpr uint8_t EP_OTG_FS_MAX_SIZE = 8;
+  static constexpr size_t SHARED_BLOCK_HALF = 64U;
   static inline CH32EndpointOtgFs* map_otg_fs_[EP_OTG_FS_MAX_SIZE][2] = {};
 };
 
@@ -147,9 +163,16 @@ class CH32EndpointOtgHs : public USB::Endpoint
 
   uint32_t transfer_tag_ = 0;
   bool transfer_active_ = false;
+  // 硬件是否为本请求报过完成（ReapProgress 据此判断能否算成功）。
+  // Whether the hardware reported a completion for this request (ReapProgress
+  // uses it to decide whether the request can count as successful).
+  bool hw_completed_ = false;
   size_t transfer_requested_ = 0;
   size_t transfer_accumulated_ = 0;
   uint8_t* transfer_cursor_ = nullptr;
+  // IN 分包：剩余未发出的字节数（0 表示本请求只剩最后一包）。
+  // IN splitting: bytes of the request not sent yet (0 = last packet in flight).
+  size_t transfer_remaining_ = 0;
 
   // 同 OtgFs：IRQ 分发（自由函数）经端点对象读取槽内存。
   // Same as OtgFs: the IRQ dispatch (free functions) reads slot memory through

@@ -325,7 +325,7 @@ CH32USBOtgHS::CH32USBOtgHS(
   }
 
   // EP0：收发共用一个 DMA 地址 → 必须是同一块（各 ≥64 B）。
-  ASSERT(rx[0].addr_ != nullptr && rx[0].addr_ == tx[0].addr_ && rx[0].size_ >= 64U);
+  REQUIRE(rx[0].addr_ != nullptr && rx[0].addr_ == tx[0].addr_ && rx[0].size_ >= 64U);
 
   auto* ep0_out = new CH32EndpointOtgHs(USB::Endpoint::EPNumber::EP0,
                                         USB::Endpoint::Direction::OUT, rx[0]);
@@ -341,7 +341,7 @@ CH32USBOtgHS::CH32USBOtgHS(
     {
       // 双向：HS 的 EP1-15 收发 DMA 寄存器分立，两块无相邻要求，各 ≥64 B
       // （手册 p.340/p.344）；默认两槽由软件切换 DMA 指针。
-      ASSERT(rx[i].size_ >= 64U && tx[i].size_ >= 64U);
+      REQUIRE(rx[i].size_ >= 64U && tx[i].size_ >= 64U);
       USB::EndpointPool::Put(
           new CH32EndpointOtgHs(ep_index, USB::Endpoint::Direction::OUT, rx[i]));
       USB::EndpointPool::Put(
