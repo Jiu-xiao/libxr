@@ -68,6 +68,17 @@ ESP32USBDevice::ESP32USBDevice(
   {
     DEV_ASSERT(USB::Endpoint::EPNumberToInt8(ep_num) < ENDPOINT_COUNT);
 
+    // 本控制器只有 EP0 + 4 个 IN 端点（IN 端点号 1..4），能发 IN 的配置项端点号超过它，
+    // 会在主机 SET_CONFIGURATION 时才配置失败（主机侧表现为反复枚举）；构造期就拒绝。
+    // The controller has EP0 plus four IN endpoints (IN endpoint numbers 1..4). An
+    // IN-capable entry above that only fails when the host sends SET_CONFIGURATION (the
+    // host then re-enumerates in a loop), so reject it at construction.
+    constexpr uint8_t MAX_IN_EP_NUM = static_cast<uint8_t>(
+        sizeof(static_cast<usb_dwc_dev_t*>(nullptr)->dieptxf_regs) /
+        sizeof(static_cast<usb_dwc_dev_t*>(nullptr)->dieptxf_regs[0]));
+    REQUIRE(cfg_it->direction_hint == EPConfig::DirectionHint::OutOnly ||
+            USB::Endpoint::EPNumberToInt8(ep_num) <= MAX_IN_EP_NUM);
+
     if (cfg_it->direction_hint == EPConfig::DirectionHint::BothDirections)
     {
       const size_t half = cfg_it->buffer.size_ / 2U;
@@ -249,18 +260,19 @@ void ESP32USBDevice::InitializeCore()
   // 这里直接重建 DWC2 device-mode 寄存器基线：先停总中断，复位 core，再重建 FIFO/中断
   // mask / Rebuild the DWC2 device-mode register baseline directly: stop global
   // interrupts, reset the core, then rebuild FIFO and interrupt masks.
-  ResetCoreRegisters();
-  RebuildCoreRegisters();
+  REQUIRE(ResetCoreRegisters());
+  REQUIRE(RebuildCoreRegisters());
 }
 
-void ESP32USBDevice::ResetCoreRegisters()
+bool ESP32USBDevice::ResetCoreRegisters()
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
   dev->gahbcfg_reg.glbllntrmsk = 0;
 
-  while (!dev->grstctl_reg.ahbidle)
+  if (!ESPUSBDetail::SpinUntil([dev]() { return dev->grstctl_reg.ahbidle != 0U; }))
   {
+    return false;
   }
 
   dev->gusbcfg_reg.forcehstmode = 0;
@@ -272,15 +284,11 @@ void ESP32USBDevice::ResetCoreRegisters()
   dev->gusbcfg_reg.hnpcap = 0;
 
   dev->grstctl_reg.csftrst = 1;
-  while (dev->grstctl_reg.csftrst)
-  {
-  }
-  while (!dev->grstctl_reg.ahbidle)
-  {
-  }
+  return ESPUSBDetail::SpinUntil([dev]() { return dev->grstctl_reg.csftrst == 0U; }) &&
+         ESPUSBDetail::SpinUntil([dev]() { return dev->grstctl_reg.ahbidle != 0U; });
 }
 
-void ESP32USBDevice::RebuildCoreRegisters()
+bool ESP32USBDevice::RebuildCoreRegisters()
 {
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
 
@@ -294,7 +302,7 @@ void ESP32USBDevice::RebuildCoreRegisters()
 
   ClearTxFifoRegisters();
 
-  FlushFifos();
+  const bool flushed = FlushFifos();
   ResetDeviceState();
 
   dev->gintsts_reg.val = 0xFFFFFFFFU;
@@ -314,7 +322,35 @@ void ESP32USBDevice::RebuildCoreRegisters()
   dev->gintmsk_reg.oepintmsk = 1;
   dev->gintmsk_reg.iepintmsk = 1;
   dev->gintmsk_reg.otgintmsk = 1;
-  if (WantsBusTime()) dev->gintmsk_reg.val |= 1U << 3U;
+  UpdateTick();
+  return flushed;
+}
+
+void ESP32USBDevice::OnStopsSettled()
+{
+  EndpointPool::HardwareScope hardware(this);
+  UpdateTick();
+}
+
+void ESP32USBDevice::UpdateTick()
+{
+  auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
+  bool needed = WantsBusTime();
+  for (size_t i = 0U; i < ENDPOINT_COUNT && !needed; ++i)
+  {
+    needed = (endpoint_map_.in[i] != nullptr &&
+              static_cast<ESP32USBEndpoint*>(endpoint_map_.in[i])->StopPending()) ||
+             (endpoint_map_.out[i] != nullptr &&
+              static_cast<ESP32USBEndpoint*>(endpoint_map_.out[i])->StopPending());
+  }
+  if (needed)
+  {
+    dev->gintmsk_reg.val |= 1U << 3U;
+  }
+  else
+  {
+    dev->gintmsk_reg.val &= ~(1U << 3U);
+  }
 }
 
 void ESP32USBDevice::OnStopTimeout(bool in_isr)
@@ -380,8 +416,14 @@ void ESP32USBDevice::ResetDone(void* arg, ErrorCode result)
   // Reset the core, rebuild the baseline, then reconnect: the host enumerates again
   // and the endpoints re-allocate their FIFOs on the next Configure (ForceStop
   // cleared the bookkeeping).
-  self->ResetCoreRegisters();
-  self->RebuildCoreRegisters();
+  if (!self->ResetCoreRegisters() || !self->RebuildCoreRegisters())
+  {
+    // 自清位超界没清：控制器不可信，留在总线外，等用户重新 Init/Start。
+    // A self-clearing bit stayed set past its bound: the controller cannot be trusted,
+    // stay off the bus until Init/Start runs again.
+    self->runtime_.started = false;
+    return;
+  }
   dev->dctl_reg.sftdiscon = 0;
   self->runtime_.started = true;
 }
@@ -415,20 +457,19 @@ void ESP32USBDevice::ClearTxFifoRegisters()
   }
 }
 
-void ESP32USBDevice::FlushFifos()
+bool ESP32USBDevice::FlushFifos()
 {
   // 复位后先冲刷所有 FIFO，避免旧 payload / setup 残留 / Flush all FIFOs after reset so
   // no stale payload or setup bytes survive.
   auto* dev = reinterpret_cast<usb_dwc_dev_t*>(ESPUSBDetail::DWC2_FS_REG_BASE);
   dev->grstctl_reg.txfnum = ESPUSBDetail::FLUSH_ALL_TX_FIFO;
   dev->grstctl_reg.txfflsh = 1;
-  while (dev->grstctl_reg.txfflsh)
-  {
-  }
+  const bool tx_done =
+      ESPUSBDetail::SpinUntil([dev]() { return dev->grstctl_reg.txfflsh == 0U; });
   dev->grstctl_reg.rxfflsh = 1;
-  while (dev->grstctl_reg.rxfflsh)
-  {
-  }
+  const bool rx_done =
+      ESPUSBDetail::SpinUntil([dev]() { return dev->grstctl_reg.rxfflsh == 0U; });
+  return tx_done && rx_done;
 }
 
 void ESP32USBDevice::ResetFifoState()
@@ -654,7 +695,7 @@ void ESP32USBDevice::HandleBusReset(bool in_isr)
   dev->diepmsk_reg.xfercomplmsk = 1;
   dev->diepmsk_reg.timeoutmsk = 1;
 
-  FlushFifos();
+  (void)FlushFifos();
 
   dev->dcfg_reg.devaddr = 0U;
 

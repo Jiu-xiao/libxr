@@ -69,7 +69,24 @@ volatile uint32_t* GetEndpointFifo(usb_dwc_dev_t* dev, uint8_t ep_num);
 void WriteFifoPacket(volatile uint32_t* fifo, const uint8_t* src, size_t size);
 void ReadFifoPacket(const volatile uint32_t* fifo, uint8_t* dst, size_t size);
 uint16_t PacketCount(size_t size, uint16_t max_packet_size);
-void FlushTxFifo(usb_dwc_dev_t* dev, uint8_t fifo_num);
+/// 有界自旋：条件成立返回 true，超过上限返回 false。用于硬件自清位的等待，使节拍和中断
+/// 里的等待有上界。
+/// Bounded spin: true once the condition holds, false after the limit. For waits on
+/// self-clearing hardware bits, so waits in the tick or an interrupt have an upper bound.
+template <typename Condition>
+inline bool SpinUntil(Condition condition, uint32_t limit = 200000U)
+{
+  for (uint32_t i = 0U; i < limit; ++i)
+  {
+    if (condition())
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool FlushTxFifo(usb_dwc_dev_t* dev, uint8_t fifo_num);
 void DisableInEndpointAndWait(usb_dwc_dev_t* dev);
 void DisableInEndpointAndWait(usb_dwc_dev_t* dev, uint8_t ep_num);
 

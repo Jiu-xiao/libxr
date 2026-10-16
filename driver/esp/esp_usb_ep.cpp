@@ -244,6 +244,7 @@ USB::Endpoint::StopResult ESP32USBEndpoint::StopHardware(bool in_isr)
       dev->in_eps[ep_num - 1U].diepctl_reg.snak = 1;
     }
     stop_phase_ = StopPhase::SNAK_WAIT;
+    device_.UpdateTick();
     return StopResult::PENDING;
   }
 
@@ -280,6 +281,7 @@ USB::Endpoint::StopResult ESP32USBEndpoint::StopHardware(bool in_isr)
   dev->doepmsk_reg.epdisbldmsk = 1;
   dev->out_eps[ep_num - 1U].doepctl_reg.epdis = 1;
   stop_phase_ = StopPhase::DIS_WAIT;
+  device_.UpdateTick();
   return StopResult::PENDING;
   UNUSED(in_isr);
 }

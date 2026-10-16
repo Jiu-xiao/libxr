@@ -213,13 +213,11 @@ uint16_t PacketCount(size_t size, uint16_t max_packet_size)
   return static_cast<uint16_t>((size + max_packet_size - 1U) / max_packet_size);
 }
 
-void FlushTxFifo(usb_dwc_dev_t* dev, uint8_t fifo_num)
+bool FlushTxFifo(usb_dwc_dev_t* dev, uint8_t fifo_num)
 {
   dev->grstctl_reg.txfnum = fifo_num;
   dev->grstctl_reg.txfflsh = 1;
-  while (dev->grstctl_reg.txfflsh)
-  {
-  }
+  return SpinUntil([dev]() { return !dev->grstctl_reg.txfflsh; });
 }
 
 void DisableInEndpointAndWait(usb_dwc_dev_t* dev)
