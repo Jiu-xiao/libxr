@@ -1,6 +1,7 @@
 // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
 // ch32_usb_otghs.cpp  (OTG HS)
 #include "ch32_usb_dev.hpp"
+#include "ch32_usb_guard.hpp"
 #include "ch32_usb_endpoint.hpp"
 #include "ch32_usb_rcc.hpp"
 #include "ep.hpp"
