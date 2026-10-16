@@ -321,8 +321,13 @@ class GsUsbClass : public DeviceClass
     // submission and the OUT slot a whole frame for reception. A BSP slot array below
     // that asserts at bind time (same class of problem as the old too-small buffers);
     // each endpoint needs >= 2 * WIRE_MAX_SIZE.
-    ASSERT(ep_data_in_->GetGranted().slot_capacity >= WIRE_MAX_SIZE);
-    ASSERT(ep_data_out_->GetGranted().slot_capacity >= WIRE_MAX_SIZE);
+    // 用 REQUIRE：槽太小在 release 构建里也不能静默通过——IN 槽 < 80 会静默
+    // 丢弃 FD 帧，OUT 槽 < 76 会把帧切成两段破坏同步。
+    // Use REQUIRE: an undersized slot must not pass silently in release builds —
+    // an IN slot below 80 silently drops FD frames and an OUT slot below 76 splits
+    // frames and breaks synchronisation.
+    REQUIRE(ep_data_in_->GetGranted().slot_capacity >= WIRE_MAX_SIZE);
+    REQUIRE(ep_data_out_->GetGranted().slot_capacity >= WIRE_MAX_SIZE);
 
     desc_block_.intf = {9,
                         static_cast<uint8_t>(DescriptorType::INTERFACE),
