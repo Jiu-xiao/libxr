@@ -900,10 +900,11 @@ class UAC1MicrophoneQ : public DeviceClass
     }
     if (completion.result == ErrorCode::ABORTED)
     {
-      // 解绑或恢复流程中的请求结束；下一拍非中断 SOF 继续激活。
-      // A request ended by an unbind or a recovery; the next non-ISR SOF tick
-      // continues the activation.
-      activate_pending_ = true;
+      // 有意的停止（解绑、SET_INTERFACE alt=0、恢复流程的 Close）：谁发起谁负责
+      // 置 activate_pending_，这里不能置——否则 GET_INTERFACE 会把 alt=0 报成 1。
+      // An intentional stop (unbind, SET_INTERFACE alt=0, a recovery Close): the
+      // initiator owns activate_pending_, and setting it here would make
+      // GET_INTERFACE report alt=0 as 1.
       return;
     }
 
