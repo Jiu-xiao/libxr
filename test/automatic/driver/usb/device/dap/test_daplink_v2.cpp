@@ -94,6 +94,7 @@ class TestDap2 : public DapV2
 {
  public:
   using DapV2::BindEndpoints;
+  using DapV2::GetWinUsbMsOs20DescriptorSet;
   using DapV2::DapV2;
   using DapV2::OnService;
   using DapV2::UnbindEndpoints;
@@ -470,6 +471,60 @@ void TestExecuteCommandsWithInlineCommands()
   f.in.Complete();
 }
 
+/// 补零到 DAP 包长的请求，窗口里放满 4 条命令：第 4 条的补零也要收完，否则主机的写
+/// 无法结束，也就不会去读响应，设备和主机互相等。
+/// Zero-padded requests with the window filled to four commands: the padding of the
+/// fourth must still be taken, or the host's write cannot finish, it never reads the
+/// responses, and device and host wait for each other.
+void TestPaddedRequestsFillTheWindowWithoutStalling()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  for (unsigned request = 0; request < 4; ++request)
+  {
+    std::vector<uint8_t> first(64, 0);
+    first[0] = INFO;
+    first[1] = PACKET_SIZE_ID;
+    TEST_ASSERT(f.out.active);
+    f.out.HostSends(first);
+    // The padding that follows is taken whether or not the window is full.
+    for (unsigned packet = 1; packet < 16; ++packet)
+    {
+      TEST_ASSERT(f.out.active);
+      f.out.HostSends(std::vector<uint8_t>(64, 0));
+    }
+  }
+  // Four commands outstanding: the window is full, one response is on the wire.
+  TEST_ASSERT(!f.out.active);
+  TEST_ASSERT(f.in.starts.size() == 1);
+
+  // Retiring the responses opens the window again and reception resumes.
+  for (unsigned i = 0; i < 4; ++i)
+  {
+    TEST_ASSERT(f.in.active);
+    f.in.Complete();
+  }
+  TEST_ASSERT(!f.in.active && f.out.active);
+}
+
+/// 单功能设备用设备级 MS OS 2.0 描述符集（Windows 对非复合设备不看功能子集头）。
+/// A single-function device uses the device-level MS OS 2.0 descriptor set (Windows
+/// ignores the function subset header on a non-composite device).
+void TestStandaloneDeviceUsesDeviceLevelWinUsbSet()
+{
+  FreshTimerList();
+  DapFixture f;  // DAP is the only function of its composition
+  const auto set = f.dap.GetWinUsbMsOs20DescriptorSet();
+  using Device = LibXR::USB::WinUsbMsOs20::DeviceScopedWinUsbMsOs20DescSet<
+      LibXR::USB::WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+  TEST_ASSERT(set.size_ == sizeof(Device));
+  uint16_t total = 0;
+  std::memcpy(&total, static_cast<const uint8_t*>(set.addr_) + 8, sizeof(total));
+  TEST_ASSERT(total == sizeof(Device));  // wTotalLength of the set header
+}
+
 void TestUnbind()
 {
   FreshTimerList();
@@ -502,6 +557,8 @@ int main()
   TestZeroPaddedTransferIsDropped();
   TestTransferAbortHasNoResponse();
   TestExecuteCommandsWithInlineCommands();
+  TestPaddedRequestsFillTheWindowWithoutStalling();
+  TestStandaloneDeviceUsesDeviceLevelWinUsbSet();
   TestUnbind();
   std::puts(
       "DAP v2 class: copy-mode Read/Write, response depth and deferred delay passed");

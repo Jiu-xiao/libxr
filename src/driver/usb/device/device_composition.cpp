@@ -294,6 +294,7 @@ DeviceComposition::DeviceComposition(
       {
         device_class->service_pool_ = &endpoint_pool_;
         classes_[class_count_++] = device_class;
+        device_class->OnCompositionKnown(composite_);
       }
     }
 

@@ -58,6 +58,18 @@ class DeviceClass : public ConfigDescriptorItem
     return nullptr;
   }
 
+  /**
+   * @brief 组合设备构造时告知本类是否处在复合设备里
+   *        Told at composition construction whether this class is part of a composite
+   *        device.
+   *
+   * 非复合设备（只有一个功能）上 Windows 不看功能子集头，设备级描述符才会被采用；类按这
+   * 个标志选择 MS OS 2.0 描述符集的形式。
+   * On a non-composite device (a single function) Windows ignores the function subset
+   * header and only a device-level descriptor takes effect; the class picks the form of
+   * its MS OS 2.0 descriptor set from this flag.
+   */
+  virtual void OnCompositionKnown(bool composite) { UNUSED(composite); }
   virtual void OnService(bool in_isr) { UNUSED(in_isr); }
   virtual size_t GetControlReceiveCapacity() const { return 64U; }
   virtual bool WantsBusTime() const { return false; }

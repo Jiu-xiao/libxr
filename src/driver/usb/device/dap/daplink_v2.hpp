@@ -441,8 +441,34 @@ class DapLinkV2Class : public DeviceClass
    */
   ConstRawData GetWinUsbMsOs20DescriptorSet() const
   {
+    if (winusb_standalone_)
+    {
+      return ConstRawData{reinterpret_cast<const uint8_t*>(&winusb_msos20_device_),
+                          sizeof(winusb_msos20_device_)};
+    }
     return ConstRawData{reinterpret_cast<const uint8_t*>(&winusb_msos20_),
                         sizeof(winusb_msos20_)};
+  }
+
+  /**
+   * @brief 单功能设备（非复合）上改用设备级 MS OS 2.0 描述符集
+   *        On a single-function (non-composite) device use the device-level MS OS 2.0
+   *        descriptor set
+   *
+   * Windows 只对复合设备看功能子集头；单功能设备要把兼容 ID 和接口 GUID 放在设备级，
+   * 否则不会绑定 WinUSB（问题代码 28）。
+   * Windows reads the function subset header only on composite devices; a single-function
+   * device needs the compatible ID and the interface GUID at device level or WinUSB does
+   * not bind (problem code 28).
+   */
+  void OnCompositionKnown(bool composite) override
+  {
+    winusb_standalone_ = !composite;
+    if (winusb_standalone_)
+    {
+      winusb_msos20_device_.Init("{CDB3B5AD-293B-4663-AA36-1AAE46463776}");
+    }
+    winusb_msos20_cap_.SetDescriptorSet(GetWinUsbMsOs20DescriptorSet());
   }
 
   /**
@@ -622,7 +648,7 @@ class DapLinkV2Class : public DeviceClass
 
   void UpdateWinUsbInterfaceFields()
   {
-    // Function subset interface number
+    // Function subset interface number (unused by the device-level set)
     winusb_msos20_.func.bFirstInterface = interface_num_;
 
     // Content changes but total size stays the same; resync for consistency.
@@ -692,12 +718,6 @@ class DapLinkV2Class : public DeviceClass
     }
 
     const size_t n = completion.actual;
-    const uint16_t mps = OutChunkSize();
-    const uint16_t packet = GetDapPacketSize();
-    const uint8_t index =
-        static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
-    uint8_t* const buffer = command_buffers_[index];
-
     if (rx_discard_)
     {
       // 补零部分已收完，丢弃。
@@ -706,21 +726,59 @@ class DapLinkV2Class : public DeviceClass
       ArmOutTransferIfIdle(in_isr);
       return;
     }
+    if (rx_probe_active_)
+    {
+      rx_probe_active_ = false;
+      HandleProbe(n, in_isr);
+      return;
+    }
+    HandleChunk(n, in_isr);
+  }
 
-    // 上一条命令以"恰好整包"结束时，主机可能把传输补零到 DAP 包长：随后到来的整包全零
-    // 不是命令（命令号 0 后面跟信息 ID 0 不是合法命令），连同剩余的补零一起丢弃。
-    // When the previous command ended on a whole packet the host may have padded its
-    // transfer to the DAP packet size: a following all-zero whole packet is not a command
-    // (command 0 with info ID 0 is not valid), so it is dropped together with the rest of
-    // the padding.
-    if (rx_off_ == 0u && rx_pad_base_ != 0u && n == mps && IsAllZero(buffer, n))
+  /// 命令缓冲环里正在装配的那一个 / The ring buffer a command is being assembled in
+  uint8_t* AssemblyBuffer() { return command_buffers_[AssemblyIndex()]; }
+  uint8_t AssemblyIndex() const
+  {
+    return static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
+  }
+
+  /// 探针接收：上一条命令以整包结束后，紧接着的那一包先收进探针缓冲，不占命令环，也
+  /// 不受响应窗口限制——它可能是同一次主机传输的补零，不收走主机就写不完。
+  /// Probe receive: after a command ended on a whole packet, the packet that follows is
+  /// taken into the probe buffer. It uses no ring place and is not held back by the
+  /// response window, because it may be padding of the same host transfer, which the
+  /// host cannot finish writing unless it is taken.
+  void StartProbeRead(size_t size, bool in_isr)
+  {
+    if (ep_data_out_->Read({rx_probe_, size}, in_isr) == ErrorCode::OK)
+    {
+      command_read_active_ = true;
+      rx_probe_active_ = true;
+    }
+  }
+
+  void HandleProbe(size_t n, bool in_isr)
+  {
+    const uint16_t mps = OutChunkSize();
+    const uint16_t packet = GetDapPacketSize();
+    if (n == 0u)
+    {
+      rx_pad_base_ = 0u;
+      ArmOutTransferIfIdle(in_isr);
+      return;
+    }
+    // 整包全零不是命令（命令号 0 后面跟信息 ID 0 不是合法命令）：它是补零，连同这次
+    // 传输剩下的补零一起丢弃。
+    // An all-zero whole packet is not a command (command 0 with info ID 0 is not valid):
+    // it is padding, dropped together with the rest of this transfer's padding.
+    if (n == mps && rx_pad_base_ != 0u && IsAllZero(rx_probe_, n))
     {
       const size_t used = static_cast<size_t>(rx_pad_base_) + n;
       rx_pad_base_ = 0u;
       if (used < packet)
       {
         rx_discard_ = true;
-        StartOutRead(buffer, 0u, static_cast<size_t>(packet) - used, in_isr);
+        StartProbeRead(static_cast<size_t>(packet) - used, in_isr);
       }
       else
       {
@@ -729,6 +787,34 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
     rx_pad_base_ = 0u;
+    // 下一条命令的第一包。窗口由主机遵守（它不会超过宣称的命令数），但命令环可能暂时
+    // 满着：先留在探针里，环里腾出位置后再放进去。
+    // The first packet of the next command. The host keeps to the advertised command
+    // count, but the ring may be full for the moment: keep it in the probe and move it
+    // into the ring once a place frees.
+    rx_probe_len_ = static_cast<uint16_t>(n);
+    rx_probe_stashed_ = true;
+    DeliverStashedProbe(in_isr);
+  }
+
+  void DeliverStashedProbe(bool in_isr)
+  {
+    if (!rx_probe_stashed_ || cmd_count_ >= CMD_BUFFER_COUNT || command_read_active_)
+    {
+      return;
+    }
+    rx_probe_stashed_ = false;
+    Memory::FastCopy(AssemblyBuffer(), rx_probe_, rx_probe_len_);
+    HandleChunk(rx_probe_len_, in_isr);
+  }
+
+  /// 装配中的命令又收到 n 字节 / n more bytes of the command being assembled
+  void HandleChunk(size_t n, bool in_isr)
+  {
+    const uint16_t mps = OutChunkSize();
+    const uint16_t packet = GetDapPacketSize();
+    const uint8_t index = AssemblyIndex();
+    uint8_t* const buffer = command_buffers_[index];
 
     rx_off_ = static_cast<uint16_t>(rx_off_ + n);
 
@@ -775,7 +861,6 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
 
-    rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
     if (buffer[0] == ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT))
     {
       // DAP_TransferAbort 收到即生效、没有响应：不进命令环。接收回调和命令执行在同一个
@@ -787,15 +872,38 @@ class DapLinkV2Class : public DeviceClass
       // cleared when the next transfer starts; when commands run in another context
       // (ExecuteExternal) the transfer being executed aborts at its next flag check.
       SetTransferAbortFlag(true);
+      rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
       rx_off_ = 0u;
-      ArmOutTransferIfIdle(in_isr);
+      if (padded_candidate)
+      {
+        StartProbeRead(mps, in_isr);
+      }
+      else
+      {
+        ArmOutTransferIfIdle(in_isr);
+      }
       return;
     }
     cmd_len_[index] = rx_off_;
+    rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
     rx_off_ = 0u;
     ++cmd_count_;
-    RequestClassService(in_isr);
-    ArmOutTransferIfIdle(in_isr);
+    if (padded_candidate)
+    {
+      // 命令在整包处完整：主机可能还在补零，紧接着那一包不受响应窗口限制。探针接收要先
+      // 挂上，再请求服务——服务可能在同一个调用里执行命令并去挂普通接收。
+      // The command is complete on a whole packet: the host may still be padding, so the
+      // packet that follows is not held back by the response window. The probe receive is
+      // armed first and the service requested after, since the service may run the
+      // command in the same call and arm an ordinary receive.
+      StartProbeRead(mps, in_isr);
+      RequestClassService(in_isr);
+    }
+    else
+    {
+      RequestClassService(in_isr);
+      ArmOutTransferIfIdle(in_isr);
+    }
   }
 
   /**
@@ -1405,8 +1513,16 @@ class DapLinkV2Class : public DeviceClass
 
   void ArmOutTransferIfIdle(bool in_isr)
   {
-    if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_ ||
-        cmd_count_ >= CMD_BUFFER_COUNT || IsResponseQueueFull() ||
+    if (!inited_ || !ep_data_out_ || !ep_data_in_ || command_read_active_) return;
+    if (rx_probe_stashed_)
+    {
+      // 探针里留着下一条命令的第一包：先把它放进命令环，不再挂新的接收。
+      // The probe holds the first packet of the next command: move it into the ring
+      // first, no new receive is armed.
+      DeliverStashedProbe(in_isr);
+      return;
+    }
+    if (cmd_count_ >= CMD_BUFFER_COUNT || IsResponseQueueFull() ||
         OutstandingResponseCount() + cmd_count_ >= MAX_OUTSTANDING_RESPONSES)
       return;
     // 拷贝模式 Read：一条命令一次接收，短包或收满（DAP 包长）即完成。
@@ -1440,6 +1556,8 @@ class DapLinkV2Class : public DeviceClass
     rx_off_ = 0u;
     rx_pad_base_ = 0u;
     rx_discard_ = false;
+    rx_probe_active_ = false;
+    rx_probe_stashed_ = false;
   }
 
   static bool IsAllZero(const uint8_t* data, size_t size)
@@ -4611,7 +4729,13 @@ class DapLinkV2Class : public DeviceClass
   /// command when it ended on a whole packet; a following all-zero whole packet is
   /// padding
   uint16_t rx_pad_base_ = 0u;
-  bool rx_discard_ = false;             ///< 正在丢弃补零 / Dropping zero padding
+  bool rx_discard_ = false;       ///< 正在丢弃补零 / Dropping zero padding
+  bool rx_probe_active_ = false;  ///< 探针接收在途 / A probe receive is in flight
+  /// 探针里留着下一条命令的第一包 / The probe holds the first packet of the next command
+  bool rx_probe_stashed_ = false;
+  uint16_t rx_probe_len_ = 0u;  ///< 探针里的字节数 / Bytes in the probe
+  /// 探针与丢弃缓冲 / Probe and drop buffer
+  uint8_t rx_probe_[MAX_DAP_PACKET_SIZE] = {};
   bool command_read_active_ = false;    ///< OUT 拷贝 Read 在途 / OUT copy Read in flight
   bool response_write_active_ = false;  ///< IN 拷贝 Write 在途 / IN copy Write in flight
 
@@ -4707,6 +4831,12 @@ class DapLinkV2Class : public DeviceClass
   LIBXR_PACKED_END
 
  private:
+  /// 单功能设备用的设备级描述符集 / Device-level descriptor set for a single-function
+  /// device
+  LibXR::USB::WinUsbMsOs20::DeviceScopedWinUsbMsOs20DescSet<
+      LibXR::USB::WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>
+      winusb_msos20_device_{};
+  bool winusb_standalone_ = false;
   LibXR::USB::WinUsbMsOs20::MsOs20BosCapability winusb_msos20_cap_{
       LibXR::ConstRawData{nullptr, 0}, WINUSB_VENDOR_CODE};  ///< WinUSB BOS capability
 
