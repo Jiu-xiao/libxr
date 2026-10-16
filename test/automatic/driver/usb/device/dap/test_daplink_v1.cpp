@@ -195,8 +195,8 @@ void TestBusyOutReportsAfterHalt()
   // data[1] is the length byte.
   dap.ProcessPending(false);
   TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::INFO));
-  TEST_ASSERT(f.in.Last().data[1] == 9U);  // "DAPLinkV1" = 9 bytes incl. NUL
-  TEST_ASSERT(std::memcmp(&f.in.Last().data[2], "DAPLinkV1", 9) == 0);
+  TEST_ASSERT(f.in.Last().data[1] == 10U);  // "DAPLinkV1" = 9 chars + NUL
+  TEST_ASSERT(std::memcmp(&f.in.Last().data[2], "DAPLinkV1", 10) == 0);
   f.in.Complete();
   TEST_ASSERT(f.out.active && f.out.starts.size() == 4);
 }
