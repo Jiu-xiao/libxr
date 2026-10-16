@@ -839,6 +839,15 @@ class DapLinkV2Class : public DeviceClass
     {
       return;
     }
+    // 窗口满时留在探针里：探针只是用来不卡住补零，不能让一个超窗口的命令挤进来，那样
+    // 执行时会没有响应槽。
+    // With the window full it stays in the probe: the probe exists so padding does not
+    // block the host, and it must not let a command beyond the window in, which would
+    // find no response slot when it runs.
+    if (outstanding_.load(std::memory_order_acquire) >= MAX_OUTSTANDING_RESPONSES)
+    {
+      return;
+    }
     if (rx_slot_ == SLOT_NONE && cmd_pool_.Acquire(rx_slot_) != ErrorCode::OK)
     {
       rx_slot_ = SLOT_NONE;

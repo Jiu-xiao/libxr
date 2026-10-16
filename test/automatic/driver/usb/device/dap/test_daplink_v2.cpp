@@ -505,6 +505,48 @@ void TestPaddedRequestsFillTheWindowWithoutStalling()
   TEST_ASSERT(!f.in.active && f.out.active);
 }
 
+/// 窗口满时，探针里收到的下一条命令不能挤进来（执行时会没有响应槽）：它留着，等一个
+/// 响应发送完、窗口空出来才放进命令池。
+/// With the window full, the next command received through the probe must not squeeze
+/// in (it would find no response slot when it runs): it waits until a response has been
+/// sent and the window has a place.
+void TestCommandBeyondTheWindowWaitsInTheProbe()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // Four commands, each exactly one whole packet (INFO then zeros, no padding after).
+  std::vector<uint8_t> command(64, 0);
+  command[0] = INFO;
+  command[1] = PACKET_SIZE_ID;
+  std::vector<uint8_t> next_command(64, 0x11);  // a fifth, non-zero first packet
+  next_command[0] = INFO;
+  next_command[1] = PACKET_SIZE_ID;
+  for (unsigned i = 0; i < 4; ++i)
+  {
+    TEST_ASSERT(f.out.active);
+    Host(f, command);
+  }
+  // The fifth command's first packet arrives through the probe; the window is full, so it
+  // is held there and nothing more is received or answered.
+  TEST_ASSERT(f.out.active);
+  Host(f, next_command);
+  TEST_ASSERT(!f.out.active);
+  TEST_ASSERT(f.in.starts.size() == 1);
+
+  // A response goes out: the window opens and the held command runs.
+  unsigned answered = 0;
+  while (f.in.active)
+  {
+    f.in.Complete();
+    Run(f);
+    ++answered;
+  }
+  TEST_ASSERT(answered == 5);  // 4 + the held fifth
+  TEST_ASSERT(f.out.active);
+}
+
 /// 单功能设备用设备级 MS OS 2.0 描述符集（Windows 对非复合设备不看功能子集头）。
 /// A single-function device uses the device-level MS OS 2.0 descriptor set (Windows
 /// ignores the function subset header on a non-composite device).
@@ -554,6 +596,7 @@ int main()
   TestTransferAbortHasNoResponse();
   TestExecuteCommandsWithInlineCommands();
   TestPaddedRequestsFillTheWindowWithoutStalling();
+  TestCommandBeyondTheWindowWaitsInTheProbe();
   TestStandaloneDeviceUsesDeviceLevelWinUsbSet();
   TestUnbind();
   std::puts(
