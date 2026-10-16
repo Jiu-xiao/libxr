@@ -384,6 +384,84 @@ void TestUserIdRoundTripAndDatabaseWrite()
   LibXR::Database::Key<uint32_t> probe(db, "user_id", 0u);
   TEST_ASSERT(static_cast<uint32_t>(probe) == user_id);
 }
+
+void TestMultiChannelRoundRobin()
+{
+  FreshTimerList();
+  GsFixture f;
+  f.gs.BindEndpoints(f.pool, 0, false);
+  Configure(f);
+
+  // Four frames per channel are queued behind the two IN slots; the channels must
+  // alternate on the wire instead of one channel draining first.
+  for (unsigned i = 0; i < 6; ++i)
+  {
+    f.can0.Inject(0x100u + i, {static_cast<uint8_t>(i)});
+    f.can1.Inject(0x200u + i, {static_cast<uint8_t>(i)});
+  }
+  for (unsigned i = 0; i < 24 && f.in.active; ++i)
+  {
+    f.in.Complete();
+  }
+  TEST_ASSERT(f.in.sent.size() == 12);
+  // The first frame went out before the other channel had anything queued; after that
+  // the channels interleave and each channel keeps its own order.
+  unsigned next[2] = {0, 0};
+  unsigned max_run = 0, run = 0;
+  uint8_t last_ch = 0xFF;
+  for (const auto& frame : f.in.sent)
+  {
+    const uint8_t ch = frame[9];
+    TEST_ASSERT(ch < 2);
+    TEST_ASSERT(frame[WIRE_HEADER] == next[ch]);
+    ++next[ch];
+    run = (ch == last_ch) ? run + 1 : 1;
+    max_run = std::max(max_run, run);
+    last_ch = ch;
+  }
+  TEST_ASSERT(next[0] == 6 && next[1] == 6);
+  TEST_ASSERT(max_run <= 2);
+}
+
+void TestErrorFrameHasOwnQueue()
+{
+  FreshTimerList();
+  GsFixture f(2, 32);  // two data frames per channel
+  f.gs.BindEndpoints(f.pool, 0, false);
+  Configure(f, true, false);
+
+  // Channel 0 reports bus errors.
+  TestGs::ControlTransferResult result;
+  TEST_ASSERT(f.gs.OnVendorRequest(false, static_cast<uint8_t>(GsUsb::BReq::MODE), 0, 8,
+                                   0, result) == ErrorCode::OK);
+  const uint32_t mode[2] = {1u, GsUsb::GSCAN_MODE_BERR_REPORTING};
+  ConstRawData mode_data{mode, sizeof(mode)};
+  TEST_ASSERT(f.gs.OnClassData(false, static_cast<uint8_t>(GsUsb::BReq::MODE),
+                               mode_data) == ErrorCode::OK);
+
+  // Fill the two IN slots and the data queue, then raise an error. The error frame
+  // must still get through because it has its own queue.
+  for (unsigned i = 0; i < 6; ++i)
+  {
+    f.can0.Inject(0x100u + i, {static_cast<uint8_t>(i)});
+  }
+  f.can0.Inject(LibXR::CAN::FromErrorID(LibXR::CAN::ErrorID::CAN_ERROR_ID_BUS_OFF), {},
+                LibXR::CAN::Type::ERROR);
+  for (unsigned i = 0; i < 16 && f.in.active; ++i)
+  {
+    f.in.Complete();
+  }
+
+  unsigned errors = 0;
+  for (const auto& frame : f.in.sent)
+  {
+    if ((ReadU32(frame, 4) & GsUsb::CAN_ERR_FLAG) != 0U)
+    {
+      ++errors;
+    }
+  }
+  TEST_ASSERT(errors == 1);
+}
 }  // namespace
 
 int main()
@@ -394,6 +472,10 @@ int main()
   TestRxQueueOverflowFlag();
   TestEchoBackpressure();
   TestUserIdRoundTripAndDatabaseWrite();
+  TestMultiChannelRoundRobin();
+  TestErrorFrameHasOwnQueue();
   std::puts(
-      "gs_usb class: queues, echo share, backpressure, overflow and USER_ID passed");
+      "gs_usb class: queues, echo share, backpressure, overflow, USER_ID, round-robin "
+      "and "
+      "error queue passed");
 }

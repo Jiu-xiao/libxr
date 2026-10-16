@@ -56,6 +56,10 @@ class GsUsbClass : public DeviceClass
   // USER_ID write-back period (tentatively 100 ms).
   static constexpr uint32_t USER_ID_WRITE_PERIOD_MS = 100;
 
+  // 每通道错误帧队列容量。
+  // Per-channel error-frame queue capacity.
+  static constexpr std::size_t ERR_QUEUE_SIZE = 8;
+
   // echo 份额：每发出一帧 RX，echo 可优先插发的帧数。
   // Echo share: how many frames echo may jump ahead per RX frame sent.
   static constexpr uint32_t ECHO_SHARE = 1;
@@ -129,7 +133,8 @@ class GsUsbClass : public DeviceClass
         identify_gpio_(identify_gpio),
         database_(database),
         echo_queue_(echo_queue_size),
-        rx_queues_(rx_queue_size)
+        rx_queues_(rx_queue_size),
+        err_queues_(ERR_QUEUE_SIZE)
   {
     ASSERT(cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -185,7 +190,8 @@ class GsUsbClass : public DeviceClass
         identify_gpio_(identify_gpio),
         database_(database),
         echo_queue_(echo_queue_size),
-        rx_queues_(rx_queue_size)
+        rx_queues_(rx_queue_size),
+        err_queues_(ERR_QUEUE_SIZE)
   {
     ASSERT(fd_cans.size() == CAN_CH_NUM);
     std::size_t i = 0;
@@ -1114,6 +1120,12 @@ class GsUsbClass : public DeviceClass
                             ///< (echoes echo_id; produced by the OUT handler)
   RxQueueArray rx_queues_;  ///< 每通道一个接收队列（Device->Host） / One RX queue per
                             ///< channel (Device->Host)
+  // 错误帧由 CAN 的错误中断产生，数据帧由接收中断产生，两者优先级不必相同，所以错误帧
+  // 单独一个队列，保证每个队列只有一个生产者上下文。
+  // Error frames come from the CAN error interrupt and data frames from the receive
+  // interrupt, whose priorities need not be equal, so error frames get their own queue
+  // and every queue keeps one producer context.
+  RxQueueArray err_queues_;
 
   // 发往主机的调度状态，只在 owner（完成回调与服务）上下文访问。
   // Host-send scheduling state, accessed only in the owner (completions and service).
@@ -1231,9 +1243,10 @@ class GsUsbClass : public DeviceClass
     if (pack.type == LibXR::CAN::Type::ERROR)
     {
       QueueItem qi;
-      if (ErrorPackToHostErrorFrame(ch, pack, qi))
+      if (ErrorPackToHostErrorFrame(ch, pack, qi) &&
+          err_queues_[ch].Push(qi) == ErrorCode::OK)
       {
-        PushRx(ch, qi, in_isr);
+        RequestClassService(in_isr);
       }
       return;
     }
@@ -1309,7 +1322,8 @@ class GsUsbClass : public DeviceClass
     for (std::size_t k = 0; k < can_count_; ++k)
     {
       const uint8_t ch = static_cast<uint8_t>((rr_ + k) % can_count_);
-      if (rx_queues_[ch].Pop(item) == ErrorCode::OK)
+      if (err_queues_[ch].Pop(item) == ErrorCode::OK ||
+          rx_queues_[ch].Pop(item) == ErrorCode::OK)
       {
         rr_ = static_cast<uint8_t>((ch + 1U) % can_count_);
         echo_credit_ = ECHO_SHARE;
