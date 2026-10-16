@@ -439,16 +439,49 @@ void DapLinkV1Class<SwdPort>::OnDataOutComplete(bool in_isr,
                                                 const Endpoint::Completion& completion)
 {
   UNUSED(in_isr);
-  if (completion.result != ErrorCode::OK || !completion.slot.Valid()) return;
+
+  // 接收失败会释放槽：必须重新挂上，否则 OUT 从此收不到报告（HID 基类的行为）。
+  // A failed receive frees its slot: arm it again or OUT never receives another
+  // report (this is what the HID base does).
+  if (completion.result != ErrorCode::OK || !completion.slot.Valid())
+  {
+    if (completion.result != ErrorCode::ABORTED && ep_out_ != nullptr)
+    {
+      (void)ep_out_->Receive(ep_out_->MaxPacketSize(), in_isr);
+    }
+    return;
+  }
+
   // owner 只登记租约并置位（浅操作）；命令在 DAP 自己的上下文执行（§3.1），
   // 响应提交前租约一直保留作背压，OUT 端点不会重新挂接收。
   // The owner only records the lease and raises the flag (shallow); the command runs in
   // DAP's own context (§3.1) and the lease is withheld until the response is
   // submitted, so the OUT endpoint is not rearmed meanwhile.
+
+  // 先写租约再置位：反过来的话执行线程可能读到空租约并卡住。
+  // Write the lease before raising the flag; the other order lets the executing
+  // thread observe an empty lease and get stuck.
+  Endpoint::Slot pending_lease = completion.slot;
   uint32_t expected = CMD_IDLE;
-  REQUIRE(cmd_state_.compare_exchange_strong(expected, CMD_PENDING,
-                                             std::memory_order_acq_rel));
-  out_lease_ = completion.slot;
+  if (!cmd_state_.compare_exchange_strong(expected, CMD_PENDING, std::memory_order_acq_rel))
+  {
+    const uint32_t state = cmd_state_.load(std::memory_order_acquire);
+    if (state != CMD_PENDING)
+    {
+      // 命令正在执行或响应正在提交：不能换租约（会与执行线程竞争），也不能
+      // 把这条 fatal 掉。丢弃这一包并重新挂接收，主机超时会重发。
+      // The command is executing or the response is being submitted: swapping the
+      // lease would race with the executing thread and failing here would be
+      // fatal. Drop this packet, rearm the receive, and let the host retry.
+      if (ep_out_ != nullptr) (void)ep_out_->ReturnSlot(pending_lease, in_isr);
+      return;
+    }
+  }
+
+  // PENDING 时执行线程还没取走，取最新的一包（后到者胜）。
+  // While PENDING the executing thread has not taken it yet, so keep the newest
+  // packet (last one wins).
+  out_lease_ = pending_lease;
 }
 
 template <typename SwdPort>
