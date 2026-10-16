@@ -1017,8 +1017,9 @@ class DapLinkV2Class : public DeviceClass
       if (action == PendingAction::NONE) break;
 
       uint32_t poll = 0u;
-      while (static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
-                                  action_deadline_ms_) < 0)
+      while (
+          static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
+                               action_deadline_ms_) < 0)
       {
         // 批内延时很短；设上限避免异常时钟下卡死。
         // Delays inside a batch are short; cap the spin so a broken clock cannot
@@ -1038,8 +1039,9 @@ class DapLinkV2Class : public DeviceClass
         const bool matched =
             swj_pin_sel_ != 0u && (pin_in & swj_pin_sel_) == swj_pin_expect_;
         const bool expired =
-            static_cast<int32_t>(static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
-                                 action_deadline_ms_) >= 0;
+            static_cast<int32_t>(
+                static_cast<uint32_t>(LibXR::Timebase::GetMilliseconds()) -
+                action_deadline_ms_) >= 0;
         if (!matched && !expired) continue;
         resp[1] = pin_in;
         out_len = 2u;
