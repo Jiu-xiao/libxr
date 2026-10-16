@@ -8,6 +8,11 @@
 namespace LibXR
 {
 
+// The CH32 OTG FS/HS endpoints still speak the pre-slot-model backend interface; they
+// are migrated in step 5. Until then the legacy classes are only compiled when
+// LIBXR_CH32_USB_OTG_LEGACY is set, so a part that also defines USBFSD (V203 has both
+// the DevFS device and the OTG FS peripheral) can build the migrated DevFS path.
+// Remove this switch with the step-5 migration.
 #if defined(USBFSD) || defined(__DOXYGEN__)
 
 /**
@@ -70,67 +75,6 @@ class CH32EndpointOtgFs : public USB::Endpoint
 };
 
 #endif  // defined(USBFSD) || defined(__DOXYGEN__)
-
-#if defined(RCC_APB1Periph_USB) || defined(__DOXYGEN__)
-
-/**
- * @brief CH32 FSDEV 端点实现 / CH32 FSDEV endpoint implementation
- */
-class CH32EndpointDevFs : public USB::Endpoint
-{
- public:
-  CH32EndpointDevFs(EPNumber ep_num, Direction dir, LibXR::RawData buffer,
-                    bool is_isochronous);
-
-  // DevFS 属第 4 步（共用 FSDEV 运行期），本分支不迁移：仅做最小编译适配（新
-  // 签名 + 占位实现），V307 的库构建会编译本文件；V203 的 USB 功能不可用是
-  // 预期状态，功能迁移由第 4 步交付。
-  // DevFS belongs to step 4 (shared FSDEV runtime) and is NOT migrated on this
-  // branch: only a minimal compile adaptation (new signatures + placeholder
-  // implementations) so the V307 library build compiles this file. V203 USB
-  // functionality staying unavailable is expected; the real migration ships with
-  // step 4.
-  ErrorCode ConfigureHardware(const Config& cfg, Granted& granted) override;
-  void CloseHardware(bool in_isr) override;
-  ErrorCode StartHardware(const HwRequest& request, bool in_isr) override;
-  USB::Endpoint::StopResult StopHardware(bool) override { return StopResult::DONE; }
-  size_t ReapProgress(const HwRequest&, bool& retired) override
-  {
-    retired = true;
-    return 0;
-  }
-  size_t MaxPacketSizeLimit(Type) const override { return 64U; }
-
-  void TransferComplete(size_t size);
-
-  void CopyRxDataToBuffer(size_t size);
-
-  ErrorCode StallHardware(bool in_isr) override;
-  ErrorCode ClearStallHardware(bool in_isr) override;
-
-  // FSDEV 设备层（ch32_usb_devfs.cpp）需要从类外读取 EP0 槽内存来取 setup 包。
-  // The FSDEV device layer (ch32_usb_devfs.cpp) reads the EP0 slot memory from
-  // outside the class to fetch the setup packet.
-  using USB::Endpoint::SlotMemory;
-
-  static void ResetPMAAllocator();
-  static void SetEpTxStatus(uint8_t ep, uint16_t status);
-  static void SetEpRxStatus(uint8_t ep, uint16_t status);
-  static void ClearEpCtrTx(uint8_t ep);
-  static void ClearEpCtrRx(uint8_t ep);
-  static uint16_t GetRxCount(uint8_t ep);
-
-  bool is_isochronous_ = false;
-
-  size_t last_transfer_size_ = 0;
-
-  uint16_t pma_addr_ = 0;
-
-  static constexpr uint8_t EP_DEV_FS_MAX_SIZE = 8;
-  static inline CH32EndpointDevFs* map_dev_fs_[EP_DEV_FS_MAX_SIZE][2] = {};
-};
-
-#endif  // defined(RCC_APB1Periph_USB) || defined(__DOXYGEN__)
 
 #if defined(USBHSD) || defined(__DOXYGEN__)
 
