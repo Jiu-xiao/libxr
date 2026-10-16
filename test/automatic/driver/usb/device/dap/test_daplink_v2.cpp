@@ -255,7 +255,9 @@ void TestBatchWithDelay()
   // EXECUTE_COMMANDS: the delay command suspends the batch — the owner does not
   // busy-wait, the response slot stays reserved, and nothing has been sent yet.
   Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
-  TEST_ASSERT(f.in.starts.empty());
+  // 只有前面 QUEUE_COMMANDS 那一次 IN 启动，没有新的响应发出。
+  // Only the earlier QUEUE_COMMANDS start exists; no new response went out.
+  TEST_ASSERT(f.in.starts.size() == 1u && !f.in.active);
   TEST_ASSERT(!f.out.active);
 
   // 延时到期（Timer 路径续做）后，整条批响应一次完整到达：
