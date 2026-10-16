@@ -236,7 +236,14 @@ CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
 {
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-  set_dma_buffer(GetNumber(), dma_buffer_.addr_, false);
+  // 共享双向端点：IN 对象拿到的地址是 OUT+64，块基址要回退 64。
+  // For a shared bidirectional endpoint the IN object receives OUT+64; step
+  // back to the block base.
+  block_dma_base_ = (!single_direction && ep_num != EPNumber::EP0 && dir == Direction::IN)
+                        ? static_cast<uint8_t*>(buffer.addr_) - SHARED_BLOCK_HALF
+                        : static_cast<uint8_t*>(buffer.addr_);
+
+  set_dma_buffer(GetNumber(), block_dma_base_, false);
 
   if (dir == Direction::IN)
   {
@@ -284,12 +291,13 @@ ErrorCode CH32EndpointOtgFs::ConfigureHardware(const Config& cfg, Granted& /*gra
     if (single_direction_) disable_tx(GetNumber());
   }
 
-  set_dma_buffer(GetNumber(), SlotMemory().addr_, false);
+  set_dma_buffer(GetNumber(), block_dma_base_, false);
   transfer_active_ = false;
   transfer_tag_ = 0;
   transfer_requested_ = 0;
   transfer_accumulated_ = 0;
   transfer_cursor_ = nullptr;
+  transfer_remaining_ = 0;
   return ErrorCode::OK;
 }
 
@@ -318,12 +326,30 @@ ErrorCode CH32EndpointOtgFs::StartHardware(const HwRequest& request, bool /*in_i
   transfer_accumulated_ = 0;
   transfer_active_ = true;
   transfer_dma_ = request.slot;
+  transfer_cursor_ = static_cast<uint8_t*>(request.slot.addr_);
+  transfer_remaining_ = 0;
+  hw_completed_ = false;
 
   if (is_in)
   {
     // 槽内存就是 DMA 缓冲：类在 Submit 前已把数据写进槽，无需再拷贝。
-    set_dma_buffer(GetNumber(), request.slot.addr_, false);
-    set_tx_len(GetNumber(), request.length);
+    // 共享双向端点不能动 UEPn_DMA：硬件的 IN 区固定在块基址 +64，写了 IN 槽
+    // 地址会把发送区推到 base+128、并让 OUT 收到 IN 区里去。
+    // Shared bidirectional endpoints must not touch UEPn_DMA: the hardware IN
+    // area is fixed at block base +64, so writing the IN slot address would
+    // transmit from base+128 and let OUT land in the IN area.
+    if (single_direction_ || is_ep0)
+    {
+      set_dma_buffer(GetNumber(), request.slot.addr_, false);
+    }
+    // 超过一个包长的 IN 请求按 MPS 分包：先发第一包，余下由完成路径续发。
+    // IN requests longer than one packet are split at MPS: send the first
+    // packet here and continue from the completion path.
+    const size_t mps = MaxPacketSize();
+    const size_t chunk = (mps > 0U && request.length > mps) ? mps : request.length;
+    transfer_remaining_ = request.length - chunk;
+    transfer_cursor_ += chunk;
+    set_tx_len(GetNumber(), chunk);
     auto addr = get_tx_ctrl_addr(GetNumber());
 
     if (!is_ep0)
@@ -342,11 +368,10 @@ ErrorCode CH32EndpointOtgFs::StartHardware(const HwRequest& request, bool /*in_i
 
   // OUT：共享模式每包完成且不推进 DMA（UEPn_DMA 收发共用，推进会破坏 IN 固定
   // +64 的硬件布局）；单向模式按包推进 DMA，多包请求一次完成。
-  if (single_direction_)
+  if (single_direction_ || is_ep0)
   {
-    transfer_cursor_ = static_cast<uint8_t*>(request.slot.addr_);
+    set_dma_buffer(GetNumber(), request.slot.addr_, false);
   }
-  set_dma_buffer(GetNumber(), request.slot.addr_, false);
   auto addr = get_rx_ctrl_addr(GetNumber());
   if (!is_ep0)
   {
@@ -380,10 +405,22 @@ USB::Endpoint::StopResult CH32EndpointOtgFs::StopHardware(bool /*in_isr*/)
   return StopResult::DONE;
 }
 
-size_t CH32EndpointOtgFs::ReapProgress(const HwRequest& /*request*/, bool& retired)
+size_t CH32EndpointOtgFs::ReapProgress(const HwRequest& request, bool& retired)
 {
-  retired = true;
-  return transfer_accumulated_;
+  // 只有硬件真正报过完成，才能认为主机把数据都取走了（与 STM32 OTG 的 XFRC
+  // 判据同口径）。否则 retired 保持 false：IN 报 0（没发出去的不能算成功），
+  // OUT 报已经落进槽的字节数（这些数据确实收到了）。
+  // Only a real hardware completion proves the host took everything (same
+  // criterion as the STM32 OTG XFRC check). Otherwise retired stays false:
+  // IN reports 0 (unsent bytes must not count as success) and OUT reports the
+  // bytes already in the slot (those really were received).
+  if (hw_completed_)
+  {
+    retired = true;
+    return request.length;
+  }
+  retired = false;
+  return (GetDirection() == Direction::OUT) ? transfer_accumulated_ : 0U;
 }
 
 ErrorCode CH32EndpointOtgFs::StallHardware(bool /*in_isr*/)
@@ -413,15 +450,29 @@ size_t CH32EndpointOtgFs::MaxPacketSizeLimit(Type type) const
 {
   // 手册表 23-4（p.359）/EP0（p.355）：EP1-15 除 EP3 外最大 64 B；EP3 仅同步
   // 传输且单缓冲时最大 1023 B；EP0 收发共用 64 B。
+  // 手册表 23-4（p.359）：只有 EP3 在同步传输且单缓冲时才支持 >64 的包长，
+  // 其余端点（含 EP0）最大 64 B。
+  // Manual table 23-4 (p.359): only EP3 in isochronous single-buffer mode
+  // supports a packet size above 64; everything else (EP0 included) is 64.
   if (type == Type::ISOCHRONOUS)
   {
-    return 1023U;
+    return (GetNumber() == EPNumber::EP3 && single_direction_) ? 1023U : 64U;
   }
   return 64U;
 }
 
 void CH32EndpointOtgFs::TransferComplete(size_t size)
 {
+  // 停止后/新请求挂载前到达的迟到完成：不该再动寄存器，也不是本请求的完成，
+  // 直接丢弃（核心按标签丢弃，这里守住硬件侧）。
+  // A completion arriving after a stop or before the next request is armed must
+  // not touch the registers and is not a completion of the current request; drop
+  // it (the core also drops it by tag, this guards the hardware side).
+  if (!transfer_active_)
+  {
+    return;
+  }
+
   const bool IS_IN = (GetDirection() == Direction::IN);
   const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
   const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
@@ -430,10 +481,45 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
 
   if (IS_IN)
   {
+    // 还有后续分包：续发下一包，整请求发完才向核心报一次完成。
+    // More packets to go: send the next one and report a single completion for
+    // the whole request once everything is out.
+    if (transfer_remaining_ > 0U)
+    {
+      const size_t mps = MaxPacketSize();
+      const size_t chunk =
+          (mps > 0U && transfer_remaining_ > mps) ? mps : transfer_remaining_;
+      if (single_direction_ || IS_EP0)
+      {
+        set_dma_buffer(GetNumber(), transfer_cursor_, false);
+      }
+      else
+      {
+        // 共享模式只有 64 B 的 IN 区，请求长度不会超过一个包；走到这里说明
+        // 配置有误，按剩余字节整包发出，不再续发。
+        // Shared mode only has a 64 B IN area, so a request never exceeds one
+        // packet; reaching here means a misconfiguration — send what is left as
+        // one packet and stop splitting.
+        transfer_remaining_ = 0U;
+      }
+      if (transfer_remaining_ > 0U)
+      {
+        set_tx_len(GetNumber(), chunk);
+        transfer_cursor_ += chunk;
+        transfer_remaining_ -= chunk;
+        *get_tx_ctrl_addr(GetNumber()) =
+            (*get_tx_ctrl_addr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) |
+            (IS_ISO ? USBFS_UEP_T_RES_NONE : USBFS_UEP_T_RES_ACK);
+        return;
+      }
+      set_tx_len(GetNumber(), chunk);
+    }
     // 完成后恢复 NAK；IN 一次请求一次完成，actual = 请求长度。
     *get_tx_ctrl_addr(GetNumber()) =
         (*get_tx_ctrl_addr(GetNumber()) & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
     transfer_active_ = false;
+    transfer_remaining_ = 0U;
+    hw_completed_ = true;
     OnHardwareComplete(true, transfer_tag_, transfer_requested_);
     return;
   }
@@ -466,6 +552,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
     *get_rx_ctrl_addr(GetNumber()) =
         (*get_rx_ctrl_addr(GetNumber()) & ~USBFS_UEP_R_RES_MASK) | USBFS_UEP_R_RES_NAK;
     transfer_active_ = false;
+    hw_completed_ = true;
     OnHardwareComplete(true, transfer_tag_, transfer_accumulated_);
     return;
   }
@@ -479,6 +566,7 @@ void CH32EndpointOtgFs::TransferComplete(size_t size)
   }
   transfer_accumulated_ = size;
   transfer_active_ = false;
+  hw_completed_ = true;
   if (IS_EP0)
   {
     // 每个 EP0 OUT 包完成即是一个阶段的收尾（FS 下 MPS0 ≤ 64 = 单包）：置

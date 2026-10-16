@@ -470,19 +470,29 @@ ErrorCode CH32EndpointOtgHs::StartHardware(const HwRequest& request, bool /*in_i
   transfer_accumulated_ = 0;
   transfer_active_ = true;
   transfer_dma_ = request.slot;
+  transfer_cursor_ = static_cast<uint8_t*>(request.slot.addr_);
+  transfer_remaining_ = 0;
+  hw_completed_ = false;
   last_transfer_size_ = request.length;  // IRQ 窄恢复路径读取（EP0 IN 无 ACK 补偿）
 
   if (IS_IN)
   {
     // 槽内存就是 DMA 缓冲：类在 Submit 前已把数据写进槽，无需再拷贝。
     set_tx_dma_buffer(GetNumber(), request.slot.addr_);
+    // 超过一个包长的 IN 请求按 MPS 分包（HS BULK 为 512，槽可达 1024）。
+    // Split IN requests longer than one packet at MPS (HS bulk is 512, slots
+    // can be 1024).
+    const size_t mps = MaxPacketSize();
+    const size_t chunk = (mps > 0U && request.length > mps) ? mps : request.length;
+    transfer_remaining_ = request.length - chunk;
+    transfer_cursor_ += chunk;
 
     if (GetType() == Type::ISOCHRONOUS)
     {
       enable_tx(GetNumber());
     }
 
-    set_tx_len(GetNumber(), request.length);
+    set_tx_len(GetNumber(), chunk);
     auto addr = get_tx_control_addr(GetNumber());
 
     if (GetType() != Type::ISOCHRONOUS)
@@ -575,10 +585,18 @@ USB::Endpoint::StopResult CH32EndpointOtgHs::StopHardware(bool /*in_isr*/)
   return StopResult::DONE;
 }
 
-size_t CH32EndpointOtgHs::ReapProgress(const HwRequest& /*request*/, bool& retired)
+size_t CH32EndpointOtgHs::ReapProgress(const HwRequest& request, bool& retired)
 {
-  retired = true;
-  return transfer_accumulated_;
+  // 同 OtgFs：只有硬件真正报过完成才算成功，否则 IN 报 0、OUT 报已收字节数。
+  // Same as OtgFs: only a real hardware completion counts as success; otherwise
+  // IN reports 0 and OUT reports the bytes received.
+  if (hw_completed_)
+  {
+    retired = true;
+    return request.length;
+  }
+  retired = false;
+  return (GetDirection() == Direction::OUT) ? transfer_accumulated_ : 0U;
 }
 
 ErrorCode CH32EndpointOtgHs::StallHardware(bool /*in_isr*/)
@@ -622,6 +640,14 @@ size_t CH32EndpointOtgHs::MaxPacketSizeLimit(Type type) const
 
 void CH32EndpointOtgHs::TransferComplete(size_t size)
 {
+  // 同 OtgFs：停止后/未挂载时的迟到完成直接丢弃，不再动寄存器。
+  // Same as OtgFs: drop completions that arrive after a stop or with nothing
+  // armed, without touching the registers.
+  if (!transfer_active_)
+  {
+    return;
+  }
+
   const bool IS_IN = (GetDirection() == Direction::IN);
   const bool IS_EP0 = (GetNumber() == EPNumber::EP0);
   const bool IS_ISO = (GetType() == Type::ISOCHRONOUS);
@@ -631,6 +657,23 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
   if (IS_IN)
   {
     auto* tx_ctrl = get_tx_control_addr(GetNumber());
+
+    // 还有后续分包：续发下一包，整请求发完才向核心报一次完成。
+    // More packets to go: send the next one and report a single completion for
+    // the whole request.
+    if (transfer_remaining_ > 0U && !IS_ISO)
+    {
+      const size_t mps = MaxPacketSize();
+      const size_t chunk =
+          (mps > 0U && transfer_remaining_ > mps) ? mps : transfer_remaining_;
+      set_tx_dma_buffer(GetNumber(), transfer_cursor_);
+      set_tx_len(GetNumber(), chunk);
+      transfer_cursor_ += chunk;
+      transfer_remaining_ -= chunk;
+      *tx_ctrl = (*tx_ctrl & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_ACK;
+      return;
+    }
+
     *tx_ctrl = (*tx_ctrl & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
 
     if (IS_ISO)
@@ -640,6 +683,8 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     }
 
     transfer_active_ = false;
+    transfer_remaining_ = 0U;
+    hw_completed_ = true;
     OnHardwareComplete(true, transfer_tag_, transfer_requested_);
     return;
   }
@@ -679,6 +724,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
           static_cast<uint8_t>((*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK);
     }
     transfer_active_ = false;
+    hw_completed_ = true;
     OnHardwareComplete(true, transfer_tag_, size);
     return;
   }
@@ -696,6 +742,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     auto* rx_ctrl = get_rx_control_addr(GetNumber());
     *rx_ctrl = (*rx_ctrl & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_NAK;
     transfer_active_ = false;
+    hw_completed_ = true;
     OnHardwareComplete(true, transfer_tag_, transfer_accumulated_);
     return;
   }

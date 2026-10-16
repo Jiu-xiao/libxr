@@ -214,7 +214,7 @@ CH32USBOtgFS::CH32USBOtgFS(
   }
 
   // EP0：收发共用同一块（≥64 B，手册 p.355）。
-  ASSERT(rx[0].addr_ != nullptr && rx[0].addr_ == tx[0].addr_ && rx[0].size_ >= 64U);
+  REQUIRE(rx[0].addr_ != nullptr && rx[0].addr_ == tx[0].addr_ && rx[0].size_ >= 64U);
 
   auto* ep0_out = new CH32EndpointOtgFs(USB::Endpoint::EPNumber::EP0,
                                         USB::Endpoint::Direction::OUT, rx[0], false);
@@ -230,8 +230,8 @@ CH32USBOtgFS::CH32USBOtgFS(
     {
       // 双向共享（单 bank）：IN 必须落在 OUT +64 且两块各 ≥64 B（手册表 23-4
       // p.359）；两个端点对象都传块基址，由端点构造按方向二分。
-      ASSERT(tx[i].addr_ == reinterpret_cast<uint8_t*>(rx[i].addr_) + 64U);
-      ASSERT(rx[i].size_ >= 64U && tx[i].size_ >= 64U);
+      REQUIRE(tx[i].addr_ == reinterpret_cast<uint8_t*>(rx[i].addr_) + 64U);
+      REQUIRE(rx[i].size_ >= 64U && tx[i].size_ >= 64U);
       USB::EndpointPool::Put(
           new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::OUT, rx[i], false));
       USB::EndpointPool::Put(
@@ -240,13 +240,13 @@ CH32USBOtgFS::CH32USBOtgFS(
     else if (rx[i].addr_ != nullptr)
     {
       // 单向 OUT：两槽各占块的一半（≥2×MPS，默认 MPS=64 → ≥128 B）。
-      ASSERT(rx[i].size_ >= 128U);
+      REQUIRE(rx[i].size_ >= 128U);
       USB::EndpointPool::Put(
           new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::OUT, rx[i], true));
     }
     else if (tx[i].addr_ != nullptr)
     {
-      ASSERT(tx[i].size_ >= 128U);
+      REQUIRE(tx[i].size_ >= 128U);
       USB::EndpointPool::Put(
           new CH32EndpointOtgFs(ep_index, USB::Endpoint::Direction::IN, tx[i], true));
     }
