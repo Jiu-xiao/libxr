@@ -373,9 +373,9 @@ void TestUacFailedRecovery()
   TEST_ASSERT(f.iso.active);
   f.iso.CompleteWith(0, ErrorCode::FAILED);
   TEST_ASSERT(f.uac.MissedTransferCount() == 2);
-  // 请求已经结束，没有待决请求可停：恢复直接重新 Configure 并续投一帧。
-  // The request already ended, so there is nothing left to stop: the recovery
-  // re-Configures and resumes straight away.
+  // 恢复同样延迟到下一拍非中断 SOF（§2.7）。
+  // The recovery likewise defers to the next non-ISR SOF tick (§2.7).
+  f.uac.OnBusTime(false, tick);
   TEST_ASSERT(f.iso.GetState() == State::IDLE && f.iso.active);
   f.iso.Complete();
 
