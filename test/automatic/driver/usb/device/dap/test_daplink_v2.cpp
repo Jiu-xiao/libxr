@@ -217,6 +217,56 @@ void TestDelayedCommand()
   f.in.Complete();
 }
 
+/// 批命令里包含延时命令：旧实现会挂起并带着"半个响应"返回，延时到期后 Timer
+/// 路径往已发出的缓冲里补写（主机收到多余响应、批响应缺字节）；现在延时就地
+/// 同步完成，批响应一次完整发出。
+/// A batch that contains a delay command: the old implementation suspended and
+/// returned a half-built response, and the Timer path later wrote into a buffer
+/// that had already been sent (an extra response on the host, a short batch
+/// response). The delay now finishes inline and the batch response goes out whole.
+void TestBatchWithDelay()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // QUEUE_COMMANDS：两条命令入队——DAP_Info 与一个 2 ms 的 DAP_Delay。
+  // QUEUE_COMMANDS: enqueue two commands - DAP_Info and a 2 ms DAP_Delay.
+  // Wire format: [QUEUE_COMMANDS, count, len, cmd...], len covers the command bytes.
+  std::vector<uint8_t> queue{static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 2u};
+  const uint8_t info_cmd[] = {static_cast<uint8_t>(CommandId::INFO),
+                              static_cast<uint8_t>(InfoId::VENDOR)};
+  const uint8_t delay_cmd[] = {DELAY, 0xD0, 0x07};  // 2000 us little-endian
+  queue.push_back(static_cast<uint8_t>(sizeof(info_cmd)));
+  queue.insert(queue.end(), info_cmd, info_cmd + sizeof(info_cmd));
+  queue.push_back(static_cast<uint8_t>(sizeof(delay_cmd)));
+  queue.insert(queue.end(), delay_cmd, delay_cmd + sizeof(delay_cmd));
+  Send(f, queue);
+  TEST_ASSERT(
+      f.in.Last().data ==
+      std::vector<uint8_t>({static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 0x00}));
+  f.in.Complete();
+
+  // EXECUTE_COMMANDS：批响应一次完整到达（[EXECUTE, info 响应..., DELAY 响应...]），
+  // 不需要 Timer 到期，也没有第二条多余响应。
+  // EXECUTE_COMMANDS: the batch response arrives at once ([EXECUTE, info response...,
+  // DELAY response...]) with no Timer wait and no second stray response.
+  Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
+  TEST_ASSERT(f.in.active);
+  const auto& batch = f.in.Last().data;
+  TEST_ASSERT(batch[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
+  TEST_ASSERT(batch[1] == static_cast<uint8_t>(CommandId::INFO));
+  TEST_ASSERT(batch[2] == 7U);  // "XRobot" incl. NUL
+  TEST_ASSERT(batch[9] == DELAY);
+  TEST_ASSERT(batch[10] == 0x00);  // DAP_OK
+  TEST_ASSERT(f.in.Last().length == 11U);
+  f.in.Complete();
+
+  // 批后 OUT 重新挂接收。
+  // The OUT endpoint is rearmed after the batch.
+  TEST_ASSERT(f.out.active);
+}
+
 void TestUnbind()
 {
   FreshTimerList();
@@ -242,6 +292,7 @@ int main()
   TestCommandRoundTrip();
   TestPipelineKeepsAdvertisedDepth();
   TestDelayedCommand();
+  TestBatchWithDelay();
   TestUnbind();
   std::puts(
       "DAP v2 class: copy-mode Read/Write, response depth and deferred delay passed");
