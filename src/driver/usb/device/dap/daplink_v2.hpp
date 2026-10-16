@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -337,6 +338,7 @@ class DapLinkV2Class : public DeviceClass
     ResetJtagChainState();
     cmd_head_ = 0u;
     cmd_count_ = 0u;
+    ResetOutAssembly();
     command_read_active_ = false;
     response_write_active_ = false;
     CancelPendingAction();
@@ -366,6 +368,7 @@ class DapLinkV2Class : public DeviceClass
     // ignores them because inited_ is already false.
     cmd_head_ = 0u;
     cmd_count_ = 0u;
+    ResetOutAssembly();
     command_read_active_ = false;
     response_write_active_ = false;
     CancelPendingAction();
@@ -683,15 +686,113 @@ class DapLinkV2Class : public DeviceClass
       // ABORTED only appears while unbinding (the entry guard filtered it through
       // inited_); SIZE_ERR means the host overran the DAP packet size and the
       // command stream is incomplete: drop the fragment and re-arm the receive.
+      ResetOutAssembly();
       ArmOutTransferIfIdle(in_isr);
       return;
     }
-    // 刚读完的缓冲是环里 head+count 的位置；登记后立刻挂下一条接收，让下一条命令在
-    // 本条执行期间到达。
-    // The buffer just read is the ring position head+count; record it and arm the next
-    // receive at once so the next command arrives while this one executes.
-    cmd_len_[(cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT] =
-        static_cast<uint16_t>(completion.actual);
+
+    const size_t n = completion.actual;
+    const uint16_t mps = OutChunkSize();
+    const uint16_t packet = GetDapPacketSize();
+    const uint8_t index =
+        static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
+    uint8_t* const buffer = command_buffers_[index];
+
+    if (rx_discard_)
+    {
+      // 补零部分已收完，丢弃。
+      // The zero padding has been taken; drop it.
+      ResetOutAssembly();
+      ArmOutTransferIfIdle(in_isr);
+      return;
+    }
+
+    // 上一条命令以"恰好整包"结束时，主机可能把传输补零到 DAP 包长：随后到来的整包全零
+    // 不是命令（命令号 0 后面跟信息 ID 0 不是合法命令），连同剩余的补零一起丢弃。
+    // When the previous command ended on a whole packet the host may have padded its
+    // transfer to the DAP packet size: a following all-zero whole packet is not a command
+    // (command 0 with info ID 0 is not valid), so it is dropped together with the rest of
+    // the padding.
+    if (rx_off_ == 0u && rx_pad_base_ != 0u && n == mps && IsAllZero(buffer, n))
+    {
+      const size_t used = static_cast<size_t>(rx_pad_base_) + n;
+      rx_pad_base_ = 0u;
+      if (used < packet)
+      {
+        rx_discard_ = true;
+        StartOutRead(buffer, 0u, static_cast<size_t>(packet) - used, in_isr);
+      }
+      else
+      {
+        ArmOutTransferIfIdle(in_isr);
+      }
+      return;
+    }
+    rx_pad_base_ = 0u;
+
+    rx_off_ = static_cast<uint16_t>(rx_off_ + n);
+
+    // 主机传输的结束：短包、零长包，或收满 DAP 包长。恰好整包结束的命令没有这些提示
+    // （OpenOCD 的 bulk 写在整倍数长度时不补零长包），所以整包到来后按命令自己的长度
+    // 判断：完整就结束，不完整就只再要缺的那一段。
+    // End of the host transfer: a short packet, a zero-length packet, or a full DAP
+    // packet. A command that ends exactly on a packet boundary has none of these (the
+    // OpenOCD bulk write sends no ZLP for multiples of the packet size), so after a
+    // whole packet the command's own length decides: complete ends it, incomplete asks
+    // only for the missing part.
+    bool done = (n == 0u) || (n % mps != 0u) || (rx_off_ >= packet);
+    bool padded_candidate = false;
+    size_t next = 0u;
+    if (!done)
+    {
+      uint16_t length = 0u;
+      const CommandScan scan = ScanCommand(buffer, rx_off_, length);
+      if (scan == CommandScan::COMPLETE && length <= rx_off_)
+      {
+        done = true;
+        padded_candidate = true;
+      }
+      else if (scan == CommandScan::COMPLETE)
+      {
+        next = std::min<size_t>(length - rx_off_, packet - rx_off_);
+      }
+      else if (scan == CommandScan::NEED_MORE)
+      {
+        next = std::min<size_t>(mps, packet - rx_off_);
+      }
+      else
+      {
+        // 长度未知的命令（JTAG、厂商命令）：按包长收，靠短包或收满结束。
+        // Length unknown (JTAG, vendor commands): receive up to the packet size and rely
+        // on a short packet or a full buffer.
+        next = packet - rx_off_;
+      }
+    }
+
+    if (!done)
+    {
+      StartOutRead(buffer, rx_off_, next, in_isr);
+      return;
+    }
+
+    rx_pad_base_ = padded_candidate ? rx_off_ : 0u;
+    if (buffer[0] == ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT))
+    {
+      // DAP_TransferAbort 收到即生效、没有响应：不进命令环。接收回调和命令执行在同一个
+      // owner 里时，它要等当前传输执行完才会被收到，此时标志在下一条传输开始时清掉；
+      // 命令在别的上下文执行（ExecuteExternal）时，正在执行的传输下一次检查标志即中止。
+      // DAP_TransferAbort takes effect on reception and has no response: it does not join
+      // the command ring. When the receive callback and the command execution share one
+      // owner it is only received after the current transfer finished, and the flag is
+      // cleared when the next transfer starts; when commands run in another context
+      // (ExecuteExternal) the transfer being executed aborts at its next flag check.
+      SetTransferAbortFlag(true);
+      rx_off_ = 0u;
+      ArmOutTransferIfIdle(in_isr);
+      return;
+    }
+    cmd_len_[index] = rx_off_;
+    rx_off_ = 0u;
     ++cmd_count_;
     RequestClassService(in_isr);
     ArmOutTransferIfIdle(in_isr);
@@ -736,11 +837,18 @@ class DapLinkV2Class : public DeviceClass
     --cmd_count_;
     if (size == 0u)
     {
+      if (pending_action_.load(std::memory_order_acquire) ==
+          static_cast<uint8_t>(PendingAction::NONE))
+      {
+        // 没有响应的命令：不入响应队列，直接让出名额并继续接收。
+        // A command without a response: nothing joins the response queue; the place is
+        // given back and reception continues.
+        ArmOutTransferIfIdle(in_isr);
+        return;
+      }
       // §10.3-a：延时命令的响应未就绪；槽已保留，pending_action_ 已登记。
       // §10.3-a: the delayed command's response is not ready; the slot is reserved
       // and the pending action is registered.
-      REQUIRE(pending_action_.load(std::memory_order_acquire) !=
-              static_cast<uint8_t>(PendingAction::NONE));
       return;
     }
     REQUIRE(size <= RESP_SLOT_SIZE);
@@ -1306,11 +1414,107 @@ class DapLinkV2Class : public DeviceClass
     // DAP packet size) ends it.
     const uint8_t index =
         static_cast<uint8_t>((cmd_head_ + cmd_count_) % CMD_BUFFER_COUNT);
-    if (ep_data_out_->Read({command_buffers_[index], GetDapPacketSize()}, in_isr) ==
-        ErrorCode::OK)
+    StartOutRead(command_buffers_[index], 0u, OutChunkSize(), in_isr);
+  }
+
+  /// 命令的第一次接收只要一个端点包：整包到来后再按命令长度决定还要多少。
+  /// The first receive of a command asks for one endpoint packet only; once it arrives
+  /// the command's length decides how much more is needed.
+  uint16_t OutChunkSize() const
+  {
+    const uint16_t mps = ep_data_out_->MaxPacketSize();
+    const uint16_t packet = GetDapPacketSize();
+    return (mps == 0u || mps > packet) ? packet : mps;
+  }
+
+  void StartOutRead(uint8_t* buffer, size_t offset, size_t size, bool in_isr)
+  {
+    if (ep_data_out_->Read({buffer + offset, size}, in_isr) == ErrorCode::OK)
     {
       command_read_active_ = true;
     }
+  }
+
+  void ResetOutAssembly()
+  {
+    rx_off_ = 0u;
+    rx_pad_base_ = 0u;
+    rx_discard_ = false;
+  }
+
+  static bool IsAllZero(const uint8_t* data, size_t size)
+  {
+    for (size_t i = 0u; i < size; ++i)
+    {
+      if (data[i] != 0u) return false;
+    }
+    return true;
+  }
+
+  enum class CommandScan : uint8_t
+  {
+    COMPLETE,   ///< 长度已知且已收齐 / Length known and fully received
+    NEED_MORE,  ///< 命令已识别但还没收齐 / Recognised but not fully received
+    UNKNOWN,    ///< 无法由内容确定长度 / Length cannot be derived from the content
+  };
+
+  /// 已识别的、可由内容确定长度的命令 / Commands whose length follows from the content
+  static bool IsScannableCommand(uint8_t id)
+  {
+    switch (id)
+    {
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::INFO):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::HOST_STATUS):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::CONNECT):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::DISCONNECT):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_CONFIGURE):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::WRITE_ABORT):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::DELAY):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::RESET_TARGET):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWJ_PINS):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWJ_CLOCK):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWD_CONFIGURE):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWJ_SEQUENCE):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::SWD_SEQUENCE):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER):
+      case ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_BLOCK):
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// 按命令自己的内容判断已收的 avail 字节是否构成一条完整命令。
+  /// Decide from the command's own content whether the received avail bytes make one
+  /// whole command.
+  CommandScan ScanCommand(const uint8_t* req, uint16_t avail, uint16_t& length) const
+  {
+    length = 0u;
+    if (avail < 1u) return CommandScan::NEED_MORE;
+    const uint8_t id = req[0];
+    if (id == ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS) ||
+        id == ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS))
+    {
+      // [ID, 命令数, 命令...]：逐条累加子命令长度。
+      // [ID, count, commands...]: add up the lengths of the sub-commands.
+      if (avail < 2u) return CommandScan::NEED_MORE;
+      uint16_t off = 2u;
+      for (uint8_t i = 0u; i < req[1]; ++i)
+      {
+        if (off >= avail) return CommandScan::NEED_MORE;
+        if (!IsScannableCommand(req[off])) return CommandScan::UNKNOWN;
+        uint16_t sub = 0u;
+        if (!ParseQueuedCommandLength(req + off, static_cast<uint16_t>(avail - off), sub))
+          return CommandScan::NEED_MORE;
+        off = static_cast<uint16_t>(off + sub);
+      }
+      length = off;
+      return CommandScan::COMPLETE;
+    }
+    if (!IsScannableCommand(id)) return CommandScan::UNKNOWN;
+    return ParseQueuedCommandLength(req, avail, length) ? CommandScan::COMPLETE
+                                                        : CommandScan::NEED_MORE;
   }
 
   /// 把队头响应交给拷贝模式 Write 发送；无响应或已在发送时不动作。
@@ -1781,20 +1985,15 @@ class DapLinkV2Class : public DeviceClass
   }
 
   ErrorCode HandleTransferAbort(bool /*in_isr*/, const uint8_t* /*req*/,
-                                uint16_t /*req_len*/, uint8_t* resp, uint16_t resp_cap,
-                                uint16_t& out_len)
+                                uint16_t /*req_len*/, uint8_t* /*resp*/,
+                                uint16_t /*resp_cap*/, uint16_t& out_len)
   {
-    if (resp_cap < 2u)
-    {
-      out_len = 0;
-      return ErrorCode::NOT_FOUND;
-    }
-
+    // DAP_TransferAbort 没有响应。USB 路径在接收时就置位标志（见 OnDataOutComplete），
+    // 这里服务批命令和 ExecuteExternal 里夹带的中止。
+    // DAP_TransferAbort has no response. The USB path sets the flag on reception (see
+    // OnDataOutComplete); this serves an abort carried inside a batch or ExecuteExternal.
     SetTransferAbortFlag(true);
-
-    resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::TRANSFER_ABORT);
-    resp[1] = ToU8(LibXR::USB::DapLinkV2Def::Status::OK);
-    out_len = 2u;
+    out_len = 0u;
     return ErrorCode::OK;
   }
 
@@ -2436,32 +2635,27 @@ class DapLinkV2Class : public DeviceClass
   /**
    * @brief Queue one packed command batch for later EXECUTE_COMMANDS
    */
-  ErrorCode HandleQueueCommands(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
-                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
+  /// 校验 [ID, 命令数, 命令...] 并把命令部分追加进队列；格式或容量不对返回 false。
+  /// Validate [ID, count, commands...] and append the command part to the queue; false
+  /// when the format or the capacity does not fit.
+  bool AppendInlineCommands(const uint8_t* req, uint16_t req_len)
   {
     if (!req || req_len < 2u)
     {
-      return BuildCmdStatusResponse(
-          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
-          resp_cap, out_len);
+      return false;
     }
 
     const uint8_t NUM = req[1];
     if (NUM == 0u)
     {
-      return BuildCmdStatusResponse(
-          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_OK, resp,
-          resp_cap, out_len);
+      return true;
     }
-
     uint16_t req_off = 2u;
     for (uint32_t i = 0u; i < NUM; ++i)
     {
       if (req_off >= req_len)
       {
-        return BuildCmdStatusResponse(
-            ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
-            resp_cap, out_len);
+        return false;
       }
 
       uint16_t cmd_len = 0u;
@@ -2469,18 +2663,14 @@ class DapLinkV2Class : public DeviceClass
                                     static_cast<uint16_t>(req_len - req_off), cmd_len) ||
           cmd_len == 0u)
       {
-        return BuildCmdStatusResponse(
-            ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
-            resp_cap, out_len);
+        return false;
       }
       req_off = static_cast<uint16_t>(req_off + cmd_len);
     }
 
     if (req_off != req_len)
     {
-      return BuildCmdStatusResponse(
-          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
-          resp_cap, out_len);
+      return false;
     }
 
     if (static_cast<uint32_t>(queued_request_length_) +
@@ -2489,29 +2679,46 @@ class DapLinkV2Class : public DeviceClass
         static_cast<uint32_t>(queued_command_count_) + static_cast<uint32_t>(NUM) >
             static_cast<uint32_t>(QUEUED_CMD_COUNT_MAX))
     {
-      return BuildCmdStatusResponse(
-          ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_ERROR, resp,
-          resp_cap, out_len);
+      return false;
     }
 
-    Memory::FastCopy(&queued_request_buffer_[queued_request_length_], &req[2],
-                     req_len - 2u);
-    queued_request_length_ =
-        static_cast<uint16_t>(queued_request_length_ + (req_len - 2u));
-    queued_command_count_ = static_cast<uint16_t>(queued_command_count_ + NUM);
+    if (NUM != 0u)
+    {
+      Memory::FastCopy(&queued_request_buffer_[queued_request_length_], &req[2],
+                       req_len - 2u);
+      queued_request_length_ =
+          static_cast<uint16_t>(queued_request_length_ + (req_len - 2u));
+      queued_command_count_ = static_cast<uint16_t>(queued_command_count_ + NUM);
+    }
+    return true;
+  }
 
+  ErrorCode HandleQueueCommands(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
+                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
+  {
     return BuildCmdStatusResponse(
-        ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS), DAP_OK, resp, resp_cap,
-        out_len);
+        ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS),
+        AppendInlineCommands(req, req_len) ? DAP_OK : DAP_ERROR, resp, resp_cap, out_len);
   }
 
   /**
    * @brief Execute all previously queued commands
    */
-  ErrorCode HandleExecuteCommands(bool in_isr, const uint8_t* /*req*/,
-                                  uint16_t /*req_len*/, uint8_t* resp, uint16_t resp_cap,
-                                  uint16_t& out_len)
+  ErrorCode HandleExecuteCommands(bool in_isr, const uint8_t* req, uint16_t req_len,
+                                  uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
+    // [ID, 命令数, 命令...]：本包自带的命令接在已排队的命令之后一起执行；只有 ID 一个
+    // 字节时只执行已排队的命令。
+    // [ID, count, commands...]: the commands carried by this packet are appended behind
+    // the queued ones and run together; a packet that is only the ID runs the queued
+    // commands.
+    if (req_len >= 2u && !AppendInlineCommands(req, req_len))
+    {
+      ResetQueuedCommandState();
+      return BuildCmdStatusResponse(
+          ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS), DAP_ERROR, resp,
+          resp_cap, out_len);
+    }
     const bool ok = TryExecuteQueuedCommandStream(in_isr, resp, resp_cap, out_len);
 
     if (batch_active_)
@@ -2725,13 +2932,12 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::ARG_ERR;
     }
 
-    if (dap_state_.transfer_abort)
-    {
-      dap_state_.transfer_abort = false;
-      resp[2] = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-      out_len = 3u;
-      return ErrorCode::OK;
-    }
+    // 传输开始时清掉旧的中止标志（一个在没有传输时到来的中止不应中止下一条传输）；
+    // 之后到来的中止在传输执行中置位。
+    // Clear a stale abort flag when a transfer starts (an abort that arrives while no
+    // transfer runs must not abort the next one); an abort that arrives later sets it
+    // during the execution.
+    dap_state_.transfer_abort = false;
 
     const uint8_t COUNT = req[2];
     uint16_t req_off = 3u;
@@ -3240,12 +3446,12 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::ARG_ERR;
     }
 
-    if (dap_state_.transfer_abort)
-    {
-      dap_state_.transfer_abort = false;
-      resp[3] = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-      return ErrorCode::OK;
-    }
+    // 传输开始时清掉旧的中止标志（一个在没有传输时到来的中止不应中止下一条传输）；
+    // 之后到来的中止在传输执行中置位。
+    // Clear a stale abort flag when a transfer starts (an abort that arrives while no
+    // transfer runs must not abort the next one); an abort that arrives later sets it
+    // during the execution.
+    dap_state_.transfer_abort = false;
 
     uint16_t count = 0u;
     count = LoadU16Le(&req[2]);
@@ -3533,13 +3739,12 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::OK;
     }
 
-    if (dap_state_.transfer_abort)
-    {
-      dap_state_.transfer_abort = false;
-      resp[2] = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-      out_len = 3u;
-      return ErrorCode::OK;
-    }
+    // 传输开始时清掉旧的中止标志（一个在没有传输时到来的中止不应中止下一条传输）；
+    // 之后到来的中止在传输执行中置位。
+    // Clear a stale abort flag when a transfer starts (an abort that arrives while no
+    // transfer runs must not abort the next one); an abort that arrives later sets it
+    // during the execution.
+    dap_state_.transfer_abort = false;
 
     const uint8_t TAP_INDEX = req[1];
     if (TAP_INDEX >= jtag_chain_.count)
@@ -3990,12 +4195,12 @@ class DapLinkV2Class : public DeviceClass
       return ErrorCode::OK;
     }
 
-    if (dap_state_.transfer_abort)
-    {
-      dap_state_.transfer_abort = false;
-      resp[3] = LibXR::USB::DapLinkV2Def::DAP_TRANSFER_ERROR;
-      return ErrorCode::OK;
-    }
+    // 传输开始时清掉旧的中止标志（一个在没有传输时到来的中止不应中止下一条传输）；
+    // 之后到来的中止在传输执行中置位。
+    // Clear a stale abort flag when a transfer starts (an abort that arrives while no
+    // transfer runs must not abort the next one); an abort that arrives later sets it
+    // during the execution.
+    dap_state_.transfer_abort = false;
 
     const uint8_t TAP_INDEX = req[1];
     if (TAP_INDEX >= jtag_chain_.count)
@@ -4400,6 +4605,13 @@ class DapLinkV2Class : public DeviceClass
   uint16_t cmd_len_[CMD_BUFFER_COUNT] = {};  ///< 各缓冲里的命令长度 / Command lengths
   uint8_t cmd_head_ = 0u;   ///< 最早一条待执行命令的缓冲 / Buffer of the oldest command
   uint8_t cmd_count_ = 0u;  ///< 已收到、未执行完的命令数 / Received, not yet executed
+  uint16_t rx_off_ =
+      0u;  ///< 正在接收的命令已收字节数 / Bytes of the command in reception
+  /// 上一条命令以整包结束时的字节数，其后的整包全零视为补零 / Bytes of the previous
+  /// command when it ended on a whole packet; a following all-zero whole packet is
+  /// padding
+  uint16_t rx_pad_base_ = 0u;
+  bool rx_discard_ = false;             ///< 正在丢弃补零 / Dropping zero padding
   bool command_read_active_ = false;    ///< OUT 拷贝 Read 在途 / OUT copy Read in flight
   bool response_write_active_ = false;  ///< IN 拷贝 Write 在途 / IN copy Write in flight
 

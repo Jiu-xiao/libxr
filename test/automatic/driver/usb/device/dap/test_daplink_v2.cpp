@@ -362,6 +362,114 @@ void TestZlpOnlyBelowDapPacketSize()
   TEST_ASSERT(bytes == 1024 && tails == 0);
 }
 
+/// 命令长度恰为端点包长的整数倍、主机不补零长包：按命令自己的长度结束，不等到超时。
+/// A command whose length is a multiple of the endpoint packet size and no ZLP from the
+/// host: it ends by the command's own length instead of waiting for a timeout.
+void TestCommandOnPacketBoundaryEndsWithoutZlp()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  // QUEUE_COMMANDS with 63 DAP_Info commands: 2 + 63 * 2 = 128 bytes, two packets.
+  std::vector<uint8_t> queue{static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 63u};
+  for (unsigned i = 0; i < 63; ++i)
+  {
+    queue.push_back(static_cast<uint8_t>(CommandId::INFO));
+    queue.push_back(static_cast<uint8_t>(InfoId::VENDOR));
+  }
+  TEST_ASSERT(queue.size() == 128);
+
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
+  f.out.HostSends(std::vector<uint8_t>(queue.begin(), queue.begin() + 64));
+  // The first packet does not complete the command: exactly the missing 64 bytes are
+  // asked for, and nothing has been answered.
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
+  TEST_ASSERT(f.in.starts.empty());
+  f.out.HostSends(std::vector<uint8_t>(queue.begin() + 64, queue.end()));
+  // The command is complete after the second whole packet: it answers.
+  TEST_ASSERT(f.in.active);
+  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::QUEUE_COMMANDS));
+}
+
+/// 主机把传输补零到 DAP 包长：补零部分不当作命令，命令只执行一次。
+/// The host pads its transfer with zeros to the DAP packet size: the padding is not taken
+/// for commands and the command runs once.
+void TestZeroPaddedTransferIsDropped()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  std::vector<uint8_t> first(64, 0);
+  first[0] = INFO;
+  first[1] = PACKET_SIZE_ID;
+  f.out.HostSends(first);  // the command is complete inside the first packet
+  TEST_ASSERT(f.in.active && f.in.starts.size() == 1);
+  f.in.Complete();
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
+
+  // The next whole packet is all zero: padding. The rest of the 1024 byte transfer is
+  // asked for in one receive and dropped.
+  f.out.HostSends(std::vector<uint8_t>(64, 0));
+  // The remaining 896 bytes arrive as 14 packets of the one receive; no command starts.
+  for (unsigned i = 0; i < 14; ++i)
+  {
+    TEST_ASSERT(f.out.active);
+    f.out.HostSends(std::vector<uint8_t>(64, 0));
+  }
+  TEST_ASSERT(f.out.active && f.out.Last().length == 64);
+  TEST_ASSERT(f.in.starts.size() == 1);  // no response to padding
+
+  // A real command still works afterwards.
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.starts.size() == 2);
+  f.in.Complete();
+}
+
+/// DAP_TransferAbort 没有响应，也不占命令环；接收继续。
+/// DAP_TransferAbort has no response and does not take a command-ring place; reception
+/// goes on.
+void TestTransferAbortHasNoResponse()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  Send(f, {static_cast<uint8_t>(CommandId::TRANSFER_ABORT)});
+  TEST_ASSERT(f.in.starts.empty() && !f.in.active);
+  TEST_ASSERT(f.out.active);
+
+  // A transfer started afterwards is not aborted by the stale flag.
+  Send(f, {CONNECT, static_cast<uint8_t>(Port::SWD)});
+  f.in.Complete();
+  Send(f, {static_cast<uint8_t>(CommandId::TRANSFER), 0x00, 0x01, 0x02});  // read DP 0
+  TEST_ASSERT(f.in.active);
+  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::TRANSFER));
+  TEST_ASSERT(f.in.Last().data[1] == 1);  // one transfer completed
+  f.in.Complete();
+}
+
+/// EXECUTE_COMMANDS 自带的命令和已排队的命令一起执行。
+/// The commands carried by EXECUTE_COMMANDS run together with the queued ones.
+void TestExecuteCommandsWithInlineCommands()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  Send(f, {static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 1, INFO, PACKET_COUNT_ID});
+  f.in.Complete();
+  Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS), 1, INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active);
+  const auto& batch = f.in.Last().data;
+  TEST_ASSERT(batch[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
+  // The queued PACKET_COUNT answer first, then the inline PACKET_SIZE answer.
+  TEST_ASSERT(batch[1] == INFO && batch[2] == 1 && batch[3] == 0x04);
+  TEST_ASSERT(batch[4] == INFO && batch[5] == 2);
+  f.in.Complete();
+}
+
 void TestUnbind()
 {
   FreshTimerList();
@@ -390,6 +498,10 @@ int main()
   TestBatchWithDelay();
   TestNextCommandReceivedDuringDelay();
   TestZlpOnlyBelowDapPacketSize();
+  TestCommandOnPacketBoundaryEndsWithoutZlp();
+  TestZeroPaddedTransferIsDropped();
+  TestTransferAbortHasNoResponse();
+  TestExecuteCommandsWithInlineCommands();
   TestUnbind();
   std::puts(
       "DAP v2 class: copy-mode Read/Write, response depth and deferred delay passed");
