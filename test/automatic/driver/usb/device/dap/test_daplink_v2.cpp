@@ -96,7 +96,6 @@ class TestDap2 : public DapV2
  public:
   using DapV2::BindEndpoints;
   using DapV2::DapV2;
-  using DapV2::GetWinUsbMsOs20DescriptorSet;
   using DapV2::OnService;
   using DapV2::UnbindEndpoints;
 };
@@ -500,19 +499,57 @@ void TestPaddedRequestsAndAFifthCommandDrain()
   TEST_ASSERT(f.out.active);
 }
 
-/// A single-function device uses the device-level MS OS 2.0 descriptor set (Windows
-/// ignores the function subset header on a non-composite device).
+/// A single-function device gets the device-level MS OS 2.0 descriptor set from the
+/// composition (Windows ignores the function subset header on a non-composite device),
+/// and it is byte for byte the structure the device-level form defines.
 void TestStandaloneDeviceUsesDeviceLevelWinUsbSet()
 {
   FreshTimerList();
   DapFixture f;  // DAP is the only function of its composition
-  const auto set = f.dap.GetWinUsbMsOs20DescriptorSet();
+  const auto set = f.composition.WinUsbDescriptorSet();
   using Device = LibXR::USB::WinUsbMsOs20::DeviceScopedWinUsbMsOs20DescSet<
       LibXR::USB::WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+  Device expected{};
+  expected.Init("{CDB3B5AD-293B-4663-AA36-1AAE46463776}");
   TEST_ASSERT(set.size_ == sizeof(Device));
-  uint16_t total = 0;
-  std::memcpy(&total, static_cast<const uint8_t*>(set.addr_) + 8, sizeof(total));
-  TEST_ASSERT(total == sizeof(Device));  // wTotalLength of the set header
+  TEST_ASSERT(std::memcmp(set.addr_, &expected, sizeof(Device)) == 0);
+  TEST_ASSERT(f.composition.WinUsbBosCapability() != nullptr);
+}
+
+uint16_t LoadU16(const uint8_t* p)
+{
+  uint16_t value = 0;
+  std::memcpy(&value, p, sizeof(value));
+  return value;
+}
+
+/// Two WinUSB functions in one composite device: one configuration subset with one
+/// function subset per function, the interface numbers following the order of the
+/// classes.
+void TestCompositeDeviceUsesFunctionSubsets()
+{
+  FreshTimerList();
+  FakeSwd swd_a, swd_b;
+  TestDap2 a(Number::EP1, Number::EP2, swd_a);
+  TestDap2 b(Number::EP3, Number::EP4, swd_b);
+  EndpointPool pool{8};
+  DeviceComposition composition(pool, {&TEST_LANGUAGE}, {{&a, &b}});
+
+  using Property = LibXR::USB::WinUsbMsOs20::DeviceInterfaceGuidsRegProperty<
+      LibXR::USB::WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+  constexpr size_t FUNCTION = 8 + 20 + sizeof(Property);  // subset header + compat + GUID
+  const auto set = composition.WinUsbDescriptorSet();
+  const auto* d = static_cast<const uint8_t*>(set.addr_);
+  TEST_ASSERT(set.size_ == 10 + 8 + 2 * FUNCTION);
+  TEST_ASSERT(LoadU16(d + 8) == set.size_);            // set header: wTotalLength
+  TEST_ASSERT(LoadU16(d + 10 + 2) == 0x0001);          // configuration subset
+  TEST_ASSERT(LoadU16(d + 10 + 6) == set.size_ - 10);  // covers both functions
+  const uint8_t* first = d + 18;
+  const uint8_t* second = first + FUNCTION;
+  TEST_ASSERT(LoadU16(first + 2) == 0x0002 && first[4] == 0);  // function subset, itf 0
+  TEST_ASSERT(LoadU16(first + 6) == FUNCTION);
+  TEST_ASSERT(LoadU16(second + 2) == 0x0002 && second[4] == 1);  // function subset, itf 1
+  TEST_ASSERT(LoadU16(second + 6) == FUNCTION);
 }
 
 void TestUnbind()
@@ -549,6 +586,7 @@ int main()
   TestExecuteCommandsWithInlineCommands();
   TestPaddedRequestsAndAFifthCommandDrain();
   TestStandaloneDeviceUsesDeviceLevelWinUsbSet();
+  TestCompositeDeviceUsesFunctionSubsets();
   TestUnbind();
   std::puts(
       "DAP v2 class: borrow-mode receive and submit, response depth and deferred delay "

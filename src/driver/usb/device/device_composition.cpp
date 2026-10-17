@@ -294,7 +294,6 @@ DeviceComposition::DeviceComposition(
       {
         device_class->service_pool_ = &endpoint_pool_;
         classes_[class_count_++] = device_class;
-        device_class->OnCompositionKnown(composite_);
       }
     }
 
@@ -314,6 +313,54 @@ DeviceComposition::DeviceComposition(
   }
 
   RegisterInterfaceStrings();
+  BuildWinUsbDescriptorSet();
+}
+
+void DeviceComposition::BuildWinUsbDescriptorSet()
+{
+  size_t count = 0;
+  for (size_t config = 0; config < config_num_; ++config)
+  {
+    for (size_t i = 0; i < items_[config].item_num; ++i)
+    {
+      auto* device_class = static_cast<DeviceClass*>(items_[config].items[i]);
+      if (device_class != nullptr && device_class->GetWinUsbInterfaceGuid() != nullptr)
+      {
+        ++count;
+      }
+    }
+  }
+  if (count == 0)
+  {
+    return;
+  }
+
+  // 接口号按配置内的累加得到，和 BindEndpoints 分配的一致。
+  // Interface numbers accumulate within a configuration, as BindEndpoints assigns them.
+  auto* functions = new WinUsbMsOs20::WinUsbFunctionInfo[count];
+  size_t n = 0;
+  for (size_t config = 0; config < config_num_; ++config)
+  {
+    size_t start_itf = 0;
+    for (size_t i = 0; i < items_[config].item_num; ++i)
+    {
+      auto* item = items_[config].items[i];
+      if (item == nullptr)
+      {
+        continue;
+      }
+      auto* device_class = static_cast<DeviceClass*>(item);
+      if (const char* guid = device_class->GetWinUsbInterfaceGuid())
+      {
+        functions[n++] = {static_cast<uint8_t>(config), static_cast<uint8_t>(start_itf),
+                          guid};
+      }
+      start_itf += item->GetInterfaceCount();
+    }
+  }
+  winusb_set_.Build(functions, count, !composite_ && count == 1);
+  delete[] functions;
+  winusb_cap_ = new WinUsbMsOs20::MsOs20BosCapability(winusb_set_.Data());
 }
 
 const DeviceComposition::ConfigItems& DeviceComposition::CurrentConfigItems() const

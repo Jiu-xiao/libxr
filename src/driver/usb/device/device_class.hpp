@@ -59,17 +59,16 @@ class DeviceClass : public ConfigDescriptorItem
   }
 
   /**
-   * @brief 组合设备构造时告知本类是否处在复合设备里
-   *        Told at composition construction whether this class is part of a composite
-   *        device.
+   * @brief 本类需要 WinUSB 绑定时返回设备接口 GUID，否则返回 nullptr
+   *        The device interface GUID when this class wants WinUSB to bind, else nullptr
    *
-   * 非复合设备（只有一个功能）上 Windows 不看功能子集头，设备级描述符才会被采用；类按这
-   * 个标志选择 MS OS 2.0 描述符集的形式。
-   * On a non-composite device (a single function) Windows ignores the function subset
-   * header and only a device-level descriptor takes effect; the class picks the form of
-   * its MS OS 2.0 descriptor set from this flag.
+   * MS OS 2.0 描述符集由组合设备统一生成：只有一个功能的非复合设备用设备级形式，其余用
+   * 配置/功能子集形式，类自己不需要关心。
+   * The MS OS 2.0 descriptor set is built by the composition: a single function on a
+   * non-composite device gets the device-level form and every other case the
+   * configuration/function subset form, so the class does not have to care.
    */
-  virtual void OnCompositionKnown(bool composite) { UNUSED(composite); }
+  virtual const char* GetWinUsbInterfaceGuid() const { return nullptr; }
   virtual void OnService(bool in_isr) { UNUSED(in_isr); }
   virtual size_t GetControlReceiveCapacity() const { return 64U; }
   virtual bool WantsBusTime() const { return false; }

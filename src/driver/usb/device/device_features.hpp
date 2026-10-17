@@ -24,11 +24,17 @@ struct BosFeature<true>
         if (auto* cap = item->GetBosCapability(j))
           bytes += cap->GetCapabilityDescriptor().size_;
     }
+    if (auto* cap = composition.WinUsbBosCapability())
+    {
+      ++capacity;
+      bytes += cap->GetCapabilityDescriptor().size_;
+    }
     manager = new BosManager(bytes, capacity);
   }
   void SelectBos(const DeviceComposition& composition)
   {
     manager->ClearCapabilities();
+    if (auto* cap = composition.WinUsbBosCapability()) manager->AddCapability(cap);
     const size_t configuration = composition.GetCurrentConfig();
     const size_t index = configuration == 0U ? 0U : configuration - 1U;
     for (size_t i = 0; i < composition.ConfigItemCount(index); ++i)

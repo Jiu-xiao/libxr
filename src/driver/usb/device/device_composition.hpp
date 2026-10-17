@@ -10,6 +10,7 @@
 #include "usb/core/desc_cfg.hpp"
 #include "usb/core/desc_str.hpp"
 #include "usb/core/ep_pool.hpp"
+#include "winusb_msos20.hpp"
 
 namespace LibXR::USB
 {
@@ -87,6 +88,12 @@ class DeviceComposition
   }
   size_t ConfigItemCount(size_t config) const { return items_[config].item_num; }
   size_t ClassCount() const { return class_count_; }
+  /// 本组合设备的 MS OS 2.0 描述符集；没有类需要 WinUSB 时为空 / The MS OS 2.0 descriptor
+  /// set of this composition; empty when no class wants WinUSB
+  ConstRawData WinUsbDescriptorSet() const { return winusb_set_.Data(); }
+  /// 对应的 BOS 平台能力；没有类需要 WinUSB 时为 nullptr / The matching BOS platform
+  /// capability; nullptr when no class wants WinUSB
+  BosCapability* WinUsbBosCapability() const { return winusb_cap_; }
   DeviceClass* ClassAt(size_t index) const { return classes_[index]; }
   void Notify(bool in_isr, DeviceEvent event, uint8_t endpoint = 0);
   void NotifyBusTime(bool in_isr, const BusTime& time);
@@ -194,7 +201,11 @@ class DeviceComposition
   uint8_t i_configuration_ = 0;  ///< 配置字符串索引 / Configuration string index
   uint8_t bm_attributes_ = CFG_BUS_POWERED;  ///< 配置属性 / bmAttributes
 
-  const bool composite_ = false;     ///< 是否为复合设备 / Whether composite device
+  const bool composite_ = false;  ///< 是否为复合设备 / Whether composite device
+  WinUsbMsOs20::WinUsbDescriptorSet winusb_set_;  ///< MS OS 2.0 描述符集 / descriptor set
+  WinUsbMsOs20::MsOs20BosCapability* winusb_cap_ = nullptr;  ///< 对应的 BOS 能力 / its
+                                                             ///< BOS capability
+  void BuildWinUsbDescriptorSet();
   const size_t config_num_ = 0;      ///< 配置数量 / Configuration count
   ConfigItems* items_ = nullptr;     ///< 配置项集合 / Configuration item set
   DeviceClass** classes_ = nullptr;  ///< 唯一 class 表 / Unique class table
