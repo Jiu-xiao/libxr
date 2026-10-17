@@ -252,6 +252,13 @@ target_include_directories(test_usb_daplink_v2 PRIVATE "${CMAKE_CURRENT_SOURCE_D
 add_test(NAME usb_daplink_v2 COMMAND test_usb_daplink_v2)
 set_tests_properties(usb_daplink_v2 PROPERTIES TIMEOUT 30)
 
+# SwdGeneralGPIO: the SWDIO level during idle cycles.
+add_executable(test_swd_general_gpio driver/debug/test_swd_general_gpio.cpp)
+target_link_libraries(test_swd_general_gpio PRIVATE xr)
+target_include_directories(test_swd_general_gpio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME swd_general_gpio COMMAND test_swd_general_gpio)
+set_tests_properties(swd_general_gpio PROPERTIES TIMEOUT 30)
+
 # DFU device classes: core-owned status stage, DNLOAD data stage and receive capacity.
 add_executable(test_usb_dfu driver/usb/device/dfu/test_dfu.cpp)
 target_link_libraries(test_usb_dfu PRIVATE xr)

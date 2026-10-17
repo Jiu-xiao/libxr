@@ -440,7 +440,13 @@ void ESP32USBDevice::ResetDone(void* arg, ErrorCode result)
     self->runtime_.started = false;
     return;
   }
+  // 全局中断要重新打开：上面为了安全关掉了它，重建基线不会替我们打开，不开的话控制器
+  // 收不到任何中断，也就不会应答主机的 SETUP（拔插后不再枚举）。
+  // Re-enable the global interrupt: it was turned off above for safety and the baseline
+  // rebuild does not turn it on again; without it the controller takes no interrupt and
+  // never answers the host's SETUP (no enumeration after a cable replug).
   dev->dctl_reg.sftdiscon = 0;
+  dev->gahbcfg_reg.glbllntrmsk = 1;
   self->runtime_.started = true;
 }
 
