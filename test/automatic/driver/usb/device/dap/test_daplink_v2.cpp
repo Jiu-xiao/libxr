@@ -199,8 +199,9 @@ void TestCommandRoundTrip()
   TEST_ASSERT(f.out.active);
 }
 
-/// Two IN slots and two command slots make four commands in flight, the advertised depth;
-/// the response of the third waits for an IN slot until the host has taken a response.
+/// Four commands in flight: the Step thread runs all of them ahead of the host. Their
+/// responses wait in staging slots and are submitted to the two IN slots as the host
+/// takes responses, in the order of the commands, without Step having to run again.
 void TestPipelineKeepsAdvertisedDepth()
 {
   FreshTimerList();
@@ -211,16 +212,16 @@ void TestPipelineKeepsAdvertisedDepth()
   {
     Send(f, {INFO, PACKET_SIZE_ID});
   }
-  // One response is on the wire, a second is queued behind it; the third command holds
-  // its command slot while it waits for an IN slot and the fourth sits in the other one.
+  // Every command has executed already; one response is on the wire, a second is queued
+  // behind it in the other IN slot, and two wait in staging slots.
   TEST_ASSERT(f.in.starts.size() == 1);
+  TEST_ASSERT(f.dap.Step(0) == ErrorCode::TIMEOUT);  // nothing left to execute
 
-  // Each response the host takes frees an IN slot and lets the next command run.
+  // Each response the host takes lets the USB side submit the next staged one.
   for (unsigned i = 0; i < 4; ++i)
   {
     TEST_ASSERT(f.in.active);
     f.in.Complete();
-    Run(f);
   }
   TEST_ASSERT(!f.in.active);
   TEST_ASSERT(f.in.sent.size() == 4);
