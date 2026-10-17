@@ -27,6 +27,15 @@ enum class SwdIoDriveMode : uint8_t
  *
  * @note 推荐外围电路：SWCLK/SWDIO 均串联 33Ω 限流电阻，SWDIO 端接 10k 上拉电阻。
  *       Recommended circuit: 33Ω series resistors on SWCLK/SWDIO, 10k pull-up on SWDIO.
+ * @note 裸线（没有串联电阻）上默认的 GPIO 驱动强度会产生振铃并引起 SWD 错误；驱动强度由
+ * BSP 设置，本类不改。快速 bit-bang 时还要注意：有些芯片上 SWDIO 改成输出后要等若干个 CPU
+ *       周期才生效（外设寄存器经 APB 写入，例如 ESP32-S3 约 16 个周期），GpioType 的
+ *       SetConfig 需要把这段时间算进去。
+ *       On bare wires (no series resistors) the default GPIO drive strength rings and
+ * causes SWD errors; the drive strength is set by the BSP and not changed here. For fast
+ *       bit-banging also note that on some chips SWDIO takes a number of CPU cycles to
+ *       become an output after the change (the peripheral register is written over APB,
+ *       about 16 cycles on ESP32-S3), and the GpioType's SetConfig has to account for it.
  */
 template <typename SwclkGpioType, typename SwdioGpioType,
           SwdIoDriveMode IO_DRIVE_MODE = SwdIoDriveMode::PUSH_PULL>

@@ -229,14 +229,20 @@ class DapLinkV2Class : public DeviceClass
    *        Do one unit of DAP work in the calling thread: wait for a command (or carry a
    *        delayed action on) and execute it.
    *
-   * 应用起一个线程循环调用即可（例如 while (true) { dap.Step(); }）。SWD/JTAG 的操作只在
-   * 这个线程里发生，USB 回调只接收命令、发送响应，不执行命令。延时类命令（DAP_Delay、
-   * ResetTarget、带等待的 SWJ_Pins）在线程里睡到到期，不占用 USB 上下文。
-   * Run it from one application thread, for example while (true) { dap.Step(); }.
-   * SWD/JTAG work happens in this thread only; the USB callbacks receive commands and
-   * send responses but never execute them. Delay-type commands (DAP_Delay, ResetTarget,
-   * SWJ_Pins with a wait) sleep in this thread until they are due and do not occupy the
-   * USB context.
+   * 应用起一个线程循环调用即可（例如 while (true) { dap.Step(); }）。线程应当和 USB 中断
+   * 分在不同的核上：同核时小命令慢 6%~15%，尾部延迟最差。SWD 引脚要能在运行 Step 的核上
+   * 访问（例如 ESP32-S3 的专用 GPIO 必须在这个核上创建）；libxr
+   * 不安排线程在哪个核，由应用 决定。SWD/JTAG 的操作只在 这个线程里发生，USB
+   * 回调只接收命令、发送响应，不执行命令。延时类命令（DAP_Delay、 ResetTarget、带等待的
+   * SWJ_Pins）在线程里睡到到期，不占用 USB 上下文。 Run it from one application thread,
+   * for example while (true) { dap.Step(); }. Put the thread on a different core than the
+   * USB interrupt: on the same core small commands are 6%-15% slower and the tail latency
+   * is the worst. The SWD pins must be reachable from the core that runs Step (for
+   * example ESP32-S3 dedicated GPIO must be created on that core); libxr does not place
+   * the thread, the application decides. SWD/JTAG work happens in this thread only; the
+   * USB callbacks receive commands and send responses but never execute them. Delay-type
+   * commands (DAP_Delay, ResetTarget, SWJ_Pins with a wait) sleep in this thread until
+   * they are due and do not occupy the USB context.
    *
    * @param timeout_ms 等待命令的最长时间；0 为不等待 / Longest wait for a command; 0 does
    *                   not wait
@@ -4782,10 +4788,13 @@ class DapLinkV2Class : public DeviceClass
   };
 
   static constexpr size_t SLOT_NONE = static_cast<size_t>(-1);
-  /// 命令池两个槽：一个在执行，另一个接收下一条命令，两者重叠。
-  /// Two command slots: one executes while the other receives the next command, so the
-  /// two overlap.
-  static constexpr size_t CMD_SLOT_COUNT = 2u;
+  /// 命令池槽数等于通告的在途命令数：一条大命令在执行时，后面的小命令只占一个槽，下一条大
+  /// 命令仍有槽可以接收，接收和执行才能真正重叠。
+  /// The command pool has as many slots as the advertised commands in flight: while a big
+  /// command executes, the small commands behind it take one slot each and the next big
+  /// command still finds a slot to be received into, so reception and execution really
+  /// overlap.
+  static constexpr size_t CMD_SLOT_COUNT = PACKET_COUNT_EFFECTIVE;
 
   uint8_t queued_request_buffer_[QUEUED_REQ_BUFFER_ALLOC_SIZE] = {};
   uint16_t queued_request_length_ = 0u;
