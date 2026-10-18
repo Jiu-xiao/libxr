@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -94,6 +95,13 @@ class ESP32USBDevice : public USB::EndpointPool,
   /**
    * @brief 初始化 USB device core 状态 / Initialize the USB device-core state
    */
+  /// 累计收到的 USB 总线复位次数（热插拔 / 主机重新枚举 / 复位）。
+  /// Cumulative number of USB bus resets (hot-plug / re-enumeration / reset).
+  uint32_t BusResetCount() const
+  {
+    return runtime_.bus_reset_count_.load(std::memory_order_acquire);
+  }
+
   void Init(bool in_isr) override;
 
   /**
@@ -197,6 +205,7 @@ class ESP32USBDevice : public USB::EndpointPool,
     bool irq_ready =
         false;  ///< 中断是否已准备完成 / Whether the interrupt has been prepared
     bool started = false;  ///< 控制器是否处于启动态 / Whether the controller is started
+    std::atomic<uint32_t> bus_reset_count_{0};  ///< 总线复位次数 / Bus reset count
     bool rom_usb_cleaned = false;  ///< ROM USB 默认状态是否已清理 / Whether the ROM USB
                                    ///< default state has been cleaned
   };

@@ -168,6 +168,19 @@ class DapLinkV2Class : public DeviceClass
     return ep != nullptr && ep->GetState() != Endpoint::State::IDLE;
   }
 
+  /// 命令钩子：在标准命令分发之前调用。返回 true 表示命令已被处理（包括写入响应）。
+  /// Command hook called before the standard dispatch. Returning true means the command
+  /// was handled (the response, if any, has been written).
+  using CommandHook = bool (*)(void* ctx, const uint8_t* req, uint16_t req_len,
+                               uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
+
+  /// 注册命令钩子，ctx 原样传回。 / Register the command hook; ctx is passed through.
+  void SetCommandHook(CommandHook hook, void* ctx = nullptr)
+  {
+    command_hook_ = hook;
+    command_hook_ctx_ = ctx;
+  }
+
   /**
    * @brief 在调用线程里同步执行一条 DAP 命令，供 USB 以外的传输使用（例如 TCP）。
    *        Execute one DAP command synchronously in the caller's thread, for transports
@@ -1698,6 +1711,12 @@ class DapLinkV2Class : public DeviceClass
         BuildNotSupportResponse(resp, resp_cap, out_len);
       }
       return ErrorCode::ARG_ERR;
+    }
+
+    if (command_hook_ != nullptr &&
+        command_hook_(command_hook_ctx_, req, req_len, resp, resp_cap, out_len))
+    {
+      return ErrorCode::OK;
     }
 
     const uint8_t CMD = req[0];
@@ -4788,6 +4807,8 @@ class DapLinkV2Class : public DeviceClass
       false;  ///< ExecuteExternal 正在执行 / ExecuteExternal in progress
   uint16_t external_size_ =
       0u;  ///< ExecuteExternal 收到的响应长度 / Response length it received
+  CommandHook command_hook_ = nullptr;  ///< 命令钩子 / Command hook
+  void* command_hook_ctx_ = nullptr;    ///< 钩子上下文 / Hook context
   uint32_t action_deadline_ms_ = 0u;  ///< 续做时刻（ms） / Resume deadline (ms)
   uint8_t* deferred_resp_ = nullptr;  ///< 保留的响应缓冲 / Reserved response buffer
   uint16_t deferred_resp_cap_ = 0u;   ///< 保留的响应容量 / Reserved response capacity

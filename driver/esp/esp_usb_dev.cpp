@@ -682,6 +682,7 @@ void IRAM_ATTR ESP32USBDevice::HandleInterrupt()
 
 void ESP32USBDevice::HandleBusReset(bool in_isr)
 {
+  runtime_.bus_reset_count_.fetch_add(1, std::memory_order_release);
   // 总线复位路径先停所有 endpoint，再清 mask/FIFO/状态，最后把 setup 接收窗口重新挂回去 /
   // The bus-reset path stops all endpoints first, then clears masks/FIFOs/state, and
   // finally rearms the setup receive window.
