@@ -282,6 +282,10 @@ extern "C" __attribute__((interrupt("WCH-Interrupt-fast"))) void USBHS_IRQHandle
       HandleTransferToken(map, INTST);
       clear_mask |= USBHS_UIF_TRANSFER;
     }
+    if (INTFLAG & USBHS_UIF_TRANSFER)
+    {
+      LibXR::CH32EndpointOtgHs::CompleteAckedInPackets();
+    }
 
     clear_mask |= static_cast<uint8_t>(INTFLAG & ~(clear_mask));
     USBHSD->INT_FG = clear_mask;

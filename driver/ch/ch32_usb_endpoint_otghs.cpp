@@ -71,11 +71,11 @@ static void set_tx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer)
 {
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    USBHSD->UEP0_DMA = (uint32_t)buffer;
+    USBHSD->UEP0_DMA = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buffer));
   }
   else
   {
-    *get_tx_dma_addr(ep_num) = (uint32_t)buffer;
+    *get_tx_dma_addr(ep_num) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buffer));
   }
   // BUF_MOD 恒 0：硬件双缓冲不再使用，双槽由软件按请求切换 DMA 指针实现
   // （MODEL_USB §2.2）。
@@ -86,11 +86,11 @@ static void set_rx_dma_buffer(USB::Endpoint::EPNumber ep_num, void* buffer)
 {
   if (ep_num == USB::Endpoint::EPNumber::EP0)
   {
-    USBHSD->UEP0_DMA = (uint32_t)buffer;
+    USBHSD->UEP0_DMA = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buffer));
   }
   else
   {
-    *get_rx_dma_addr(ep_num) = (uint32_t)buffer;
+    *get_rx_dma_addr(ep_num) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buffer));
   }
   USBHSD->BUF_MODE &= ~(1 << static_cast<int>(ep_num));
 }
@@ -500,6 +500,7 @@ ErrorCode CH32EndpointOtgHs::StartHardware(const HwRequest& request, bool /*in_i
       if (!IS_EP0)
       {
         *addr = (*addr & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_ACK;
+        tx_tog_armed_ = *addr & USBHS_UEP_T_TOG_MASK;
       }
       else
       {
@@ -615,12 +616,52 @@ ErrorCode CH32EndpointOtgHs::StallHardware(bool /*in_isr*/)
 ErrorCode CH32EndpointOtgHs::ClearStallHardware(bool /*in_isr*/)
 {
   if (GetDirection() == Direction::IN)
+  {
     *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;
+    tx_tog_armed_ = USBHS_UEP_T_TOG_DATA0;
+  }
   else
     *get_rx_control_addr(GetNumber()) = USBHS_UEP_R_RES_NAK | USBHS_UEP_R_TOG_AUTO;
   tog0_ = false;
   tog1_ = false;
   return ErrorCode::OK;
+}
+
+bool CH32EndpointOtgHs::InPacketAcked() const
+{
+  if (!transfer_active_ || GetDirection() != Direction::IN ||
+      GetNumber() == EPNumber::EP0 || GetType() == Type::ISOCHRONOUS)
+  {
+    return false;
+  }
+  return (*get_tx_control_addr(GetNumber()) & USBHS_UEP_T_TOG_MASK) != tx_tog_armed_;
+}
+
+void CH32EndpointOtgHs::CompleteAckedInPackets()
+{
+  // INT_BUSY 让控制器在 UIF_TRANSFER 清零前对后续事务回忙 NAK，而 INT_ST 记录的是
+  // 最近一次事务：IN 包刚被 ACK，主机紧接着发来的 IN（多包传输的下一包、ZLP，或别的
+  // 端点的事务）被忙 NAK 后，INT_ST 就变成 NAK 或别的端点，按 INT_ST 分发会丢掉这次
+  // 完成，RES 仍为 ACK，控制器随后把同一包再发一遍（toggle 已翻转，主机照单全收）。
+  // 所以每次 UIF_TRANSFER 都按 toggle 检查挂着的 IN 包是否已被 ACK。UIF_TRANSFER
+  // 清零前不会有新事务完成，同一次检查不会把续挂的包误判为已发。
+  // With INT_BUSY the controller busy-NAKs further transactions until UIF_TRANSFER is
+  // cleared, while INT_ST describes the latest transaction: when the IN right after an
+  // ACKed packet (the next packet of a multi-packet transfer, a ZLP, or another
+  // endpoint's transaction) is busy-NAKed, INT_ST shows a NAK or another endpoint and
+  // dispatching by INT_ST loses the completion. RES stays ACK and the controller sends
+  // the same packet again (with the toggle already advanced, so the host accepts it).
+  // Hence every UIF_TRANSFER checks the toggle of each armed IN packet. No transaction
+  // completes before UIF_TRANSFER is cleared, so a packet re-armed here is not taken
+  // for a sent one in the same check.
+  for (uint8_t i = 1; i < EP_OTG_HS_MAX_SIZE; ++i)
+  {
+    auto* ep_in = map_otg_hs_[i][static_cast<uint8_t>(Direction::IN)];
+    if (ep_in != nullptr && ep_in->InPacketAcked())
+    {
+      ep_in->TransferComplete(0u);
+    }
+  }
 }
 
 size_t CH32EndpointOtgHs::MaxPacketSizeLimit(Type type) const
@@ -671,6 +712,7 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
       transfer_cursor_ += chunk;
       transfer_remaining_ -= chunk;
       *tx_ctrl = (*tx_ctrl & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_ACK;
+      tx_tog_armed_ = *tx_ctrl & USBHS_UEP_T_TOG_MASK;
       return;
     }
 
@@ -736,7 +778,8 @@ void CH32EndpointOtgHs::TransferComplete(size_t size)
     if (transfer_accumulated_ < transfer_requested_ && size == MaxPacketSize())
     {
       transfer_cursor_ += size;
-      *get_rx_dma_addr(GetNumber()) = reinterpret_cast<uint32_t>(transfer_cursor_);
+      *get_rx_dma_addr(GetNumber()) =
+          static_cast<uint32_t>(reinterpret_cast<uintptr_t>(transfer_cursor_));
       return;  // RES 仍为 ACK，继续收下一包
     }
     auto* rx_ctrl = get_rx_control_addr(GetNumber());

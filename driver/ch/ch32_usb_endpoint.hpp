@@ -93,6 +93,14 @@ class CH32EndpointOtgHs : public USB::Endpoint
   size_t ReapProgress(const HwRequest& request, bool& retired) override;
 
   void TransferComplete(size_t size);
+  /// 非 EP0 BULK/INTERRUPT IN：挂起的包是否已被主机 ACK（TOG_AUTO 下 toggle 已翻转）。
+  /// Non-EP0 bulk/interrupt IN: whether the host has ACKed the armed packet (the
+  /// TOG_AUTO toggle moved since it was armed).
+  bool InPacketAcked() const;
+  /// 每次 UIF_TRANSFER 调用：完成所有已被 ACK 但 INT_ST 没报出来的 IN 包。
+  /// Called on every UIF_TRANSFER: completes each IN packet that was ACKed although
+  /// INT_ST did not report it.
+  static void CompleteAckedInPackets();
   ErrorCode StallHardware(bool in_isr) override;
   ErrorCode ClearStallHardware(bool in_isr) override;
   size_t MaxPacketSizeLimit(Type type) const override;
@@ -117,6 +125,9 @@ class CH32EndpointOtgHs : public USB::Endpoint
   // IN 分包：剩余未发出的字节数（0 表示本请求只剩最后一包）。
   // IN splitting: bytes of the request not sent yet (0 = last packet in flight).
   size_t transfer_remaining_ = 0;
+  // IN：挂包时 TX_CTRL 的 toggle 位（USBHS_UEP_T_TOG_MASK）。
+  // IN: the TX_CTRL toggle bits (USBHS_UEP_T_TOG_MASK) when the packet was armed.
+  uint8_t tx_tog_armed_ = 0;
 
   // 同 OtgFs：IRQ 分发（自由函数）经端点对象读取槽内存。
   // Same as OtgFs: the IRQ dispatch (free functions) reads slot memory through
