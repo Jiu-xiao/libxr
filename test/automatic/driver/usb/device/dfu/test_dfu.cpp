@@ -264,12 +264,59 @@ void TestBootloaderDownload()
 
   boot.UnbindEndpoints(f.pool, false);
 }
+
+uint16_t LoadU16(const uint8_t* p)
+{
+  uint16_t value = 0;
+  std::memcpy(&value, p, sizeof(value));
+  return value;
+}
+
+/// The DFU classes only declare their WinUSB GUID; the MS OS 2.0 descriptor set comes
+/// from the composition. A bootloader on its own gets the device-level form, and a
+/// runtime DFU next to another function gets a function subset in the one set the
+/// device reports, so the BOS carries a single MS OS 2.0 capability.
+void TestWinUsbSetComesFromComposition()
+{
+  using Device = WinUsbMsOs20::DeviceScopedWinUsbMsOs20DescSet<
+      WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+  using Property =
+      WinUsbMsOs20::DeviceInterfaceGuidsRegProperty<WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+
+  FreshTimerList();
+  BootFixture f;
+  Device expected{};
+  expected.Init(TestBoot::DEFAULT_WINUSB_DEVICE_INTERFACE_GUID);
+  const auto standalone = f.composition.WinUsbDescriptorSet();
+  TEST_ASSERT(standalone.size_ == sizeof(Device));
+  TEST_ASSERT(std::memcmp(standalone.addr_, &expected, sizeof(Device)) == 0);
+  TEST_ASSERT(static_cast<DeviceClass&>(f.boot).GetBosCapabilityCount() == 0U);
+
+  TestRuntime rt(&JumpToBootloader);
+  std::array<uint8_t, 4096> flash_mem{};
+  RamFlash flash{256, 8, {flash_mem.data(), flash_mem.size()}};
+  TestBoot boot{flash, 0, 2048, 2048, &JumpToApp, nullptr, false};
+  EndpointPool pool{2};
+  DeviceComposition composite(pool, {&TEST_LANGUAGE}, {{&boot, &rt}});
+  TEST_ASSERT(static_cast<DeviceClass&>(rt).GetBosCapabilityCount() == 0U);
+  TEST_ASSERT(composite.WinUsbBosCapability() != nullptr);
+
+  constexpr size_t FUNCTION = 8 + 20 + sizeof(Property);
+  const auto set = composite.WinUsbDescriptorSet();
+  const auto* d = static_cast<const uint8_t*>(set.addr_);
+  TEST_ASSERT(set.size_ == 10 + 8 + 2 * FUNCTION);
+  TEST_ASSERT(LoadU16(d + 10 + 2) == 0x0001);  // configuration subset
+  const uint8_t* second = d + 18 + FUNCTION;
+  TEST_ASSERT(LoadU16(second + 2) == 0x0002 && second[4] == 1);  // runtime DFU, itf 1
+}
 }  // namespace
 
 int main()
 {
   TestRuntimeDetach();
   TestBootloaderDownload();
+  TestWinUsbSetComesFromComposition();
   std::puts(
-      "DFU classes: status stage in the core, DNLOAD data stage and capacity passed");
+      "DFU classes: status stage in the core, DNLOAD data stage, capacity and WinUSB "
+      "descriptor set passed");
 }
