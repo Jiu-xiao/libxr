@@ -8,6 +8,7 @@
 #include "libxr_cb.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
+#include "usb_macro_guard.hpp"
 
 namespace LibXR::USB
 {

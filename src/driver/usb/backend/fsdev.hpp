@@ -4,6 +4,7 @@
 
 #include "usb/core/ep.hpp"
 #include "usb/core/ep_pool.hpp"
+#include "usb/core/usb_macro_guard.hpp"
 #include "usb/device/dev_core.hpp"
 
 /**

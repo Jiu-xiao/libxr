@@ -6,6 +6,7 @@
 #include "libxr_mem.hpp"
 #include "timebase.hpp"
 #include "usb/core/desc_cfg.hpp"
+#include "usb/core/usb_macro_guard.hpp"
 
 namespace LibXR::USB
 {
