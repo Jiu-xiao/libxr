@@ -128,6 +128,7 @@ class DeviceCore : private Detail::BosFeature<Capabilities::BOS>,
   void Initialize(bool in_isr);
   void Deinitialize(bool in_isr);
   void HandleSetup(bool in_isr, const SetupPacket& setup);
+  void RefreshUnconfiguredSpeed();
   void DispatchSetup(bool in_isr);
   ErrorCode HandleStandardRequest(bool in_isr);
   ErrorCode ClassRequest(bool in_isr);

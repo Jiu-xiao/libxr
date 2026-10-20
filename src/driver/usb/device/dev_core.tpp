@@ -243,12 +243,31 @@ void DeviceCore<C>::HandleSetup(bool in_isr, const SetupPacket& setup)
   if (in0_->IsStalled()) (void)in0_->ClearStall(in_isr);
   if (out0_->IsStalled()) (void)out0_->ClearStall(in_isr);
   setup_ = setup;
+  RefreshUnconfiguredSpeed();
   if (pool_.AnyStopping())
   {
     continuation_ = Continuation::SETUP;
     return;
   }
   DispatchSetup(in_isr);
+}
+
+// 有的控制器在报告复位时还没完成速度协商（CH32 USBHS 在高速 chirp 结束前读到全速），
+// 所以在 SET_CONFIGURATION 之前的每个 SETUP 上重读一次：此时协商早已结束，描述符和端点
+// 都还没按速度定下来。
+// Some controllers report the reset before speed negotiation has finished (CH32 USBHS
+// reads full speed until the high-speed chirp ends), so the speed is read again on every
+// setup packet before SET_CONFIGURATION: negotiation is long over by then, and neither
+// the descriptors nor the endpoints have been committed to a speed yet.
+template <typename C>
+void DeviceCore<C>::RefreshUnconfiguredSpeed()
+{
+  if (pool_.DataEnabled()) return;
+  const Speed observed = ReadBusSpeed();
+  if (observed == speed_ || (profile_speeds_ & SpeedBit(observed)) == 0U) return;
+  speed_ = observed;
+  EndpointPool::HardwareScope hardware(&pool_);
+  pool_.SetSpeed(speed_);
 }
 
 template <typename C>
