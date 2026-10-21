@@ -258,6 +258,15 @@ target_include_directories(test_swd_general_gpio PRIVATE "${CMAKE_CURRENT_SOURCE
 add_test(NAME swd_general_gpio COMMAND test_swd_general_gpio)
 set_tests_properties(swd_general_gpio PROPERTIES TIMEOUT 30)
 
+# DapSerialTransport: Topic framing, CRC errors, resynchronization, the max-packet
+# boundary, TX backpressure and lifecycle on a mock UART and a mock DAP; no ESP-IDF or
+# vendor code is involved.
+add_executable(test_dap_serial_transport driver/debug/test_dap_serial_transport.cpp)
+target_link_libraries(test_dap_serial_transport PRIVATE xr pthread)
+target_include_directories(test_dap_serial_transport PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME dap_serial_transport COMMAND test_dap_serial_transport)
+set_tests_properties(dap_serial_transport PROPERTIES TIMEOUT 60)
+
 # DFU device classes: core-owned status stage, DNLOAD data stage and receive capacity.
 add_executable(test_usb_dfu driver/usb/device/dfu/test_dfu.cpp)
 target_link_libraries(test_usb_dfu PRIVATE xr)
