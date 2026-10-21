@@ -3000,7 +3000,7 @@ class DapLinkV2Class : public DeviceClass
   {
     LibXR::Debug::SwdProtocol::Response swd_resp = {};
     const auto req = LibXR::Debug::SwdProtocol::make_dp_read_req(
-        LibXR::Debug::SwdProtocol::DpReadReg::CTRL_STAT);
+        LibXR::Debug::SwdProtocol::DpReadReg::RDBUFF);
     const ErrorCode ec = TransferTxnFast(req, swd_resp);
     ack_out = swd_resp.ack;
     if (ec != ErrorCode::OK)
