@@ -19,6 +19,44 @@ enum class SwdIoDriveMode : uint8_t
 };
 
 /**
+ * @brief SwdGeneralGPIO 的时序参数，单位是 CPU 周期的 1/10，与 CPU 主频无关。
+ *        Timing parameters of SwdGeneralGPIO, in tenths of a CPU cycle, independent
+ *        of the CPU clock.
+ *
+ * 带延时的路径上，一个 SWCLK 周期耗时 a + b·N 个 CPU 周期，N 是每个半周期的延时循环
+ * 次数（一个周期有两个半周期，所以 b 是两次延时循环的耗时）；无延时路径每个 SWCLK
+ * 周期耗时 c 个 CPU 周期。
+ * On the delayed path one SWCLK period costs a + b·N CPU cycles, where N is the
+ * delay-loop count per half period (a period has two half periods, so b is the cost
+ * of two delay iterations); the path without delay costs c CPU cycles per period.
+ *
+ * 标定（DWT 周期计数）：固定几个 N（N >= 1），用 DWT_CYCCNT 分别测读数据相、写数据相
+ * 和请求字节每个 SWCLK 周期的 CPU 周期数，对 N >= 2 的点按 a + b·N 拟合得到 b；a 取
+ * 所有路径、所有 N（包括 N = 1）下“实测值 − b·N”的最小值；c 取 N = 0 时各路径每周期
+ * 周期数的最小值。三个值都取下界，所以算出的时钟不会快于请求值。
+ * Calibration (DWT cycle counter): fix a few N (N >= 1) and measure the CPU cycles per
+ * SWCLK period of the read data phase, the write data phase and the request byte with
+ * DWT_CYCCNT. Fit a + b·N over the points with N >= 2 to get b; take a as the smallest
+ * "measured − b·N" over every path and every N including N = 1, and c as the smallest
+ * cycles per period of any path at N = 0. All three are lower bounds, so the clock
+ * that results is never faster than requested.
+ *
+ * 默认值是保守的下界（每次延时循环和每个周期至少 1 个 CPU 周期，截距 0），在任何平台
+ * 上都不会快于请求值，但通常明显更慢。
+ * The defaults are conservative lower bounds (at least one CPU cycle per delay
+ * iteration and per period, zero intercept): never faster than requested on any
+ * platform, but usually much slower.
+ */
+struct SwdGpioTiming
+{
+  uint32_t step_cycles_x10 =
+      20u;  ///< b：每个 N 的周期数 ×10 / b: cycles per step of N x10.
+  uint32_t intercept_cycles_x10 = 0u;  ///< a：截距 ×10 / a: intercept x10.
+  uint32_t fast_cycles_x10 =
+      10u;  ///< c：无延时路径每周期周期数 ×10 / c: cycles per period without delay x10.
+};
+
+/**
  * @brief 基于 GpioType 轮询 bit-bang 的 SWD 探针。
  *        SWD probe based on polling bit-bang using GpioType.
  *
@@ -46,41 +84,26 @@ class SwdGeneralGPIO final : public Swd
   static constexpr uint32_t MIN_HZ = 50'000u;
   static constexpr uint32_t MAX_HZ = 100'000'000u;
 
-  static constexpr uint32_t NS_PER_SEC = 1'000'000'000u;
-  static constexpr uint32_t LOOPS_SCALE = 1000u;           // ns -> us 的缩放分母
-  static constexpr uint32_t CEIL_BIAS = LOOPS_SCALE - 1u;  // ceil(x/LOOPS_SCALE) 的偏置
-
-  static constexpr uint32_t HalfPeriodNsFromHz(uint32_t hz)
-  {
-    // ceil(1e9 / (2*hz))
-    return (NS_PER_SEC + (2u * hz) - 1u) / (2u * hz);
-  }
-
-  static constexpr uint32_t HALF_PERIOD_NS_MAX = HalfPeriodNsFromHz(MIN_HZ);
-  static constexpr uint32_t MAX_LOOPS_PER_US =
-      (UINT32_MAX - CEIL_BIAS) / HALF_PERIOD_NS_MAX;
-
   static_assert(MIN_HZ > 0u);
   static_assert(MAX_HZ >= MIN_HZ);
-  static_assert(HALF_PERIOD_NS_MAX > 0u);
 
  public:
   /**
    * @brief 构造函数 / Constructor.
    * @param swclk 用作 SWCLK 的 GPIO / GPIO used as SWCLK.
    * @param swdio 用作 SWDIO 的 GPIO / GPIO used as SWDIO.
-   * @param loops_per_us 每个 us 的循延时环次数 / Loops per us of delay.
+   * @param cpu_hz 执行本类的 CPU 主频（Hz）；0 表示始终走无延时路径 /
+   *        Clock of the CPU that runs this class (Hz); 0 always takes the path
+   *        without delay.
+   * @param timing 本平台标定的时序参数（见 SwdGpioTiming） / Timing parameters
+   *        calibrated for this platform (see SwdGpioTiming).
    * @param default_hz 默认 SWCLK 频率（Hz） / Default SWCLK frequency (Hz).
    */
-  explicit SwdGeneralGPIO(SwclkGpioType& swclk, SwdioGpioType& swdio,
-                          uint32_t loops_per_us, uint32_t default_hz = DEFAULT_CLOCK_HZ)
-      : swclk_(swclk), swdio_(swdio), loops_per_us_(loops_per_us)
+  explicit SwdGeneralGPIO(SwclkGpioType& swclk, SwdioGpioType& swdio, uint32_t cpu_hz,
+                          const SwdGpioTiming& timing,
+                          uint32_t default_hz = DEFAULT_CLOCK_HZ)
+      : swclk_(swclk), swdio_(swdio), cpu_hz_(cpu_hz), timing_(timing)
   {
-    if (loops_per_us_ > MAX_LOOPS_PER_US)
-    {
-      loops_per_us_ = MAX_LOOPS_PER_US;
-    }
-
     // SWCLK baseline
     swclk_.SetConfig(
         {SwclkGpioType::Direction::OUTPUT_PUSH_PULL, SwclkGpioType::Pull::NONE});
@@ -103,7 +126,6 @@ class SwdGeneralGPIO final : public Swd
     if (hz == 0u)
     {
       clock_hz_ = 0u;
-      half_period_ns_ = 0u;
       half_period_loops_ = 0u;
       return ErrorCode::OK;
     }
@@ -118,36 +140,56 @@ class SwdGeneralGPIO final : public Swd
     }
 
     clock_hz_ = hz;
-
-    // Keep MCU timing setup integer-only so simple SWD clock setup does not
-    // pull in floating-point runtime helpers.
-    const uint64_t DEN = static_cast<uint64_t>(2u) * static_cast<uint64_t>(hz);
-    half_period_ns_ =
-        static_cast<uint32_t>((static_cast<uint64_t>(NS_PER_SEC) + DEN - 1u) / DEN);
-
-    if (loops_per_us_ == 0u)
-    {
-      half_period_loops_ = 0u;
-      return ErrorCode::OK;
-    }
-
-    const uint64_t loops_num =
-        static_cast<uint64_t>(loops_per_us_) * static_cast<uint64_t>(half_period_ns_);
-
-    if (loops_num < static_cast<uint64_t>(LOOPS_SCALE))
-    {
-      half_period_loops_ = 0u;
-    }
-    else
-    {
-      const uint64_t loops_ceil = (loops_num + static_cast<uint64_t>(LOOPS_SCALE) - 1u) /
-                                  static_cast<uint64_t>(LOOPS_SCALE);
-      half_period_loops_ = (loops_ceil >= static_cast<uint64_t>(UINT32_MAX))
-                               ? UINT32_MAX
-                               : static_cast<uint32_t>(loops_ceil);
-    }
-
+    half_period_loops_ = DelayLoops(cpu_hz_, hz, timing_);
     return ErrorCode::OK;
+  }
+
+  /**
+   * @brief 每个半周期的延时循环次数 / Delay-loop count per half period.
+   *
+   * f >= f_cpu / c 时返回 0（无延时路径不快于请求值）；否则返回
+   * max(1, ceil((f_cpu / f − a) / b))，即 a + b·N 不短于请求周期的最小 N。只用整数
+   * 运算，不引入浮点库。
+   * Returns 0 when f >= f_cpu / c (the path without delay is not faster than
+   * requested); otherwise max(1, ceil((f_cpu / f − a) / b)), the smallest N for which
+   * a + b·N is not shorter than the requested period. Integer-only, so no
+   * floating-point helpers are pulled in.
+   *
+   * @param cpu_hz CPU 主频（Hz），0 时返回 0 / CPU clock (Hz); 0 returns 0.
+   * @param hz 请求的 SWCLK 频率（Hz） / Requested SWCLK frequency (Hz).
+   * @param timing 时序参数 / Timing parameters.
+   * @return 延时循环次数 / Delay-loop count.
+   */
+  static constexpr uint32_t DelayLoops(uint32_t cpu_hz, uint32_t hz,
+                                       const SwdGpioTiming& timing)
+  {
+    if (cpu_hz == 0u || hz == 0u)
+    {
+      return 0u;
+    }
+    // 都乘以 hz 比较，避免周期取整 / Compare after multiplying by hz, so the period is
+    // never rounded.
+    const uint64_t PERIOD_X10_HZ = static_cast<uint64_t>(cpu_hz) * 10u;
+    const uint64_t HZ = hz;
+    if (static_cast<uint64_t>(timing.fast_cycles_x10) * HZ >= PERIOD_X10_HZ)
+    {
+      return 0u;
+    }
+    const uint64_t A_HZ = static_cast<uint64_t>(timing.intercept_cycles_x10) * HZ;
+    if (PERIOD_X10_HZ <= A_HZ)
+    {
+      return 1u;
+    }
+    const uint64_t B_HZ =
+        static_cast<uint64_t>(timing.step_cycles_x10 == 0u ? 1u
+                                                           : timing.step_cycles_x10) *
+        HZ;
+    const uint64_t N = (PERIOD_X10_HZ - A_HZ + B_HZ - 1u) / B_HZ;
+    if (N < 1u)
+    {
+      return 1u;
+    }
+    return (N >= UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(N);
   }
 
   void Close() override
@@ -639,9 +681,10 @@ class SwdGeneralGPIO final : public Swd
 
   uint32_t clock_hz_ = 0u;  ///< 当前 SWCLK 频率（Hz） / Current SWCLK frequency (Hz).
 
-  uint32_t loops_per_us_ = 0u;       // 手调系数：BusyLoop 每微秒大约需要的迭代数
-  uint32_t half_period_ns_ = 0u;     // 当前半周期（ns）
-  uint32_t half_period_loops_ = 0u;  // 当前半周期对应的 BusyLoop 迭代数
+  uint32_t cpu_hz_ = 0u;  ///< CPU 主频（Hz） / CPU clock (Hz).
+  SwdGpioTiming timing_;  ///< 时序参数 / Timing parameters.
+  uint32_t half_period_loops_ =
+      0u;  ///< 每个半周期的延时循环次数 / Delay loops per half period.
 
   SwdioMode swdio_mode_ =
       SwdioMode::UNKNOWN;  ///< SWDIO 当前模式缓存 / Cached current SWDIO mode.
