@@ -237,6 +237,12 @@ target_link_libraries(test_usb_hid PRIVATE xr)
 target_include_directories(test_usb_hid PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME usb_hid COMMAND test_usb_hid)
 set_tests_properties(usb_hid PROPERTIES TIMEOUT 30)
+# DAP v2 device class: borrow-mode receive and submit, response depth, delays in Step.
+add_executable(test_usb_daplink_v2 driver/usb/device/dap/test_daplink_v2.cpp)
+target_link_libraries(test_usb_daplink_v2 PRIVATE xr)
+target_include_directories(test_usb_daplink_v2 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_daplink_v2 COMMAND test_usb_daplink_v2)
+set_tests_properties(usb_daplink_v2 PROPERTIES TIMEOUT 30)
 
 # SwdGeneralGPIO: the SWDIO level during idle cycles.
 add_executable(test_swd_general_gpio driver/debug/test_swd_general_gpio.cpp)
