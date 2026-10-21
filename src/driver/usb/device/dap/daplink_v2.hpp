@@ -1477,7 +1477,7 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /**
-   * @brief Execute queued commands into one combined EXECUTE_COMMANDS response
+   * @brief Execute the commands in the batch buffer into one EXECUTE_COMMANDS response
    * @param in_isr current context flag
    * @param resp response buffer
    * @param resp_cap response capacity
@@ -1571,6 +1571,7 @@ class DapLinkV2Class : public DeviceClass
   void FinishBatch(bool ok, bool in_isr, uint16_t size = 0u)
   {
     uint8_t* resp = batch_resp_;
+    const uint16_t resp_cap = batch_resp_cap_;
     batch_active_ = false;
     batch_req_off_ = 0u;
     batch_resp_off_ = 0u;
@@ -1581,7 +1582,7 @@ class DapLinkV2Class : public DeviceClass
 
     if (!ok)
     {
-      if (resp != nullptr && batch_resp_cap_ >= 2u)
+      if (resp != nullptr && resp_cap >= 2u)
       {
         resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS);
         resp[1] = DAP_ERROR;
@@ -1600,8 +1601,13 @@ class DapLinkV2Class : public DeviceClass
       return false;
     }
 
+    if (resp_cap < 2u)
+    {
+      return false;
+    }
     resp[0] = ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS);
-    out_len = 1u;
+    resp[1] = static_cast<uint8_t>(queued_command_count_);
+    out_len = 2u;
 
     if (queued_command_count_ == 0u)
     {
@@ -1609,7 +1615,7 @@ class DapLinkV2Class : public DeviceClass
     }
 
     uint16_t req_off = 0u;
-    uint16_t resp_off = 1u;
+    uint16_t resp_off = 2u;
     for (uint32_t i = 0u; i < queued_command_count_; ++i)
     {
       if (req_off >= queued_request_length_)
@@ -1863,8 +1869,12 @@ class DapLinkV2Class : public DeviceClass
         (void)BuildUnknownCmdResponse(resp, resp_cap, out_len);
         return ErrorCode::NOT_SUPPORT;
 
+      // CMSIS-DAP 参考实现把 DAP_QueueCommands 包改写成 DAP_ExecuteCommands 执行，
+      // 响应也是 DAP_ExecuteCommands 的格式；每个包一条响应，按包的顺序发出。
+      // The CMSIS-DAP reference implementation rewrites a DAP_QueueCommands packet into
+      // DAP_ExecuteCommands and runs it, so the response has the DAP_ExecuteCommands
+      // format; every packet gets one response, in packet order.
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS):
-        return HandleQueueCommands(in_isr, req, req_len, resp, resp_cap, out_len);
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS):
         return HandleExecuteCommands(in_isr, req, req_len, resp, resp_cap, out_len);
 
@@ -2856,12 +2866,9 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
-  /**
-   * @brief Queue one packed command batch for later EXECUTE_COMMANDS
-   */
-  /// 校验 [ID, 命令数, 命令...] 并把命令部分追加进队列；格式或容量不对返回 false。
-  /// Validate [ID, count, commands...] and append the command part to the queue; false
-  /// when the format or the capacity does not fit.
+  /// 校验 [ID, 命令数, 命令...] 并把命令部分拷进批处理缓冲；格式或容量不对返回 false。
+  /// Validate [ID, count, commands...] and copy the command part into the batch buffer;
+  /// false when the format or the capacity does not fit.
   bool AppendInlineCommands(const uint8_t* req, uint16_t req_len)
   {
     if (!req || req_len < 2u)
@@ -2917,26 +2924,18 @@ class DapLinkV2Class : public DeviceClass
     return true;
   }
 
-  ErrorCode HandleQueueCommands(bool /*in_isr*/, const uint8_t* req, uint16_t req_len,
-                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
-  {
-    return BuildCmdStatusResponse(
-        ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS),
-        AppendInlineCommands(req, req_len) ? DAP_OK : DAP_ERROR, resp, resp_cap, out_len);
-  }
-
   /**
-   * @brief Execute all previously queued commands
+   * @brief DAP_ExecuteCommands（也用于 DAP_QueueCommands）/ DAP_ExecuteCommands (also
+   *        used for DAP_QueueCommands)
+   *
+   * 请求 [ID, 命令数, 命令...]，响应 [0x7F, 命令数, 各条命令的响应...]。
+   * Request [ID, count, commands...], response [0x7F, count, each command's response...].
    */
   ErrorCode HandleExecuteCommands(bool in_isr, const uint8_t* req, uint16_t req_len,
                                   uint8_t* resp, uint16_t resp_cap, uint16_t& out_len)
   {
-    // [ID, 命令数, 命令...]：本包自带的命令接在已排队的命令之后一起执行；只有 ID 一个
-    // 字节时只执行已排队的命令。
-    // [ID, count, commands...]: the commands carried by this packet are appended behind
-    // the queued ones and run together; a packet that is only the ID runs the queued
-    // commands.
-    if (req_len >= 2u && !AppendInlineCommands(req, req_len))
+    ResetQueuedCommandState();
+    if (!AppendInlineCommands(req, req_len))
     {
       ResetQueuedCommandState();
       return BuildCmdStatusResponse(
