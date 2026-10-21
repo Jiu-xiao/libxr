@@ -224,6 +224,13 @@ target_include_directories(
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
 
+# HID device class on the slot model: input reports, OUT leases, LED and idle rate.
+add_executable(test_usb_hid driver/usb/device/hid/test_hid.cpp)
+target_link_libraries(test_usb_hid PRIVATE xr)
+target_include_directories(test_usb_hid PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_hid COMMAND test_usb_hid)
+set_tests_properties(usb_hid PROPERTIES TIMEOUT 30)
+
 # SwdGeneralGPIO: the SWDIO level during idle cycles.
 add_executable(test_swd_general_gpio driver/debug/test_swd_general_gpio.cpp)
 target_link_libraries(test_swd_general_gpio PRIVATE xr)
