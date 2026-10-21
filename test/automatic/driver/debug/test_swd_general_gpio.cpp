@@ -89,51 +89,67 @@ void TestRequestOnTheWire()
 
 using Gpio = Debug::SwdGeneralGPIO<ClockedPin, RecordingPin>;
 
-/// SetClockHz follows the rule the user set: N = 0 when f >= f_cpu / c, otherwise
-/// N = max(1, ceil((f_cpu / f - a) / b)). Synthetic port: 100 MHz CPU, b = 10 cycles,
-/// a = 15 cycles, c = 12 cycles.
-void TestDelayLoopsFollowTheRule()
+/// SetClockHz picks the step closest to the requested period: the path without delay
+/// (c cycles per clock) or N >= 1 (a + b·N), the slower one on a tie. Synthetic port:
+/// 100 MHz CPU, b = 10 cycles, a = 15 cycles, c = 12 cycles.
+void TestDelayLoopsPickTheNearestStep()
 {
   constexpr uint32_t CPU = 100'000'000u;
   constexpr Debug::SwdGpioTiming T{100u, 150u, 120u};
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 1'000'000u, T) == 9u);  // 100 cycles: 8.5 -> 9
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 2'000'000u, T) == 4u);  // 50 cycles: 3.5 -> 4
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 3'000'000u, T) == 2u);  // 33.3 cycles: 1.8 -> 2
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 5'000'000u, T) == 1u);  // 20 cycles: 0.5 -> 1
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 8'000'000u, T) == 1u);  // 12.5 cycles: below a -> 1
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 9'000'000u, T) == 0u);  // 11.1 cycles <= c -> 0
-  TEST_ASSERT(Gpio::DelayLoops(CPU, 50'000u, T) == 199u);   // 2000 cycles: 198.5 -> 199
-  // f == f_cpu / c exactly takes the path without delay.
-  TEST_ASSERT(Gpio::DelayLoops(96'000'000u, 8'000'000u, T) == 0u);
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 3'000'000u, T) == 2u);   // 33.3: 35 beats 25
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 4'000'000u, T) == 1u);   // 25: exact
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 5'000'000u, T) == 1u);   // 20: 25 beats 12
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 6'000'000u, T) == 0u);   // 16.7: 12 beats 25
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 10'000'000u, T) == 0u);  // 10: no delay
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 1'000'000u, T) == 9u);   // 100: 95 / 105 tie -> 105
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 2'000'000u, T) == 4u);   // 50: 45 / 55 tie -> 55
+  TEST_ASSERT(Gpio::DelayLoops(CPU, 50'000u, T) == 199u);    // 2000: 1995 / 2005 tie
+  // Halfway between the path without delay (12) and N = 1 (25): the slower one.
+  TEST_ASSERT(Gpio::DelayLoops(37'000'000u, 2'000'000u, T) == 1u);  // 18.5
   // An unknown CPU clock keeps the path without delay.
   TEST_ASSERT(Gpio::DelayLoops(0u, 1'000'000u, T) == 0u);
-  // The defaults are lower bounds: 2 cycles per step, no intercept.
+  // Defaults: 2 cycles per step, no intercept, 1 cycle without delay.
   TEST_ASSERT(Gpio::DelayLoops(CPU, 1'000'000u, Debug::SwdGpioTiming{}) == 50u);
 }
 
-/// Under the model the chosen N never gives a clock above the request, and it is the
-/// smallest such N.
-void TestDelayLoopsNeverFasterThanRequested()
+/// Over a sweep the chosen step is at least as close to the request as every other
+/// step, the slower on a tie, and within half a step when N >= 2.
+void TestDelayLoopsNearestStepSweep()
 {
   constexpr uint32_t CPU = 64'000'000u;
-  constexpr Debug::SwdGpioTiming T{88u, 130u, 110u};
-  const uint64_t REQ = static_cast<uint64_t>(CPU) * 10u;
+  constexpr Debug::SwdGpioTiming T{88u, 160u, 110u};
+  const uint64_t TARGET = static_cast<uint64_t>(CPU) * 10u;
+  auto cost = [&](uint32_t n) -> uint64_t
+  {
+    return n == 0u ? T.fast_cycles_x10
+                   : T.intercept_cycles_x10 + uint64_t{T.step_cycles_x10} * n;
+  };
+  auto err = [&](uint64_t c, uint32_t hz) -> uint64_t
+  {
+    const uint64_t X = c * hz;
+    return X > TARGET ? X - TARGET : TARGET - X;
+  };
   for (uint32_t hz = 50'000u; hz <= 20'000'000u; hz += 25'000u)
   {
     const uint32_t N = Gpio::DelayLoops(CPU, hz, T);
-    if (N == 0u)
+    const uint64_t E = err(cost(N), hz);
+    for (uint32_t other : {0u, N > 1u ? N - 1u : 1u, N + 1u})
     {
-      TEST_ASSERT(static_cast<uint64_t>(T.fast_cycles_x10) * hz >= REQ);
-      continue;
+      if (other == N)
+      {
+        continue;
+      }
+      const uint64_t OE = err(cost(other), hz);
+      TEST_ASSERT(E <= OE);
+      if (E == OE)
+      {
+        TEST_ASSERT(cost(N) > cost(other));
+      }
     }
-    TEST_ASSERT(static_cast<uint64_t>(T.fast_cycles_x10) * hz < REQ);
-    const uint64_t COST = T.intercept_cycles_x10 + uint64_t{T.step_cycles_x10} * N;
-    TEST_ASSERT(COST * hz >= REQ);
-    if (N > 1u)
+    if (N >= 2u)
     {
-      const uint64_t LESS =
-          T.intercept_cycles_x10 + uint64_t{T.step_cycles_x10} * (N - 1u);
-      TEST_ASSERT(LESS * hz < REQ);
+      // |a + b·N - target| <= b / 2, all scaled by hz and by 10.
+      TEST_ASSERT(2u * E <= uint64_t{T.step_cycles_x10} * hz);
     }
   }
 }
@@ -143,7 +159,7 @@ int main()
 {
   TestIdleClocksDriveSwdioLow();
   TestRequestOnTheWire();
-  TestDelayLoopsFollowTheRule();
-  TestDelayLoopsNeverFasterThanRequested();
+  TestDelayLoopsPickTheNearestStep();
+  TestDelayLoopsNearestStepSweep();
   std::puts("SwdGeneralGPIO: idle clocks drive SWDIO low");
 }

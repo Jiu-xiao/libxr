@@ -30,22 +30,22 @@ enum class SwdIoDriveMode : uint8_t
  * delay-loop count per half period (a period has two half periods, so b is the cost
  * of two delay iterations); the path without delay costs c CPU cycles per period.
  *
- * 标定（DWT 周期计数）：固定几个 N（N >= 1），用 DWT_CYCCNT 分别测读数据相、写数据相
- * 和请求字节每个 SWCLK 周期的 CPU 周期数，对 N >= 2 的点按 a + b·N 拟合得到 b；a 取
- * 所有路径、所有 N（包括 N = 1）下“实测值 − b·N”的最小值；c 取 N = 0 时各路径每周期
- * 周期数的最小值。三个值都取下界，所以算出的时钟不会快于请求值。
- * Calibration (DWT cycle counter): fix a few N (N >= 1) and measure the CPU cycles per
- * SWCLK period of the read data phase, the write data phase and the request byte with
- * DWT_CYCCNT. Fit a + b·N over the points with N >= 2 to get b; take a as the smallest
- * "measured − b·N" over every path and every N including N = 1, and c as the smallest
- * cycles per period of any path at N = 0. All three are lower bounds, so the clock
- * that results is never faster than requested.
+ * 标定（DWT 周期计数）：固定几个 N，用 DWT_CYCCNT 分别测读数据相、写数据相和请求
+ * 字节每个 SWCLK 周期的 CPU 周期数，按 a + b·N 对各路径一起拟合，得到 a 和 b 的典型
+ * 值；c 是 N = 0 时各路径每周期周期数的典型值。SetClockHz 取周期数最接近请求周期的
+ * 档位，所以实际时钟与请求值相差不超过半档（b / 2），可能略快也可能略慢。
+ * Calibration (DWT cycle counter): fix a few N and measure the CPU cycles per SWCLK
+ * period of the read data phase, the write data phase and the request byte with
+ * DWT_CYCCNT; fit a + b·N over all paths together for the typical a and b, and take c
+ * as the typical cycles per period of the paths at N = 0. SetClockHz picks the step
+ * whose cycles per period are closest to the requested period, so the clock is within
+ * half a step (b / 2) of the request, slightly faster or slightly slower.
  *
- * 默认值是保守的下界（每次延时循环和每个周期至少 1 个 CPU 周期，截距 0），在任何平台
- * 上都不会快于请求值，但通常明显更慢。
- * The defaults are conservative lower bounds (at least one CPU cycle per delay
- * iteration and per period, zero intercept): never faster than requested on any
- * platform, but usually much slower.
+ * 默认值是保守值（每次延时循环和每个周期 1 个 CPU 周期，截距 0）：未标定的平台上
+ * 实际时钟通常明显慢于请求值。
+ * The defaults are conservative (one CPU cycle per delay iteration and per period,
+ * zero intercept): on an uncalibrated platform the clock is usually much slower than
+ * requested.
  */
 struct SwdGpioTiming
 {
@@ -147,12 +147,12 @@ class SwdGeneralGPIO final : public Swd
   /**
    * @brief 每个半周期的延时循环次数 / Delay-loop count per half period.
    *
-   * f >= f_cpu / c 时返回 0（无延时路径不快于请求值）；否则返回
-   * max(1, ceil((f_cpu / f − a) / b))，即 a + b·N 不短于请求周期的最小 N。只用整数
-   * 运算，不引入浮点库。
-   * Returns 0 when f >= f_cpu / c (the path without delay is not faster than
-   * requested); otherwise max(1, ceil((f_cpu / f − a) / b)), the smallest N for which
-   * a + b·N is not shorter than the requested period. Integer-only, so no
+   * 候选档位是无延时路径（每周期 c）和 N >= 1（每周期 a + b·N），取每周期周期数最接近
+   * f_cpu / f 的一档；两档一样近时取较慢的一档。返回 0 表示无延时路径。只用整数运算，
+   * 不引入浮点库。
+   * The candidates are the path without delay (c per period) and N >= 1 (a + b·N per
+   * period); the one whose cycles per period are closest to f_cpu / f wins, and of two
+   * equally close ones the slower. 0 means the path without delay. Integer-only, so no
    * floating-point helpers are pulled in.
    *
    * @param cpu_hz CPU 主频（Hz），0 时返回 0 / CPU clock (Hz); 0 returns 0.
@@ -167,28 +167,41 @@ class SwdGeneralGPIO final : public Swd
     {
       return 0u;
     }
-    // 都乘以 hz 比较，避免周期取整 / Compare after multiplying by hz, so the period is
-    // never rounded.
-    const uint64_t PERIOD_X10_HZ = static_cast<uint64_t>(cpu_hz) * 10u;
+    // 都乘以 hz 比较，避免周期取整：误差 = |每周期周期数 × hz − f_cpu|（单位 1/10
+    // 周期）。 Compare after multiplying by hz, so the period is never rounded: the error
+    // is |cycles per period x hz - f_cpu| (in tenths of a cycle).
+    const uint64_t TARGET = static_cast<uint64_t>(cpu_hz) * 10u;
     const uint64_t REQ_HZ = hz;
-    if (static_cast<uint64_t>(timing.fast_cycles_x10) * REQ_HZ >= PERIOD_X10_HZ)
+    const uint64_t A = timing.intercept_cycles_x10;
+    const uint64_t B = (timing.step_cycles_x10 == 0u) ? 1u : timing.step_cycles_x10;
+
+    // 最接近的 N 在 floor((目标 − a) / b) 和它加 1 之间（至少为 1）。
+    // The closest N is floor((target - a) / b) or one more (at least 1).
+    uint64_t lo = 1u;
+    if (TARGET > A * REQ_HZ)
     {
-      return 0u;
+      lo = (TARGET - A * REQ_HZ) / (B * REQ_HZ);
+      if (lo < 1u)
+      {
+        lo = 1u;
+      }
     }
-    const uint64_t A_HZ = static_cast<uint64_t>(timing.intercept_cycles_x10) * REQ_HZ;
-    if (PERIOD_X10_HZ <= A_HZ)
+
+    uint64_t best_n = 0u;
+    uint64_t best_cost = timing.fast_cycles_x10;
+    uint64_t best_err = AbsDiff(best_cost * REQ_HZ, TARGET);
+    for (const uint64_t N : {lo, lo + 1u})
     {
-      return 1u;
+      const uint64_t COST = A + B * N;
+      const uint64_t ERR = AbsDiff(COST * REQ_HZ, TARGET);
+      if (ERR < best_err || (ERR == best_err && COST > best_cost))
+      {
+        best_n = N;
+        best_cost = COST;
+        best_err = ERR;
+      }
     }
-    const uint64_t STEP_X10 =
-        (timing.step_cycles_x10 == 0u) ? 1u : timing.step_cycles_x10;
-    const uint64_t B_HZ = STEP_X10 * REQ_HZ;
-    const uint64_t N = (PERIOD_X10_HZ - A_HZ + B_HZ - 1u) / B_HZ;
-    if (N < 1u)
-    {
-      return 1u;
-    }
-    return (N >= UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(N);
+    return (best_n >= UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(best_n);
   }
 
   void Close() override
@@ -301,6 +314,11 @@ class SwdGeneralGPIO final : public Swd
   }
 
  private:
+  static constexpr uint64_t AbsDiff(uint64_t x, uint64_t y)
+  {
+    return x > y ? x - y : y - x;
+  }
+
   static inline uint8_t Parity32(uint32_t x)
   {
     x ^= x >> 16;
