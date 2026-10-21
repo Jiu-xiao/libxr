@@ -32,14 +32,16 @@ enum class SwdIoDriveMode : uint8_t
  *
  * 标定（DWT 周期计数）：固定几个 N，用 DWT_CYCCNT 分别测读数据相、写数据相和请求
  * 字节每个 SWCLK 周期的 CPU 周期数，按 a + b·N 对各路径一起拟合，得到 a 和 b 的典型
- * 值；c 是 N = 0 时各路径每周期周期数的典型值。SetClockHz 取周期数最接近请求周期的
- * 档位，所以实际时钟与请求值相差不超过半档（b / 2），可能略快也可能略慢。
+ * 值；c 是 N = 0 时各路径每周期周期数的典型值。SetClockHz 只在无延时路径不超速时
+ * 用它，否则在 N >= 1 中取周期数最接近请求周期的档位，所以实际时钟与请求值相差不超过
+ * 半档（b / 2），可能略快也可能略慢。
  * Calibration (DWT cycle counter): fix a few N and measure the CPU cycles per SWCLK
  * period of the read data phase, the write data phase and the request byte with
  * DWT_CYCCNT; fit a + b·N over all paths together for the typical a and b, and take c
- * as the typical cycles per period of the paths at N = 0. SetClockHz picks the step
- * whose cycles per period are closest to the requested period, so the clock is within
- * half a step (b / 2) of the request, slightly faster or slightly slower.
+ * as the typical cycles per period of the paths at N = 0. SetClockHz takes the path
+ * without delay only when it does not overshoot; otherwise it picks, among N >= 1, the
+ * step whose cycles per period are closest to the requested period, so the clock is
+ * within half a step (b / 2) of the request, slightly faster or slightly slower.
  *
  * 默认值是保守值（每次延时循环和每个周期 1 个 CPU 周期，截距 0）：未标定的平台上
  * 实际时钟通常明显慢于请求值。
@@ -147,13 +149,15 @@ class SwdGeneralGPIO final : public Swd
   /**
    * @brief 每个半周期的延时循环次数 / Delay-loop count per half period.
    *
-   * 候选档位是无延时路径（每周期 c）和 N >= 1（每周期 a + b·N），取每周期周期数最接近
-   * f_cpu / f 的一档；两档一样近时取较慢的一档。返回 0 表示无延时路径。只用整数运算，
-   * 不引入浮点库。
-   * The candidates are the path without delay (c per period) and N >= 1 (a + b·N per
-   * period); the one whose cycles per period are closest to f_cpu / f wins, and of two
-   * equally close ones the slower. 0 means the path without delay. Integer-only, so no
-   * floating-point helpers are pulled in.
+   * f >= f_cpu / c 时返回 0：无延时路径不会快于请求值。否则在 N >= 1（每周期 a + b·N）
+   * 中取每周期周期数最接近 f_cpu / f 的一档，两档一样近时取较慢的一档。无延时路径与
+   * N = 1 之间的间隔可能大于一档，所以只在它不超速时才用它。只用整数运算，不引入浮点库。
+   * Returns 0 when f >= f_cpu / c: the path without delay is then never faster than
+   * requested. Otherwise, among N >= 1 (a + b·N per period), the one whose cycles per
+   * period are closest to f_cpu / f wins, and of two equally close ones the slower. The
+   * gap between the path without delay and N = 1 can be wider than a step, so that path
+   * is used only when it does not overshoot. Integer-only, so no floating-point helpers
+   * are pulled in.
    *
    * @param cpu_hz CPU 主频（Hz），0 时返回 0 / CPU clock (Hz); 0 returns 0.
    * @param hz 请求的 SWCLK 频率（Hz） / Requested SWCLK frequency (Hz).
@@ -167,15 +171,20 @@ class SwdGeneralGPIO final : public Swd
     {
       return 0u;
     }
-    // 都乘以 hz 比较，避免周期取整：误差 = |每周期周期数 × hz − f_cpu|（单位 1/10
-    // 周期）。 Compare after multiplying by hz, so the period is never rounded: the error
-    // is |cycles per period x hz - f_cpu| (in tenths of a cycle).
+    // 都乘以 hz 比较，避免周期取整。误差 = |每周期周期数 × hz − f_cpu|，单位 1/10 周期。
+    // Compare after multiplying by hz, so the period is never rounded. The error is
+    // |cycles per period x hz - f_cpu|, in tenths of a cycle.
     const uint64_t TARGET = static_cast<uint64_t>(cpu_hz) * 10u;
     const uint64_t REQ_HZ = hz;
+    if (static_cast<uint64_t>(timing.fast_cycles_x10) * REQ_HZ >= TARGET)
+    {
+      return 0u;
+    }
+
     const uint64_t A = timing.intercept_cycles_x10;
     const uint64_t B = (timing.step_cycles_x10 == 0u) ? 1u : timing.step_cycles_x10;
 
-    // 最接近的 N 在 floor((目标 − a) / b) 和它加 1 之间（至少为 1）。
+    // 最接近的 N 是 floor((目标 − a) / b) 或它加 1（至少为 1）。
     // The closest N is floor((target - a) / b) or one more (at least 1).
     uint64_t lo = 1u;
     if (TARGET > A * REQ_HZ)
@@ -187,19 +196,13 @@ class SwdGeneralGPIO final : public Swd
       }
     }
 
-    uint64_t best_n = 0u;
-    uint64_t best_cost = timing.fast_cycles_x10;
-    uint64_t best_err = AbsDiff(best_cost * REQ_HZ, TARGET);
-    for (const uint64_t N : {lo, lo + 1u})
+    uint64_t best_n = lo;
+    const uint64_t LO_ERR = AbsDiff((A + B * lo) * REQ_HZ, TARGET);
+    const uint64_t NEXT_ERR = AbsDiff((A + B * (lo + 1u)) * REQ_HZ, TARGET);
+    // 一样近时取较慢的一档 / On a tie take the slower step.
+    if (NEXT_ERR <= LO_ERR)
     {
-      const uint64_t COST = A + B * N;
-      const uint64_t ERR = AbsDiff(COST * REQ_HZ, TARGET);
-      if (ERR < best_err || (ERR == best_err && COST > best_cost))
-      {
-        best_n = N;
-        best_cost = COST;
-        best_err = ERR;
-      }
+      best_n = lo + 1u;
     }
     return (best_n >= UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(best_n);
   }
