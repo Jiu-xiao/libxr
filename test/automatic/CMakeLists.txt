@@ -218,3 +218,10 @@ target_include_directories(
 )
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
+
+# SwdGeneralGPIO: the SWDIO level during idle cycles.
+add_executable(test_swd_general_gpio driver/debug/test_swd_general_gpio.cpp)
+target_link_libraries(test_swd_general_gpio PRIVATE xr)
+target_include_directories(test_swd_general_gpio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME swd_general_gpio COMMAND test_swd_general_gpio)
+set_tests_properties(swd_general_gpio PROPERTIES TIMEOUT 30)
