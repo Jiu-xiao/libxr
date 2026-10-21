@@ -198,9 +198,10 @@ void TestCommandRoundTrip()
   TEST_ASSERT(f.out.active);
 }
 
-/// Four commands in flight: the Step thread runs all of them ahead of the host. Their
-/// responses wait in staging slots and are submitted to the two IN slots as the host
-/// takes responses, in the order of the commands, without Step having to run again.
+/// Four commands in flight: the Step thread runs all of them ahead of the host. The first
+/// two responses go straight into the two IN slots; the other two wait in staging slots
+/// and are submitted as the host takes responses, in the order of the commands, without
+/// Step having to run again.
 void TestPipelineKeepsAdvertisedDepth()
 {
   FreshTimerList();
@@ -225,6 +226,92 @@ void TestPipelineKeepsAdvertisedDepth()
   TEST_ASSERT(!f.in.active);
   TEST_ASSERT(f.in.sent.size() == 4);
   TEST_ASSERT(f.out.active);
+}
+
+/// With an IN slot free and nothing staged, Step writes the response into the IN slot and
+/// submits it itself: it reaches the wire without the class service.
+void TestResponseNeedsNoClassService()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  f.handler = Callback<uint32_t>::Create([](bool, DapFixture*, uint32_t) {}, &f);
+  f.pool.SetControlHandler(f.handler);
+
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
+  TEST_ASSERT(f.in.Last().data[0] == INFO);
+  f.in.Complete();
+}
+
+/// Responses written into IN slots and staged ones interleave: they still go out in the
+/// order of the commands. PACKET_COUNT answers 3 bytes and PACKET_SIZE 4, so the lengths
+/// on the wire show the order.
+void TestDirectAndStagedResponsesKeepOrder()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  std::vector<size_t> expected;
+  auto send = [&](uint8_t id)
+  {
+    Send(f, {INFO, id});
+    expected.push_back(id == PACKET_COUNT_ID ? 3U : 4U);
+  };
+  // Two responses take both IN slots directly; the next two are staged.
+  send(PACKET_COUNT_ID);
+  send(PACKET_SIZE_ID);
+  send(PACKET_COUNT_ID);
+  send(PACKET_SIZE_ID);
+  TEST_ASSERT(f.in.starts.size() == 1);
+  // The host takes one; a staged response fills the slot. A new command meets a staged
+  // response still waiting and is staged behind it.
+  f.in.Complete();
+  send(PACKET_COUNT_ID);
+  while (f.in.active)
+  {
+    f.in.Complete();
+    Run(f);
+  }
+  // Everything drained: the next response goes straight into an IN slot again.
+  send(PACKET_SIZE_ID);
+  TEST_ASSERT(f.in.active);
+  f.in.Complete();
+
+  TEST_ASSERT(f.in.sent.size() == expected.size());
+  for (size_t i = 0; i < expected.size(); ++i)
+  {
+    TEST_ASSERT(f.in.sent[i].size() == expected[i]);
+  }
+}
+
+/// An unbind while Step holds an IN slot for a delayed response: the slot is given back,
+/// and after rebinding both IN slots are free.
+void TestUnbindWhileHoldingInSlot()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  f.out.HostSends({DELAY, 0x10, 0x27});  // 10000 us
+  std::thread dap_thread([&f]() { (void)f.dap.Step(1000); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  f.dap.UnbindEndpoints(f.pool, false);
+  dap_thread.join();
+  TEST_ASSERT(f.in.starts.empty());
+  // The application's loop steps again; unbound, Step gives back what it holds.
+  TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
+
+  f.dap.BindEndpoints(f.pool, 0, false);
+  Slot a, b;
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  f.in.ReleaseSlot(a, false);
+  f.in.ReleaseSlot(b, false);
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
+  f.in.Complete();
 }
 
 void TestDelayedCommand()
@@ -576,6 +663,9 @@ int main()
   // start a scheduler thread; the test drives every refresh itself.
   TestCommandRoundTrip();
   TestPipelineKeepsAdvertisedDepth();
+  TestResponseNeedsNoClassService();
+  TestDirectAndStagedResponsesKeepOrder();
+  TestUnbindWhileHoldingInSlot();
   TestDelayedCommand();
   TestBatchWithDelay();
   TestNextCommandReceivedDuringDelay();

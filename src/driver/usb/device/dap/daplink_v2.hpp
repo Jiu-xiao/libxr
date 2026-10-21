@@ -289,16 +289,24 @@ class DapLinkV2Class : public DeviceClass
       AbandonCurrent();
       return ErrorCode::OK;
     }
-    // 响应先写进响应池的暂存槽，不等主机取走前面的响应：SWD 继续往前执行，由 USB 侧在 IN
-    // 槽有空时把暂存的响应拷进去提交。暂存槽用完（客户端在途数超过通告值）时在这里等；命令
-    // 继续由本线程持有，超时返回后下一次 Step 接着等。
-    // The response is first written into a staging slot of the response pool and does not
-    // wait for the host to take earlier responses: SWD goes on executing, and the USB
-    // side copies the staged responses into an IN slot and submits them as slots come
-    // free. With the staging slots used up (a client with more in flight than advertised)
-    // wait here; the command stays with this thread and the next Step goes on waiting
-    // after a timeout.
-    while (cur_resp_ == SLOT_NONE)
+    // 没有暂存的响应在排队、又有空闲的 IN 槽时，响应直接写进 IN 槽，
+    // 由本线程提交，不经过类服务也不拷贝。否则响应先写进响应池的暂存槽，
+    // 不等主机取走前面的响应：SWD 继续往前执行，由 USB 侧在 IN 槽有空时
+    // 把暂存的响应拷进去提交。暂存槽用完（客户端在途数超过通告值）时在这里等；
+    // 命令继续由本线程持有，超时返回后下一次 Step 接着等。
+    // With no staged response waiting and an IN slot free, the response is written
+    // straight into the IN slot and submitted by this thread, without the class service
+    // and without a copy. Otherwise it is first written into a staging slot of the
+    // response pool and does not wait for the host to take earlier responses: SWD goes on
+    // executing, and the USB side copies the staged responses into an IN slot and submits
+    // them as slots come free. With the staging slots used up (a client with more in
+    // flight than advertised) wait here; the command stays with this thread and the next
+    // Step goes on waiting after a timeout.
+    if (cur_resp_ == SLOT_NONE && !cur_in_.Valid())
+    {
+      TakeInSlot();
+    }
+    while (cur_resp_ == SLOT_NONE && !cur_in_.Valid())
     {
       if (resp_pool_.Acquire(cur_resp_) == ErrorCode::OK)
       {
@@ -717,23 +725,70 @@ class DapLinkV2Class : public DeviceClass
       const ResponseSlot& response = resp_pool_.At(send_idx_);
       const size_t length = std::min<size_t>(response.len, slot.data.size_);
       Memory::FastCopy(slot.data.addr_, response.payload, length);
-      // 响应恰好等于 DAP 包长时主机读满 DAP 包长缓冲就结束，不补零长包；补了会留下一个
-      // 主机不取的零长包，占住 IN 槽，深流水下把命令流堵死。
-      // A response exactly as long as the DAP packet needs no ZLP: the host's
-      // DAP-packet-sized read completes when the buffer is full. A ZLP would stay armed,
-      // keeping an IN slot occupied, which stalls the command stream under a deep
-      // pipeline.
-      const size_t mps = ep_data_in_->MaxPacketSize();
-      const bool need_zlp =
-          (mps != 0U) && (length % mps == 0U) && (length < GetDapPacketSize());
-      const ErrorCode ec = ep_data_in_->Submit(slot, length, need_zlp, in_isr);
+      const ErrorCode ec =
+          ep_data_in_->Submit(slot, length, NeedZlp(*ep_data_in_, length), in_isr);
       if (ec != ErrorCode::OK && ec != ErrorCode::ABORTED)
       {
         ep_data_in_->ReleaseSlot(slot, in_isr);
       }
       resp_pool_.Release(send_idx_);
       send_idx_ = SLOT_NONE;
+      // 这条暂存响应已进端点队列：计数归零后 Step 可以直接提交而不越过它。
+      // This staged response is in the endpoint queue: once the count is zero Step may
+      // submit directly without overtaking it.
+      uint32_t staged = staged_outstanding_.load(std::memory_order_acquire);
+      while (staged != 0u && !staged_outstanding_.compare_exchange_weak(
+                                 staged, staged - 1u, std::memory_order_acq_rel,
+                                 std::memory_order_acquire))
+      {
+      }
       slot_sem_.PostFromCallback(in_isr);  // 一个暂存槽空出来了 / a staging slot is free
+    }
+  }
+
+  /// 响应恰好等于 DAP 包长时主机读满 DAP 包长缓冲就结束，不补零长包；补了会留下一个主机
+  /// 不取的零长包，占住 IN 槽，深流水下把命令流堵死。
+  /// A response exactly as long as the DAP packet needs no ZLP: the host's
+  /// DAP-packet-sized read completes when the buffer is full. A ZLP would stay armed,
+  /// keeping an IN slot occupied, which stalls the command stream under a deep pipeline.
+  bool NeedZlp(const Endpoint& ep, size_t length) const
+  {
+    const size_t mps = ep.MaxPacketSize();
+    return (mps != 0U) && (length % mps == 0U) && (length < GetDapPacketSize());
+  }
+
+  /// Step 线程：没有暂存响应在排队时借一个空闲 IN 槽来直接写响应；借不到就走暂存槽。
+  /// Step thread: borrow a free IN slot to write the response in place when no staged
+  /// response is waiting; without one the staging slot is used.
+  void TakeInSlot()
+  {
+    Endpoint* ep = ep_data_in_;
+    if (ep == nullptr || staged_outstanding_.load(std::memory_order_acquire) != 0u)
+    {
+      return;
+    }
+    Endpoint::Slot slot;
+    if (ep->AcquireSlot(slot, false) != ErrorCode::OK)
+    {
+      return;
+    }
+    cur_in_ = slot;
+    cur_in_ep_ = ep;
+  }
+
+  /// Step 线程：提交直接写好的 IN 槽。解绑作废的槽 Submit 得 ABORTED，已回到空闲。
+  /// Step thread: submit the IN slot written in place. A slot voided by an unbind gets
+  /// ABORTED from Submit and is free again.
+  void SubmitInSlot(uint16_t size)
+  {
+    Endpoint* ep = cur_in_ep_;
+    const Endpoint::Slot slot = cur_in_;
+    cur_in_ = {};
+    cur_in_ep_ = nullptr;
+    const ErrorCode ec = ep->Submit(slot, size, NeedZlp(*ep, size), false);
+    if (ec != ErrorCode::OK && ec != ErrorCode::ABORTED)
+    {
+      ep->ReleaseSlot(slot, false);
     }
   }
 
@@ -762,6 +817,7 @@ class DapLinkV2Class : public DeviceClass
     {
       resp_pool_.Release(slot);
     }
+    staged_outstanding_.store(0u, std::memory_order_release);
   }
 
   /// 字节流状态归零：放掉正在拼装的命令槽 / Reset the byte-stream state: give back the
@@ -1009,16 +1065,27 @@ class DapLinkV2Class : public DeviceClass
   }
 
   /// 执行手里的这条命令（Step
-  /// 线程）：命令槽和一个暂存响应槽都由本线程持有，到响应发布才放出。 延时命令（size 为
-  /// 0）一直持有它们，续做完成后才发布。 Execute the command in hand (Step thread): the
-  /// command slot and a staging response slot are held by this thread until the response
-  /// is published. A delayed command (size 0) keeps holding them and is published once it
-  /// is carried on to completion.
+  /// 线程）：命令槽和响应缓冲（IN 槽或暂存响应槽）都由本线程持有，到响应发布才放出。
+  /// 延时命令（size 为 0）一直持有它们，续做完成后才发布。 Execute the command in hand
+  /// (Step thread): the command slot and the response buffer (an IN slot or a staging
+  /// slot) are held by this thread until the response is published. A delayed command
+  /// (size 0) keeps holding them and is published once it is carried on to completion.
   void ExecuteCurrent(bool in_isr)
   {
     CommandSlot& command = cmd_pool_.At(cur_cmd_);
-    uint8_t* const resp = resp_pool_.At(cur_resp_).payload;
-    const uint16_t cap = RESP_SLOT_SIZE;
+    uint8_t* resp = nullptr;
+    uint16_t cap = RESP_SLOT_SIZE;
+    if (cur_in_.Valid())
+    {
+      // IN 槽不小于通告的 DAP 包长（见 BindEndpoints）。
+      // An IN slot is not smaller than the announced DAP packet size (see BindEndpoints).
+      resp = static_cast<uint8_t*>(cur_in_.data.addr_);
+      cap = static_cast<uint16_t>(std::min<size_t>(cur_in_.data.size_, RESP_SLOT_SIZE));
+    }
+    else
+    {
+      resp = resp_pool_.At(cur_resp_).payload;
+    }
     uint16_t size = 0;
     const auto result =
         ProcessOneCommand(in_isr, command.data, command.len, resp, cap, size);
@@ -1050,10 +1117,16 @@ class DapLinkV2Class : public DeviceClass
     return inited_ && cur_epoch_ == epoch_.load(std::memory_order_acquire);
   }
 
-  /// 放出本线程持有的命令槽和暂存响应槽（不发布） / Give back the command slot and the
-  /// staging response slot this thread holds (without publishing)
+  /// 放出本线程持有的命令槽和响应缓冲（不发布） / Give back the command slot and the
+  /// response buffer this thread holds (without publishing)
   void AbandonCurrent()
   {
+    if (cur_in_.Valid())
+    {
+      cur_in_ep_->ReleaseSlot(cur_in_, false);
+      cur_in_ = {};
+      cur_in_ep_ = nullptr;
+    }
     if (cur_resp_ != SLOT_NONE)
     {
       resp_pool_.Release(cur_resp_);
@@ -1066,10 +1139,13 @@ class DapLinkV2Class : public DeviceClass
     }
   }
 
-  /// 发布暂存的响应，放出命令槽，并让 USB 侧去提交给 IN
-  /// 槽；延时的响应在续做完成后也从这里 发布。 Publish the staged response, give back the
-  /// command slot and let the USB side submit it to an IN slot; a deferred response is
-  /// published here once its continuation completes.
+  /// 发布响应并放出命令槽：直接写在 IN 槽里的响应由本线程提交，
+  /// 暂存的响应交给 USB 侧提交；延时的响应在续做完成后也从这里发布。
+  /// 类服务随后处理被留住的包和补挂接收。
+  /// Publish the response and give back the command slot: a response written in an IN
+  /// slot is submitted by this thread, a staged one is left to the USB side; a deferred
+  /// response is published here once its continuation completes. The class service then
+  /// handles held packets and re-arms the receives.
   void CompleteResponse(uint16_t size, bool in_isr)
   {
     UNUSED(in_isr);
@@ -1087,9 +1163,17 @@ class DapLinkV2Class : public DeviceClass
       AbandonCurrent();
       return;
     }
-    resp_pool_.At(cur_resp_).len = size;
-    resp_pool_.Publish(cur_resp_);
-    cur_resp_ = SLOT_NONE;
+    if (cur_in_.Valid())
+    {
+      SubmitInSlot(size);
+    }
+    else
+    {
+      resp_pool_.At(cur_resp_).len = size;
+      staged_outstanding_.fetch_add(1u, std::memory_order_acq_rel);
+      resp_pool_.Publish(cur_resp_);
+      cur_resp_ = SLOT_NONE;
+    }
     cmd_pool_.Release(cur_cmd_);
     cur_cmd_ = SLOT_NONE;
     RequestClassService(false);
@@ -4754,6 +4838,14 @@ class DapLinkV2Class : public DeviceClass
       SLOT_NONE;  ///< Step 线程持有的暂存响应槽 / Staging slot the Step thread holds
   size_t send_idx_ = SLOT_NONE;  ///< USB 侧已取出、等 IN 槽的暂存响应 / Staged response
                                  ///< taken by the USB side, waiting for an IN slot
+  /// 已发布、还没进端点队列的暂存响应数：为 0 时 Step 才直接提交，响应顺序不变。
+  /// Staged responses published but not yet in the endpoint queue: Step submits directly
+  /// only when it is zero, so responses keep their order. Word-sized: some targets have
+  /// no byte atomics.
+  std::atomic<uint32_t> staged_outstanding_{0u};
+  Endpoint::Slot cur_in_{};        ///< Step 线程借来直接写响应的 IN 槽 / IN slot the Step
+                                   ///< thread borrowed to write the response in place
+  Endpoint* cur_in_ep_ = nullptr;  ///< cur_in_ 所属端点 / Endpoint cur_in_ belongs to
   /// 每发布一条命令发一次，Step() 在它上面等 / Posted per published command, Step() waits
   /// on it
   LibXR::Semaphore cmd_sem_{0};
