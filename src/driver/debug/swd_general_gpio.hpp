@@ -413,20 +413,36 @@ class SwdGeneralGPIO final : public Swd
     GenOneClkWithoutDelay();
   }
 
+  // 按字节收发的函数都展开成 8 位，不留逐位循环：循环的跳转目标落在哪里随代码布局变化，
+  // 在取指要等待的 Flash 上（例如 STM32F1 的 64 位预取行），跨行的跳转目标会让每一位多等
+  // 几个周期，同一份源码换个位置就快慢不同。
+  // The byte functions are unrolled into 8 bits with no per-bit loop: where a loop's
+  // branch target lands moves with the code layout, and on flash with fetch wait states
+  // (for example the 64-bit prefetch lines of the STM32F1) a target straddling a line
+  // costs every bit a few cycles, so the same source runs at different speeds depending
+  // on where it is placed.
   inline void WriteByteLSB(uint8_t b)
   {
-    for (uint32_t i = 0; i < BYTE_BITS; ++i)
-    {
-      WriteBit(((b >> i) & 0x1u) != 0u);
-    }
+    WriteBit((b & 0x01u) != 0u);
+    WriteBit((b & 0x02u) != 0u);
+    WriteBit((b & 0x04u) != 0u);
+    WriteBit((b & 0x08u) != 0u);
+    WriteBit((b & 0x10u) != 0u);
+    WriteBit((b & 0x20u) != 0u);
+    WriteBit((b & 0x40u) != 0u);
+    WriteBit((b & 0x80u) != 0u);
   }
 
   inline void WriteByteLSBWithoutDelay(uint8_t b)
   {
-    for (uint32_t i = 0; i < BYTE_BITS; ++i)
-    {
-      WriteBitWithoutDelay(((b >> i) & 0x1u) != 0u);
-    }
+    WriteBitWithoutDelay((b & 0x01u) != 0u);
+    WriteBitWithoutDelay((b & 0x02u) != 0u);
+    WriteBitWithoutDelay((b & 0x04u) != 0u);
+    WriteBitWithoutDelay((b & 0x08u) != 0u);
+    WriteBitWithoutDelay((b & 0x10u) != 0u);
+    WriteBitWithoutDelay((b & 0x20u) != 0u);
+    WriteBitWithoutDelay((b & 0x40u) != 0u);
+    WriteBitWithoutDelay((b & 0x80u) != 0u);
   }
 
   [[gnu::always_inline]] inline bool ReadBitAndClock()
@@ -450,13 +466,14 @@ class SwdGeneralGPIO final : public Swd
   inline uint8_t ReadByteLSB()
   {
     uint8_t v = 0u;
-    for (uint32_t i = 0; i < BYTE_BITS; ++i)
-    {
-      if (ReadBitAndClock())
-      {
-        v = static_cast<uint8_t>(v | (1u << i));
-      }
-    }
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x01u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x02u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x04u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x08u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x10u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x20u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x40u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x80u : 0u);
     return v;
   }
 
@@ -476,6 +493,28 @@ class SwdGeneralGPIO final : public Swd
 
   [[gnu::always_inline]] static inline void BusyLoop(uint32_t loops)
   {
+#if defined(__thumb2__)
+    // Thumb-2：两条 16 位指令的循环，.balign 8 让它落在同一个 64 位取指行里，含它的函数段
+    // 也因此按 8 字节对齐，每次迭代的周期数不再随代码布局变化（编译器生成的循环可能跨行，
+    // 每次迭代多等取指周期）。对齐填充的 nop 只在进入循环前执行一次。
+    // Thumb-2: a loop of two 16-bit instructions; .balign 8 keeps it inside one 64-bit
+    // fetch line and makes the section of the containing function 8-byte aligned, so
+    // the cycles per iteration no longer depend on code layout (a compiler-generated loop
+    // may straddle a line and wait for an extra fetch on every iteration). The alignment
+    // nops run once, before the loop.
+    if (loops == 0u)
+    {
+      return;
+    }
+    asm volatile(
+        ".balign 8\n"
+        "1:\n\t"
+        "subs %0, %0, #1\n\t"
+        "bne 1b\n"
+        : "+l"(loops)
+        :
+        : "cc");
+#else
     // 计数器放在寄存器里；atomic_signal_fence 只约束编译器、不产生指令，使空循环不会被
     // 优化掉。volatile 计数器会在每次迭代读写栈并带内存屏障，每次迭代更慢。
     // The counter lives in a register; atomic_signal_fence constrains only the compiler
@@ -486,6 +525,7 @@ class SwdGeneralGPIO final : public Swd
     {
       std::atomic_signal_fence(std::memory_order_seq_cst);
     }
+#endif
   }
 
  private:
