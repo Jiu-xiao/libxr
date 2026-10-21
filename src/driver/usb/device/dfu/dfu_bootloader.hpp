@@ -204,7 +204,7 @@ class DfuBootloaderBackend
       return DFUStatusCode::ERR_TARGET;
     }
     busy = HasPendingWrite();
-    poll_timeout_ms = busy ? download_.next_poll_timeout_ms : 0u;
+    poll_timeout_ms = busy ? RemainingWriteTime() : 0u;
     return download_.last_status;
   }
 
@@ -333,6 +333,7 @@ class DfuBootloaderBackend
     if (!job_state_.compare_exchange_strong(expected, RUNNING, std::memory_order_acq_rel))
       return false;
     DFUStatusCode result = DFUStatusCode::OK;
+    job_started_ms_ = static_cast<uint32_t>(Timebase::GetMilliseconds());
     if (job_.kind == WorkKind::WRITE)
     {
       if (!EnsureBlocksErased(job_.write.offset, job_.write.len))
@@ -342,6 +343,14 @@ class DfuBootloaderBackend
       else if (flash_.Write(image_offset_ + job_.write.offset,
                             {write_buffer_, job_.write.len}) != ErrorCode::OK)
         result = DFUStatusCode::ERR_PROG;
+      // 记下这类步骤的实测耗时，作为下一次报告的 poll timeout。
+      // Keep the measured duration of this kind of step for the next poll timeout.
+      uint32_t spent =
+          static_cast<uint32_t>(Timebase::GetMilliseconds()) - job_started_ms_;
+      spent = spent < MIN_WRITE_POLL_MS   ? MIN_WRITE_POLL_MS
+              : spent > MAX_WRITE_POLL_MS ? MAX_WRITE_POLL_MS
+                                          : spent;
+      (write_needs_erase_ ? measured_erase_write_ms_ : measured_write_ms_) = spent;
     }
     else
     {
@@ -491,23 +500,46 @@ class DfuBootloaderBackend
 
   bool HasPendingManifest() const { return manifest_.pending; }
 
-  // 为下一次 GETSTATUS 返回一个粗粒度的 host-visible poll timeout；
-  // 仍需擦除的块会比纯写入步骤报告更长的等待时间。
-  // Return a coarse host-visible poll timeout for the next GETSTATUS;
-  // blocks that still need erase are reported slower than pure program-only writes.
-  uint32_t ComputeWritePollTimeout(size_t offset, size_t len) const
+  // 下一次 GETSTATUS 报告的 poll timeout：同类写入步骤（要擦除 / 只编程）上一次实测
+  // 的耗时，还没有实测时用 25 / 10 ms。主机按它等待，一般一次 GETSTATUS 就能看到
+  // 写完。
+  // The poll timeout reported by the next GETSTATUS: the measured duration of the last
+  // write step of the same kind (with erase / program only), or 25 / 10 ms before one
+  // was measured. A host that waits for it usually sees the step done at the first
+  // GETSTATUS.
+  uint32_t ComputeWritePollTimeout(size_t offset, size_t len)
   {
     const size_t first_block = offset / erase_block_size_;
     const size_t last_block = (offset + len - 1u) / erase_block_size_;
+    write_needs_erase_ = false;
     for (size_t block = first_block; block <= last_block && block < erase_block_count_;
          ++block)
     {
       if (erased_blocks_[block] == 0u)
       {
-        return 25u;
+        write_needs_erase_ = true;
+        break;
       }
     }
-    return 10u;
+    return write_needs_erase_ ? measured_erase_write_ms_ : measured_write_ms_;
+  }
+
+  // 写入步骤还剩的估计时间：步骤开始前为完整估计，开始后为估计减去已用时间，至少
+  // MIN_REMAINING_POLL_MS。 / Estimated time left for the write step: the whole estimate
+  // before the step starts, the estimate minus the time spent once it runs, at least
+  // MIN_REMAINING_POLL_MS.
+  uint32_t RemainingWriteTime() const
+  {
+    const uint32_t estimate = download_.next_poll_timeout_ms;
+    const uint32_t state = job_state_.load(std::memory_order_acquire) & ~CANCELLED;
+    if (state != RUNNING && state != DONE)
+    {
+      return estimate;
+    }
+    const uint32_t spent =
+        static_cast<uint32_t>(Timebase::GetMilliseconds()) - job_started_ms_;
+    return spent + MIN_REMAINING_POLL_MS < estimate ? estimate - spent
+                                                    : MIN_REMAINING_POLL_MS;
   }
 
   // 执行一次延迟写入步骤：
@@ -726,6 +758,13 @@ class DfuBootloaderBackend
     size_t image_size = 0;
   } job_;
   std::atomic<uint32_t> job_state_{EMPTY};
+  static constexpr uint32_t MIN_WRITE_POLL_MS = 10u;    ///< 报告的下限 / Lower bound
+  static constexpr uint32_t MAX_WRITE_POLL_MS = 1000u;  ///< 报告的上限 / Upper bound
+  static constexpr uint32_t MIN_REMAINING_POLL_MS = 5u;
+  uint32_t job_started_ms_ = 0u;    ///< 当前步骤开始时刻 / Start of the current step
+  bool write_needs_erase_ = false;  ///< 当前写入步骤要擦除 / Current step erases
+  uint32_t measured_erase_write_ms_ = 25u;  ///< 上次擦除+编程耗时 / Last erase+program
+  uint32_t measured_write_ms_ = 10u;        ///< 上次只编程耗时 / Last program-only step
   DFUStatusCode job_result_ = DFUStatusCode::OK;
   std::atomic<size_t> published_image_size_{0};
   std::atomic<uint32_t> launch_request_{0};
@@ -1164,9 +1203,9 @@ class DFUClass : public DfuInterfaceClassBase
     }
     if (state_ == DFUState::DFU_DNBUSY || state_ == DFUState::DFU_MANIFEST)
     {
-      poll_deadline_ =
-          static_cast<uint32_t>(Timebase::GetMilliseconds()) + poll_timeout_ms_;
-      poll_waiting_ = true;
+      // 期限已在应答时设好；主机确认了应答，后端才开始这一步的工作。
+      // The deadline was set with the answer; the backend starts the step's work once
+      // the host has acknowledged it.
       if constexpr (requires(Backend& b) { b.AllowPendingWork(); })
         backend_.AllowPendingWork();
     }
@@ -1293,6 +1332,18 @@ class DFUClass : public DfuInterfaceClassBase
   ErrorCode HandleGetStatus(ControlTransferResult& result)
   {
     AdvanceStateForStatusRead();
+    if (state_ == DFUState::DFU_DNBUSY || state_ == DFUState::DFU_MANIFEST)
+    {
+      // 等待从应答交出时算起，并少算 1 ms 抵消毫秒取整：按 bwPollTimeout 等待的主机
+      // 不会早于期限。状态阶段的完成中断可能因 flash 擦写关中断而推迟，不能从那里算。
+      // The wait counts from handing over this answer, 1 ms short to absorb the
+      // millisecond rounding, so a host that waits bwPollTimeout never comes early.
+      // The status stage can complete late while flash work runs with interrupts off,
+      // so the wait must not count from there.
+      const uint32_t wait = poll_timeout_ms_ > 0u ? poll_timeout_ms_ - 1u : 0u;
+      poll_deadline_ = static_cast<uint32_t>(Timebase::GetMilliseconds()) + wait;
+      poll_waiting_ = true;
+    }
     status_response_.bStatus = static_cast<uint8_t>(status_);
     status_response_.SetPollTimeout(poll_timeout_ms_);
     status_response_.bState = static_cast<uint8_t>(state_);

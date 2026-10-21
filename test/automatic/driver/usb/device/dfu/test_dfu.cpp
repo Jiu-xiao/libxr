@@ -17,6 +17,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 #include "device_composition.hpp"
 #include "dfu_bootloader.hpp"
@@ -95,6 +96,7 @@ class TestBoot : public BootClass
   using DFUClass<DfuBootloaderBackend, 256>::OnClassData;
   using DFUClass<DfuBootloaderBackend, 256>::OnClassInDataStatusComplete;
   using DFUClass<DfuBootloaderBackend, 256>::OnClassRequest;
+  using DFUClass<DfuBootloaderBackend, 256>::OnControlRequest;
   using DFUClass<DfuBootloaderBackend, 256>::UnbindEndpoints;
   using ControlTransferResult = DeviceClass::ControlTransferResult;
 };
@@ -265,6 +267,80 @@ void TestBootloaderDownload()
   boot.UnbindEndpoints(f.pool, false);
 }
 
+/// While a block is written the host must wait bwPollTimeout before the next GETSTATUS.
+/// That wait counts from the GETSTATUS answer, not from its status stage: on hardware the
+/// status-stage interrupt can come late while flash work runs with interrupts off, and a
+/// host that waited exactly bwPollTimeout was stalled. A GETSTATUS that really comes
+/// early is still stalled (DFU 1.1, dfuDNBUSY). The reported timeout follows the measured
+/// duration of the last write step of the same kind.
+void TestPollWaitCountsFromTheAnswer()
+{
+  FreshTimerList();
+  BootFixture f;
+  TestBoot& boot = f.boot;
+  boot.BindEndpoints(f.pool, 0, false);
+
+  TestBoot::ControlTransferResult result;
+  auto ask = [&](uint8_t req, uint16_t val, uint16_t len)
+  {
+    result.write_data = {};
+    return boot.OnClassRequest(false, req, val, len, 0, result);
+  };
+  // GETSTATUS through the class's control entry, which applies the poll deadline.
+  auto get_status = [&]()
+  {
+    result.write_data = {};
+    const SetupPacket setup{0xA1, DFU_GETSTATUS, 0, 0, 6};
+    return boot.OnControlRequest(false, setup, result);
+  };
+  auto poll_ms = [&]()
+  {
+    const uint8_t* s = Bytes(result.write_data);
+    return static_cast<uint32_t>(s[1]) | static_cast<uint32_t>(s[2]) << 8 |
+           static_cast<uint32_t>(s[3]) << 16;
+  };
+  std::array<uint8_t, 256> payload{};
+  payload.fill(0xA5);
+  auto download_block0 = [&]()
+  {
+    TEST_ASSERT(ask(DFU_DNLOAD, 0, 256) == ErrorCode::OK);
+    ConstRawData data{payload.data(), payload.size()};
+    TEST_ASSERT(boot.OnClassData(false, DFU_DNLOAD, data) == ErrorCode::OK);
+    TEST_ASSERT(get_status() == ErrorCode::OK);
+    TEST_ASSERT(Bytes(result.write_data)[4] ==
+                static_cast<uint8_t>(DFUState::DFU_DNBUSY));
+    return poll_ms();
+  };
+  // The status stage completes late (as when flash work blocks the interrupt), then the
+  // host comes back exactly bwPollTimeout after the answer: not stalled, and done.
+  auto late_status_stage = [&](uint32_t reported)
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(reported / 2));
+    boot.OnClassInDataStatusComplete(false, DFU_GETSTATUS);
+    Timer::Refresh();  // the write step runs
+    std::this_thread::sleep_for(std::chrono::milliseconds(reported - reported / 2));
+    TEST_ASSERT(get_status() == ErrorCode::OK);
+    TEST_ASSERT(Bytes(result.write_data)[4] ==
+                static_cast<uint8_t>(DFUState::DFU_DNLOAD_IDLE));
+  };
+
+  // Before any measurement a step that erases reports 25 ms.
+  TEST_ASSERT(download_block0() == 25u);
+  // Coming back at once is too early: stalled, the device is in dfuERROR.
+  TEST_ASSERT(get_status() != ErrorCode::OK);
+  TEST_ASSERT(ask(DFU_CLRSTATUS, 0, 0) == ErrorCode::OK);
+
+  TEST_ASSERT(download_block0() == 25u);
+  late_status_stage(25u);
+
+  // After an abort the block needs its erase again, now reported with the measured
+  // duration (instant on the RAM flash, so the 10 ms floor).
+  TEST_ASSERT(ask(0x06 /* ABORT */, 0, 0) == ErrorCode::OK);
+  TEST_ASSERT(download_block0() == 10u);
+  late_status_stage(10u);
+  boot.UnbindEndpoints(f.pool, false);
+}
+
 uint16_t LoadU16(const uint8_t* p)
 {
   uint16_t value = 0;
@@ -280,8 +356,8 @@ void TestWinUsbSetComesFromComposition()
 {
   using Device = WinUsbMsOs20::DeviceScopedWinUsbMsOs20DescSet<
       WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
-  using Property =
-      WinUsbMsOs20::DeviceInterfaceGuidsRegProperty<WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
+  using Property = WinUsbMsOs20::DeviceInterfaceGuidsRegProperty<
+      WinUsbMsOs20::GUID_MULTI_SZ_UTF16_BYTES>;
 
   FreshTimerList();
   BootFixture f;
@@ -315,6 +391,7 @@ int main()
 {
   TestRuntimeDetach();
   TestBootloaderDownload();
+  TestPollWaitCountsFromTheAnswer();
   TestWinUsbSetComesFromComposition();
   std::puts(
       "DFU classes: status stage in the core, DNLOAD data stage, capacity and WinUSB "
