@@ -198,9 +198,10 @@ void TestCommandRoundTrip()
   TEST_ASSERT(f.out.active);
 }
 
-/// Four commands in flight: the Step thread runs all of them ahead of the host. Their
-/// responses wait in staging slots and are submitted to the two IN slots as the host
-/// takes responses, in the order of the commands, without Step having to run again.
+/// Four commands in flight: the Step thread runs all of them ahead of the host. The first
+/// two responses go straight into the two IN slots; the other two wait in staging slots
+/// and are submitted as the host takes responses, in the order of the commands, without
+/// Step having to run again.
 void TestPipelineKeepsAdvertisedDepth()
 {
   FreshTimerList();
@@ -225,6 +226,92 @@ void TestPipelineKeepsAdvertisedDepth()
   TEST_ASSERT(!f.in.active);
   TEST_ASSERT(f.in.sent.size() == 4);
   TEST_ASSERT(f.out.active);
+}
+
+/// With an IN slot free and nothing staged, Step writes the response into the IN slot and
+/// submits it itself: it reaches the wire without the class service.
+void TestResponseNeedsNoClassService()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  f.handler = Callback<uint32_t>::Create([](bool, DapFixture*, uint32_t) {}, &f);
+  f.pool.SetControlHandler(f.handler);
+
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
+  TEST_ASSERT(f.in.Last().data[0] == INFO);
+  f.in.Complete();
+}
+
+/// Responses written into IN slots and staged ones interleave: they still go out in the
+/// order of the commands. PACKET_COUNT answers 3 bytes and PACKET_SIZE 4, so the lengths
+/// on the wire show the order.
+void TestDirectAndStagedResponsesKeepOrder()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  std::vector<size_t> expected;
+  auto send = [&](uint8_t id)
+  {
+    Send(f, {INFO, id});
+    expected.push_back(id == PACKET_COUNT_ID ? 3U : 4U);
+  };
+  // Two responses take both IN slots directly; the next two are staged.
+  send(PACKET_COUNT_ID);
+  send(PACKET_SIZE_ID);
+  send(PACKET_COUNT_ID);
+  send(PACKET_SIZE_ID);
+  TEST_ASSERT(f.in.starts.size() == 1);
+  // The host takes one; a staged response fills the slot. A new command meets a staged
+  // response still waiting and is staged behind it.
+  f.in.Complete();
+  send(PACKET_COUNT_ID);
+  while (f.in.active)
+  {
+    f.in.Complete();
+    Run(f);
+  }
+  // Everything drained: the next response goes straight into an IN slot again.
+  send(PACKET_SIZE_ID);
+  TEST_ASSERT(f.in.active);
+  f.in.Complete();
+
+  TEST_ASSERT(f.in.sent.size() == expected.size());
+  for (size_t i = 0; i < expected.size(); ++i)
+  {
+    TEST_ASSERT(f.in.sent[i].size() == expected[i]);
+  }
+}
+
+/// An unbind while Step holds an IN slot for a delayed response: the slot is given back,
+/// and after rebinding both IN slots are free.
+void TestUnbindWhileHoldingInSlot()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+
+  f.out.HostSends({DELAY, 0x10, 0x27});  // 10000 us
+  std::thread dap_thread([&f]() { (void)f.dap.Step(1000); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  f.dap.UnbindEndpoints(f.pool, false);
+  dap_thread.join();
+  TEST_ASSERT(f.in.starts.empty());
+  // The application's loop steps again; unbound, Step gives back what it holds.
+  TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
+
+  f.dap.BindEndpoints(f.pool, 0, false);
+  Slot a, b;
+  TEST_ASSERT(f.in.AcquireSlot(a, false) == ErrorCode::OK);
+  TEST_ASSERT(f.in.AcquireSlot(b, false) == ErrorCode::OK);
+  f.in.ReleaseSlot(a, false);
+  f.in.ReleaseSlot(b, false);
+  Send(f, {INFO, PACKET_SIZE_ID});
+  TEST_ASSERT(f.in.active && f.in.Last().length == 4);
+  f.in.Complete();
 }
 
 void TestDelayedCommand()
@@ -259,8 +346,9 @@ void TestBatchWithDelay()
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
 
-  // QUEUE_COMMANDS: enqueue two commands - DAP_Info and a 2 ms DAP_Delay. The wire format
-  // is plain concatenation (each command's length follows from its ID, no prefix).
+  // QUEUE_COMMANDS with two commands - DAP_Info and a 2 ms DAP_Delay. The wire format is
+  // plain concatenation (each command's length follows from its ID, no prefix). The
+  // packet runs as EXECUTE_COMMANDS, as in the CMSIS-DAP reference implementation.
   std::vector<uint8_t> queue{
       static_cast<uint8_t>(CommandId::QUEUE_COMMANDS),
       2u,
@@ -270,27 +358,22 @@ void TestBatchWithDelay()
       0xD0,
       0x07,  // 2000 us little-endian
   };
+  // The delay inside the batch makes Step sleep until it is due, and the whole response
+  // arrives at once: [EXECUTE, count, INFO response, DELAY response], with no second
+  // stray response.
   Host(f, queue);
-  TEST_ASSERT(
-      f.in.Last().data ==
-      std::vector<uint8_t>({static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 0x00}));
-  f.in.Complete();
-
-  // EXECUTE_COMMANDS: the delay inside the batch makes Step sleep until it is due, and
-  // the whole batch response arrives at once: [EXECUTE, INFO response, DELAY response],
-  // with no second stray response.
-  Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS)});
   TEST_ASSERT(f.in.active);
   const auto& batch = f.in.Last().data;
-  // INFO response: [INFO, len=7, "XRobot" + NUL], 9 bytes total (batch [1..9]); the DELAY
-  // response [DELAY, 0x00] follows at [10..11], batch length 12.
+  // INFO response: [INFO, len=7, "XRobot" + NUL], 9 bytes total (batch [2..10]); the DELAY
+  // response [DELAY, 0x00] follows at [11..12], batch length 13.
   TEST_ASSERT(batch[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
-  TEST_ASSERT(batch[1] == static_cast<uint8_t>(CommandId::INFO));
-  TEST_ASSERT(batch[2] == 7U);    // "XRobot" incl. NUL
-  TEST_ASSERT(batch[9] == 0x00);  // NUL of "XRobot"
-  TEST_ASSERT(batch[10] == DELAY);
-  TEST_ASSERT(batch[11] == 0x00);  // DAP_OK
-  TEST_ASSERT(f.in.Last().length == 12U);
+  TEST_ASSERT(batch[1] == 2U);  // number of commands
+  TEST_ASSERT(batch[2] == static_cast<uint8_t>(CommandId::INFO));
+  TEST_ASSERT(batch[3] == 7U);     // "XRobot" incl. NUL
+  TEST_ASSERT(batch[10] == 0x00);  // NUL of "XRobot"
+  TEST_ASSERT(batch[11] == DELAY);
+  TEST_ASSERT(batch[12] == 0x00);  // DAP_OK
+  TEST_ASSERT(f.in.Last().length == 13U);
   f.in.Complete();
   TEST_ASSERT(f.out.active);
 }
@@ -376,7 +459,7 @@ void TestCommandOnPacketBoundaryEndsWithoutZlp()
   Host(f, std::vector<uint8_t>(queue.begin() + 64, queue.end()));
   // The command is complete after the second whole packet: it answers.
   TEST_ASSERT(f.in.active);
-  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::QUEUE_COMMANDS));
+  TEST_ASSERT(f.in.Last().data[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
 }
 
 /// The host pads its transfer with zeros to the DAP packet size: the padding is not taken
@@ -432,22 +515,59 @@ void TestTransferAbortHasNoResponse()
   f.in.Complete();
 }
 
-/// The commands carried by EXECUTE_COMMANDS run together with the queued ones.
-void TestExecuteCommandsWithInlineCommands()
+/// Every QUEUE_COMMANDS or EXECUTE_COMMANDS packet runs its own commands and answers
+/// [EXECUTE, count, responses...]; nothing carries over to the next packet.
+void TestQueueAndExecuteAnswerPerPacket()
 {
   FreshTimerList();
   DapFixture f;
   f.dap.BindEndpoints(f.pool, 0, false);
+  const uint8_t EXECUTE = static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS);
 
   Send(f, {static_cast<uint8_t>(CommandId::QUEUE_COMMANDS), 1, INFO, PACKET_COUNT_ID});
+  TEST_ASSERT(f.in.active);
+  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({EXECUTE, 1, INFO, 1, 0x04}));
   f.in.Complete();
-  Send(f, {static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS), 1, INFO, PACKET_SIZE_ID});
+
+  Send(f, {EXECUTE, 2, INFO, PACKET_COUNT_ID, INFO, PACKET_SIZE_ID});
   TEST_ASSERT(f.in.active);
   const auto& batch = f.in.Last().data;
-  TEST_ASSERT(batch[0] == static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS));
-  // The queued PACKET_COUNT answer first, then the inline PACKET_SIZE answer.
-  TEST_ASSERT(batch[1] == INFO && batch[2] == 1 && batch[3] == 0x04);
-  TEST_ASSERT(batch[4] == INFO && batch[5] == 2);
+  TEST_ASSERT(f.in.Last().length == 9U);
+  TEST_ASSERT(batch[0] == EXECUTE && batch[1] == 2);
+  TEST_ASSERT(batch[2] == INFO && batch[3] == 1 && batch[4] == 0x04);
+  TEST_ASSERT(batch[5] == INFO && batch[6] == 2);
+  f.in.Complete();
+
+  // A packet without the command count is malformed.
+  Send(f, {EXECUTE});
+  TEST_ASSERT(f.in.active);
+  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({EXECUTE, 0xFF}));
+  f.in.Complete();
+}
+
+/// A batch resumed after a delay that then runs out of response space answers DAP_ERROR.
+void TestResumedBatchOverflowAnswersError()
+{
+  FreshTimerList();
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  const uint8_t EXECUTE = static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS);
+
+  // A 1 ms delay, then 120 DAP_Info(vendor) answers of 9 bytes: more than one response.
+  std::vector<uint8_t> req{EXECUTE, 121u, DELAY, 0xE8, 0x03};
+  for (unsigned i = 0; i < 120; ++i)
+  {
+    req.push_back(INFO);
+    req.push_back(static_cast<uint8_t>(InfoId::VENDOR));
+  }
+  // The host writes it in endpoint packets.
+  for (size_t off = 0; off < req.size(); off += 64)
+  {
+    const size_t end = std::min(req.size(), off + 64);
+    Host(f, std::vector<uint8_t>(req.begin() + off, req.begin() + end));
+  }
+  TEST_ASSERT(f.in.active);
+  TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({EXECUTE, 0xFF}));
   f.in.Complete();
 }
 
@@ -576,6 +696,9 @@ int main()
   // start a scheduler thread; the test drives every refresh itself.
   TestCommandRoundTrip();
   TestPipelineKeepsAdvertisedDepth();
+  TestResponseNeedsNoClassService();
+  TestDirectAndStagedResponsesKeepOrder();
+  TestUnbindWhileHoldingInSlot();
   TestDelayedCommand();
   TestBatchWithDelay();
   TestNextCommandReceivedDuringDelay();
@@ -583,7 +706,8 @@ int main()
   TestCommandOnPacketBoundaryEndsWithoutZlp();
   TestZeroPaddedTransferIsDropped();
   TestTransferAbortHasNoResponse();
-  TestExecuteCommandsWithInlineCommands();
+  TestQueueAndExecuteAnswerPerPacket();
+  TestResumedBatchOverflowAnswersError();
   TestPaddedRequestsAndAFifthCommandDrain();
   TestStandaloneDeviceUsesDeviceLevelWinUsbSet();
   TestCompositeDeviceUsesFunctionSubsets();

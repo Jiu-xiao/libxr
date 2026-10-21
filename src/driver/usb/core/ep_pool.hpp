@@ -132,15 +132,15 @@ class EndpointPool
   class HardwareScope
   {
    public:
-    explicit HardwareScope(EndpointPool* pool) : pool_(pool)
+    [[gnu::always_inline]] explicit HardwareScope(EndpointPool* pool) : pool_(pool)
     {
       if (pool_ && pool_->hardware_enter_)
         token_ = pool_->hardware_enter_(pool_->hardware_context_);
     }
-    ~HardwareScope() { Release(); }
+    [[gnu::always_inline]] ~HardwareScope() { Release(); }
     HardwareScope(const HardwareScope&) = delete;
     HardwareScope& operator=(const HardwareScope&) = delete;
-    void Release()
+    [[gnu::always_inline]] void Release()
     {
       if (pool_ && pool_->hardware_leave_)
         pool_->hardware_leave_(pool_->hardware_context_, token_);
@@ -202,7 +202,7 @@ class EndpointPool
     control_pending_.fetch_or(events, std::memory_order_release);
   }
   void PostControl(uint32_t events, bool in_isr);
-  bool HasPendingControl(uint32_t mask = UINT32_MAX) const
+  [[gnu::always_inline]] bool HasPendingControl(uint32_t mask = UINT32_MAX) const
   {
     return (control_pending_.load(std::memory_order_acquire) & mask) != 0U;
   }
@@ -212,7 +212,7 @@ class EndpointPool
   {
     return (endpoint_pending_.fetch_and(~bit, std::memory_order_acq_rel) & bit) != 0U;
   }
-  void NotifyEndpoint(uint32_t bit, bool in_isr)
+  [[gnu::always_inline]] void NotifyEndpoint(uint32_t bit, bool in_isr)
   {
     endpoint_pending_.fetch_or(bit, std::memory_order_release);
     PostControl(ENDPOINT_EVENT, in_isr);
@@ -220,7 +220,7 @@ class EndpointPool
   /// Owner: make every endpoint recheck its queue after a start gate opened.
   void KickEndpoints(bool in_isr);
   /// Owner: whether an endpoint may start hardware now.
-  bool CanStart(bool ep0) const
+  [[gnu::always_inline]] bool CanStart(bool ep0) const
   {
     return !planning_ && !suspended_ && !lifecycle_hold_ &&
            !HasPendingControl(LIFECYCLE_EVENTS) && (ep0 || data_enabled_);
@@ -315,5 +315,25 @@ class EndpointPool
   Endpoint* ep0_in_ = nullptr;   ///< 端点0 IN对象 / Endpoint 0 IN pointer
   Endpoint* ep0_out_ = nullptr;  ///< 端点0 OUT对象 / Endpoint 0 OUT pointer
 };
+
+// Endpoint helpers on the request path that need the pool; ep.cpp inlines them.
+inline bool Endpoint::CanStart() const
+{
+  return pool_ == nullptr || pool_->CanStart(number_ == EPNumber::EP0);
+}
+
+inline void Endpoint::NotifyOwner(bool in_isr)
+{
+  if (pool_ != nullptr) pool_->NotifyEndpoint(pending_bit_, in_isr);
+}
+
+inline void Endpoint::NotifyQueued(bool in_isr)
+{
+  // Pairs with the fence in Service: either this sees servicing_ cleared and notifies,
+  // or the owner's StartNext sees the request just queued.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  if (servicing_.load(std::memory_order_relaxed) != 0U) return;
+  NotifyOwner(in_isr);
+}
 
 }  // namespace LibXR::USB

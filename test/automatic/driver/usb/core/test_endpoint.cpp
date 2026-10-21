@@ -445,6 +445,39 @@ void TestOutLease()
   TEST_ASSERT(f.out.AcquireSlot(none, false) == ErrorCode::STATE_ERR);
 }
 
+/// A request queued from the endpoint's own completion callback is started by the
+/// StartNext that follows the callback; it posts no notification of its own.
+void TestQueueFromOwnCallbackPostsNothing()
+{
+  struct Context
+  {
+    Fixture* f;
+    unsigned calls = 0;
+    bool posted = true;
+  };
+  Fixture f;
+  Context context{&f};
+  f.out.SetOnComplete(Callback<const Completion&>::Create(
+      [](bool in_isr, Context* self, const Completion& completion)
+      {
+        ++self->calls;
+        TEST_ASSERT(self->f->out.ReturnSlot(completion.slot, in_isr) == ErrorCode::OK);
+        self->posted = self->f->pool.HasPendingControl(EndpointPool::ENDPOINT_EVENT);
+      },
+      &context));
+  TEST_ASSERT(f.out.Configure({Direction::OUT, Type::BULK, 64}, false) == ErrorCode::OK);
+  // One request only: the early start finds nothing queued, so the returned slot is
+  // started after the callback.
+  TEST_ASSERT(f.out.Receive(64, false) == ErrorCode::OK);
+  TEST_ASSERT(f.out.starts.size() == 1);
+  f.out.HostSends(Bytes(10, 1));
+  TEST_ASSERT(context.calls == 1 && !context.posted);
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 2);
+  f.out.HostSends(Bytes(64, 2));
+  TEST_ASSERT(context.calls == 2 && !context.posted);
+  TEST_ASSERT(f.out.active && f.out.starts.size() == 3);
+}
+
 void TestCloseMakesLentSlotsStale()
 {
   Fixture f;
@@ -1447,6 +1480,7 @@ int main()
   TestInBorrowOrder();
   TestZeroLengthTailAndShort();
   TestOutLease();
+  TestQueueFromOwnCallbackPostsNothing();
   TestCloseMakesLentSlotsStale();
   TestCloseWithPendingStop();
   TestLateCompletionDropped();

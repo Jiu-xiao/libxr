@@ -22,37 +22,7 @@ Endpoint::Endpoint(EPNumber number, Direction direction, RawData slots,
   REQUIRE(slot_size_ != 0U);
 }
 
-uint32_t Endpoint::Enqueue(uint32_t word, uint8_t index)
-{
-  const uint8_t other = index ^ 1U;
-  const uint8_t head = SlotOf(word, other) == QUEUED ? other : index;
-  word = WithSlot(word, index, QUEUED);
-  return head == 1U ? (word | HEAD_BIT) : (word & ~HEAD_BIT);
-}
-
-RawData Endpoint::SlotData(uint8_t index, size_t capacity) const
-{
-  return {static_cast<uint8_t*>(memory_.addr_) + index * slot_size_, capacity};
-}
-
 bool Endpoint::IsPlanning() const { return pool_ != nullptr && pool_->IsPlanning(); }
-
-bool Endpoint::CanStart() const
-{
-  return pool_ == nullptr || pool_->CanStart(number_ == EPNumber::EP0);
-}
-
-void Endpoint::NotifyOwner(bool in_isr)
-{
-  if (pool_ != nullptr) pool_->NotifyEndpoint(pending_bit_, in_isr);
-}
-
-uint32_t Endpoint::NextTag(uint8_t index)
-{
-  sequence_ = (sequence_ + 1U) & 0x3FFFFFFFU;
-  if (sequence_ == 0U) sequence_ = 1U;
-  return (sequence_ << 2U) | index;
-}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -378,11 +348,16 @@ void Endpoint::Service(bool in_isr)
   {
     // On the normal path the next queued request starts before the completion callback
     // runs, so the callback's work does not delay the wire.
+    servicing_.store(1U, std::memory_order_relaxed);
     start_before_deliver_ = true;
     RetireMailbox(in_isr);
     start_before_deliver_ = false;
     if (stopping_ && stop_confirmed_.load(std::memory_order_acquire) != 0U)
       FinishStop(in_isr);
+    // Requests queued since servicing_ was set (often by the callback) skipped their
+    // notification; StartNext picks them up. Pairs with the fence in NotifyQueued.
+    servicing_.store(0U, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
     StartNext(in_isr);
     // Work posted for this endpoint meanwhile (often by its own callback) is done here.
   } while (pool_ != nullptr && pool_->TakeEndpointBit(pending_bit_));
@@ -650,7 +625,7 @@ ErrorCode Endpoint::Submit(const Slot& slot, size_t length, bool zlp, bool in_is
                                     std::memory_order_acquire))
       break;
   } while (true);
-  NotifyOwner(in_isr);
+  NotifyQueued(in_isr);
   return ErrorCode::OK;
 }
 
@@ -671,7 +646,7 @@ ErrorCode Endpoint::SubmitZeroLength(bool in_isr)
     next = old | ZLP_QUEUED_BIT;
   } while (!word_.compare_exchange_weak(old, next, std::memory_order_acq_rel,
                                         std::memory_order_acquire));
-  NotifyOwner(in_isr);
+  NotifyQueued(in_isr);
   return ErrorCode::OK;
 }
 
@@ -726,7 +701,7 @@ ErrorCode Endpoint::Receive(size_t bytes, bool in_isr)
                                     std::memory_order_acquire))
       break;
   } while (true);
-  NotifyOwner(in_isr);
+  NotifyQueued(in_isr);
   return ErrorCode::OK;
 }
 
@@ -754,7 +729,7 @@ ErrorCode Endpoint::ReturnSlot(const Slot& slot, bool in_isr)
                                     std::memory_order_acquire))
       break;
   } while (true);
-  NotifyOwner(in_isr);
+  NotifyQueued(in_isr);
   return ErrorCode::OK;
 }
 
@@ -850,7 +825,7 @@ ErrorCode Endpoint::Write(ConstRawData data, bool zlp, bool in_isr)
     if (copy_offset_ == copy_size_) break;
   }
   const ErrorCode result = PublishCopy(order, count, claimed);
-  if (result == ErrorCode::OK) NotifyOwner(in_isr);
+  if (result == ErrorCode::OK) NotifyQueued(in_isr);
   return result;
 }
 
@@ -872,7 +847,7 @@ ErrorCode Endpoint::Read(RawData buffer, bool in_isr)
   const uint8_t index = (claimed & 1U) ? 0U : 1U;
   meta_[index] = {CopyReadArm(capacity, packet), false};
   const ErrorCode result = PublishCopy(&index, 1U, claimed);
-  if (result == ErrorCode::OK) NotifyOwner(in_isr);
+  if (result == ErrorCode::OK) NotifyQueued(in_isr);
   return result;
 }
 
