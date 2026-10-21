@@ -238,6 +238,19 @@ target_include_directories(test_usb_hid PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.."
 add_test(NAME usb_hid COMMAND test_usb_hid)
 set_tests_properties(usb_hid PROPERTIES TIMEOUT 30)
 
+# DAP v1 device class: the command state machine is driven by ProcessPending().
+add_executable(test_usb_daplink_v1 driver/usb/device/dap/test_daplink_v1.cpp)
+target_link_libraries(test_usb_daplink_v1 PRIVATE xr)
+target_include_directories(test_usb_daplink_v1 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_daplink_v1 COMMAND test_usb_daplink_v1)
+set_tests_properties(usb_daplink_v1 PROPERTIES TIMEOUT 30)
+# DAP v2 device class: copy-mode Read/Write, response depth and the deferred delay path.
+add_executable(test_usb_daplink_v2 driver/usb/device/dap/test_daplink_v2.cpp)
+target_link_libraries(test_usb_daplink_v2 PRIVATE xr)
+target_include_directories(test_usb_daplink_v2 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_daplink_v2 COMMAND test_usb_daplink_v2)
+set_tests_properties(usb_daplink_v2 PROPERTIES TIMEOUT 30)
+
 # SwdGeneralGPIO: the SWDIO level during idle cycles.
 add_executable(test_swd_general_gpio driver/debug/test_swd_general_gpio.cpp)
 target_link_libraries(test_swd_general_gpio PRIVATE xr)
