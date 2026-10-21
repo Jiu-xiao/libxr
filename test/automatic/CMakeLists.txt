@@ -252,6 +252,24 @@ target_include_directories(test_usb_dfu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.."
 add_test(NAME usb_dfu COMMAND test_usb_dfu)
 set_tests_properties(usb_dfu PROPERTIES TIMEOUT 30)
 
+# CH32 USBHS IN endpoint against a fake register block: ACKed packets that INT_ST
+# reports as busy NAKs are found by their toggle.
+add_executable(
+  test_ch32_usbhs_in driver/usb/ch32/test_ch32_usbhs_in.cpp
+                     "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/ch/ch32_usb_endpoint_otghs.cpp"
+)
+target_link_libraries(test_ch32_usbhs_in PRIVATE xr)
+target_include_directories(
+  test_ch32_usbhs_in PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.."
+                             "${CMAKE_CURRENT_SOURCE_DIR}/driver/usb/ch32"
+                             "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/ch"
+)
+target_compile_definitions(
+  test_ch32_usbhs_in PRIVATE LIBXR_CH32_CONFIG_FILE=fake_ch32v30x_usbhs.h
+)
+add_test(NAME ch32_usbhs_in COMMAND test_ch32_usbhs_in)
+set_tests_properties(ch32_usbhs_in PROPERTIES TIMEOUT 30)
+
 # cdc_test classes: lease return, DTR-triggered packet and the read re-arm.
 add_executable(test_usb_cdc_test driver/usb/device/cdc/test_cdc_test.cpp)
 target_link_libraries(test_usb_cdc_test PRIVATE xr)
