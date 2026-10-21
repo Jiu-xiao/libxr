@@ -341,6 +341,7 @@ class Endpoint
   void Attach(EndpointPool& pool) { pool_ = &pool; }
   void Service(bool in_isr);
   void NotifyOwner(bool in_isr);
+  void NotifyQueued(bool in_isr);
   bool CanStart() const;
   bool Usable(uint32_t word, uint8_t index) const
   {
@@ -420,6 +421,9 @@ class Endpoint
   ErrorCode completion_result_ = ErrorCode::OK;
   std::atomic<uint32_t> stop_confirmed_{0};
   uint32_t pending_bit_ = 0;  // This endpoint's bit in the pool's pending mask.
+  // Set by the owner while it retires this endpoint's completion (callback included);
+  // a request queued meanwhile is started by the StartNext that follows.
+  std::atomic<uint32_t> servicing_{0};
 
   Callback<const Completion&> on_complete_;
 };
