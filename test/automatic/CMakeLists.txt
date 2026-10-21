@@ -86,7 +86,6 @@ add_executable(
   core/rw/write_stream/test_write_stream.cpp
   driver/power/test_power.cpp
   driver/uart/test_uart.cpp
-  driver/usb/test_cdc_uart.cpp
   driver/timebase/test_timebase.cpp
   middleware/database/database/test_database.cpp
   middleware/database/raw/raw/test_linux_database_raw.cpp
@@ -207,6 +206,12 @@ add_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xrobot_freshness.cmake"
 )
 set_tests_properties(xrobot_freshness PROPERTIES TIMEOUT 60)
+# Real Endpoint/CDC/RW code; only the hardware segment is controlled by the test.
+add_executable(test_usb_endpoint driver/usb/core/test_endpoint.cpp)
+target_link_libraries(test_usb_endpoint PRIVATE xr)
+target_include_directories(test_usb_endpoint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_endpoint COMMAND test_usb_endpoint)
+set_tests_properties(usb_endpoint PROPERTIES TIMEOUT 30)
 
 # DriverAsyncCondition driven by OnTick() calls from the test instead of a timebase.
 add_executable(
@@ -232,3 +237,17 @@ target_link_libraries(test_swd_protocol PRIVATE xr)
 target_include_directories(test_swd_protocol PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME swd_protocol COMMAND test_swd_protocol)
 set_tests_properties(swd_protocol PROPERTIES TIMEOUT 30)
+
+# cdc_test classes: lease return, DTR-triggered packet and the read re-arm.
+add_executable(test_usb_cdc_test driver/usb/device/cdc/test_cdc_test.cpp)
+target_link_libraries(test_usb_cdc_test PRIVATE xr)
+target_include_directories(test_usb_cdc_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_cdc_test COMMAND test_usb_cdc_test)
+set_tests_properties(usb_cdc_test PROPERTIES TIMEOUT 30)
+# CDCUart / CDCToUart: SET_LINE_CODING is always acknowledged, GET returns the applied
+# coding.
+add_executable(test_usb_cdc_uart driver/usb/device/cdc/test_cdc_uart.cpp)
+target_link_libraries(test_usb_cdc_uart PRIVATE xr)
+target_include_directories(test_usb_cdc_uart PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_cdc_uart COMMAND test_usb_cdc_uart)
+set_tests_properties(usb_cdc_uart PROPERTIES TIMEOUT 30)
