@@ -615,6 +615,15 @@ ErrorCode CH32EndpointOtgHs::StallHardware(bool /*in_isr*/)
 
 ErrorCode CH32EndpointOtgHs::ClearStallHardware(bool /*in_isr*/)
 {
+  if (GetNumber() == EPNumber::EP0)
+  {
+    // 下一个 SETUP 已在中断里把 EP0 恢复为 NAK/DATA1（PrepareEp0ForSetup）；这里再写
+    // 一遍会把数据阶段首包改成 DATA0，主机当作重复包丢弃，STALL 后的下一个请求超时。
+    // The next SETUP has already restored EP0 to NAK/DATA1 in the interrupt
+    // (PrepareEp0ForSetup); writing it again here would send the first data packet as
+    // DATA0, which the host drops as a repeat, so the request after a STALL timed out.
+    return ErrorCode::OK;
+  }
   if (GetDirection() == Direction::IN)
   {
     *get_tx_control_addr(GetNumber()) = USBHS_UEP_T_RES_NAK | USBHS_UEP_T_TOG_AUTO;

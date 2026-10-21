@@ -169,6 +169,29 @@ void TestQueuedResponses()
   TEST_ASSERT(f.rec.list.size() == 2 && f.rec.list[1].actual == 3);
 }
 
+// EP0 after a STALL. The next SETUP restores EP0 to NAK/DATA1 in the interrupt before
+// the device core clears the endpoint's halt; that clear must not reset the toggle, or
+// the data stage starts with DATA0, the host drops it as a repeat and the request after
+// a STALL times out.
+void TestEp0StallClearKeepsData1()
+{
+  fake_usbhsd = {};
+  Block<128> in_storage;
+  EndpointPool pool{2};
+  CH32EndpointOtgHs in0{Endpoint::EPNumber::EP0, Direction::IN, in_storage.Raw()};
+  pool.SetSpeed(Speed::HIGH);
+  TEST_ASSERT(pool.Put(&in0) == ErrorCode::OK);
+  TEST_ASSERT(in0.Configure({Direction::IN, Endpoint::Type::CONTROL, 64}, false) ==
+              ErrorCode::OK);
+
+  TEST_ASSERT(in0.Stall(false) == ErrorCode::OK);
+  TEST_ASSERT((fake_usbhsd.UEP0_TX_CTRL & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL);
+  // What the SETUP interrupt writes (PrepareEp0ForSetup).
+  fake_usbhsd.UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK;
+  TEST_ASSERT(in0.ClearStall(false) == ErrorCode::OK);
+  TEST_ASSERT(fake_usbhsd.UEP0_TX_CTRL == (USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_NAK));
+}
+
 }  // namespace
 
 int main()
@@ -176,5 +199,6 @@ int main()
   TestTwoPacketResponse();
   TestPacketAndZlp();
   TestQueuedResponses();
+  TestEp0StallClearKeepsData1();
   std::puts("CH32 USBHS IN completions found by toggle passed");
 }

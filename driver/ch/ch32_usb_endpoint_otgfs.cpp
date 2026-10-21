@@ -445,6 +445,13 @@ ErrorCode CH32EndpointOtgFs::StallHardware(bool /*in_isr*/)
 
 ErrorCode CH32EndpointOtgFs::ClearStallHardware(bool /*in_isr*/)
 {
+  if (GetNumber() == EPNumber::EP0)
+  {
+    // 下一个 SETUP 已在中断里把 EP0 恢复为 NAK/DATA1；这里再复位 toggle 会让数据阶段
+    // 首包变成 DATA0。 / The next SETUP has already restored EP0 to NAK/DATA1 in the
+    // interrupt; resetting the toggle here would send the first data packet as DATA0.
+    return ErrorCode::OK;
+  }
   if (GetDirection() == Direction::IN)
     *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
   else
