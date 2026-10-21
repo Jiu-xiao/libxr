@@ -86,7 +86,6 @@ add_executable(
   core/rw/write_stream/test_write_stream.cpp
   driver/power/test_power.cpp
   driver/uart/test_uart.cpp
-  driver/usb/test_cdc_uart.cpp
   driver/timebase/test_timebase.cpp
   middleware/database/database/test_database.cpp
   middleware/database/raw/raw/test_linux_database_raw.cpp
@@ -207,6 +206,12 @@ add_test(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xrobot_freshness.cmake"
 )
 set_tests_properties(xrobot_freshness PROPERTIES TIMEOUT 60)
+# Real Endpoint/CDC/RW code; only the hardware segment is controlled by the test.
+add_executable(test_usb_endpoint driver/usb/core/test_endpoint.cpp)
+target_link_libraries(test_usb_endpoint PRIVATE xr)
+target_include_directories(test_usb_endpoint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_endpoint COMMAND test_usb_endpoint)
+set_tests_properties(usb_endpoint PROPERTIES TIMEOUT 30)
 
 # DriverAsyncCondition driven by OnTick() calls from the test instead of a timebase.
 add_executable(
@@ -219,9 +224,42 @@ target_include_directories(
 add_test(NAME driver_async_condition COMMAND test_driver_async_condition)
 set_tests_properties(driver_async_condition PROPERTIES TIMEOUT 30)
 
+# HID device class on the slot model: input reports, OUT leases, LED and idle resend.
+add_executable(test_usb_hid driver/usb/device/hid/test_hid.cpp)
+target_link_libraries(test_usb_hid PRIVATE xr)
+target_include_directories(test_usb_hid PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_hid COMMAND test_usb_hid)
+set_tests_properties(usb_hid PROPERTIES TIMEOUT 30)
+
 # SwdGeneralGPIO: the SWDIO level during idle cycles.
 add_executable(test_swd_general_gpio driver/debug/test_swd_general_gpio.cpp)
 target_link_libraries(test_swd_general_gpio PRIVATE xr)
 target_include_directories(test_swd_general_gpio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_test(NAME swd_general_gpio COMMAND test_swd_general_gpio)
 set_tests_properties(swd_general_gpio PROPERTIES TIMEOUT 30)
+
+# DFU device classes: core-owned status stage, DNLOAD data stage and receive capacity.
+add_executable(test_usb_dfu driver/usb/device/dfu/test_dfu.cpp)
+target_link_libraries(test_usb_dfu PRIVATE xr)
+target_include_directories(test_usb_dfu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_dfu COMMAND test_usb_dfu)
+set_tests_properties(usb_dfu PROPERTIES TIMEOUT 30)
+
+# cdc_test classes: lease return, DTR-triggered packet and the read re-arm.
+add_executable(test_usb_cdc_test driver/usb/device/cdc/test_cdc_test.cpp)
+target_link_libraries(test_usb_cdc_test PRIVATE xr)
+target_include_directories(test_usb_cdc_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_cdc_test COMMAND test_usb_cdc_test)
+set_tests_properties(usb_cdc_test PROPERTIES TIMEOUT 30)
+# gs_usb device class: per-channel queues, echo share, backpressure and USER_ID.
+add_executable(test_usb_gsusb driver/usb/device/gsusb/test_gsusb.cpp)
+target_link_libraries(test_usb_gsusb PRIVATE xr)
+target_include_directories(test_usb_gsusb PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_gsusb COMMAND test_usb_gsusb)
+set_tests_properties(usb_gsusb PROPERTIES TIMEOUT 30)
+# UAC1 microphone on the slot model: alt switching, SOF pacing, FAILED recovery.
+add_executable(test_uac_mic driver/usb/device/uac/test_uac_mic.cpp)
+target_link_libraries(test_uac_mic PRIVATE xr)
+target_include_directories(test_uac_mic PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME usb_uac_mic COMMAND test_uac_mic)
+set_tests_properties(usb_uac_mic PROPERTIES TIMEOUT 30)
