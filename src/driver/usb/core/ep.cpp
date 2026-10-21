@@ -22,46 +22,7 @@ Endpoint::Endpoint(EPNumber number, Direction direction, RawData slots,
   REQUIRE(slot_size_ != 0U);
 }
 
-uint32_t Endpoint::Enqueue(uint32_t word, uint8_t index)
-{
-  const uint8_t other = index ^ 1U;
-  const uint8_t head = SlotOf(word, other) == QUEUED ? other : index;
-  word = WithSlot(word, index, QUEUED);
-  return head == 1U ? (word | HEAD_BIT) : (word & ~HEAD_BIT);
-}
-
-RawData Endpoint::SlotData(uint8_t index, size_t capacity) const
-{
-  return {static_cast<uint8_t*>(memory_.addr_) + index * slot_size_, capacity};
-}
-
 bool Endpoint::IsPlanning() const { return pool_ != nullptr && pool_->IsPlanning(); }
-
-bool Endpoint::CanStart() const
-{
-  return pool_ == nullptr || pool_->CanStart(number_ == EPNumber::EP0);
-}
-
-void Endpoint::NotifyOwner(bool in_isr)
-{
-  if (pool_ != nullptr) pool_->NotifyEndpoint(pending_bit_, in_isr);
-}
-
-void Endpoint::NotifyQueued(bool in_isr)
-{
-  // Pairs with the fence in Service: either this sees servicing_ cleared and notifies,
-  // or the owner's StartNext sees the request just queued.
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-  if (servicing_.load(std::memory_order_relaxed) != 0U) return;
-  NotifyOwner(in_isr);
-}
-
-uint32_t Endpoint::NextTag(uint8_t index)
-{
-  sequence_ = (sequence_ + 1U) & 0x3FFFFFFFU;
-  if (sequence_ == 0U) sequence_ = 1U;
-  return (sequence_ << 2U) | index;
-}
 
 // ---------------------------------------------------------------------------
 // Configuration

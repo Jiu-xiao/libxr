@@ -190,7 +190,10 @@ class Endpoint
     return GetState() == State::DISABLED ? EPNumberToInt8(number_)
                                          : EPNumberToAddr(number_, config_.direction);
   }
-  State GetState() const { return state_.load(std::memory_order_acquire); }
+  [[gnu::always_inline]] State GetState() const
+  {
+    return state_.load(std::memory_order_acquire);
+  }
   Type GetType() const { return config_.type; }
   uint16_t MaxPacketSize() const { return granted_.max_packet_size; }
   /// 当前速度下槽和后端都放得下的最大合法包长；没有时为 0。只读查询，Configure 仍须显式
@@ -322,15 +325,24 @@ class Endpoint
   static constexpr uint8_t ZLP_INDEX = 2U;
   static constexpr uint8_t NO_REQUEST = 0xFFU;
 
-  static uint32_t SlotOf(uint32_t word, uint8_t index)
+  // The small helpers on the request path are forced inline: under -Os the compiler keeps
+  // them out of line, and on flash with wait states each call costs more than its body.
+  [[gnu::always_inline]] static uint32_t SlotOf(uint32_t word, uint8_t index)
   {
     return (word >> (index * SLOT_BITS)) & SLOT_MASK;
   }
-  static uint32_t WithSlot(uint32_t word, uint8_t index, uint32_t state)
+  [[gnu::always_inline]] static uint32_t WithSlot(uint32_t word, uint8_t index,
+                                                  uint32_t state)
   {
     return (word & ~(SLOT_MASK << (index * SLOT_BITS))) | (state << (index * SLOT_BITS));
   }
-  static uint32_t Enqueue(uint32_t word, uint8_t index);
+  [[gnu::always_inline]] static uint32_t Enqueue(uint32_t word, uint8_t index)
+  {
+    const uint8_t other = index ^ 1U;
+    const uint8_t head = SlotOf(word, other) == QUEUED ? other : index;
+    word = WithSlot(word, index, QUEUED);
+    return head == 1U ? (word | HEAD_BIT) : (word & ~HEAD_BIT);
+  }
 
   struct SlotMeta
   {
@@ -340,14 +352,18 @@ class Endpoint
 
   void Attach(EndpointPool& pool) { pool_ = &pool; }
   void Service(bool in_isr);
-  void NotifyOwner(bool in_isr);
-  void NotifyQueued(bool in_isr);
-  bool CanStart() const;
-  bool Usable(uint32_t word, uint8_t index) const
+  // Defined in ep_pool.hpp, which ep.cpp includes.
+  [[gnu::always_inline]] inline void NotifyOwner(bool in_isr);
+  [[gnu::always_inline]] inline void NotifyQueued(bool in_isr);
+  [[gnu::always_inline]] inline bool CanStart() const;
+  [[gnu::always_inline]] bool Usable(uint32_t word, uint8_t index) const
   {
     return index < slot_count_ && SlotOf(word, index) == FREE;
   }
-  RawData SlotData(uint8_t index, size_t capacity) const;
+  [[gnu::always_inline]] RawData SlotData(uint8_t index, size_t capacity) const
+  {
+    return {static_cast<uint8_t*>(memory_.addr_) + index * slot_size_, capacity};
+  }
   void StartNext(bool in_isr);
   bool StartOne(bool in_isr, bool defer_failure);
   bool StartEarly(bool in_isr);
@@ -368,10 +384,18 @@ class Endpoint
   ErrorCode ClaimForCopy(bool in, size_t size, uint8_t& claimed, size_t& capacity,
                          size_t& packet);
   ErrorCode PublishCopy(const uint8_t* order, uint8_t count, uint8_t claimed);
-  uint32_t NextTag(uint8_t index);
+  [[gnu::always_inline]] uint32_t NextTag(uint8_t index)
+  {
+    sequence_ = (sequence_ + 1U) & 0x3FFFFFFFU;
+    if (sequence_ == 0U) sequence_ = 1U;
+    return (sequence_ << 2U) | index;
+  }
   void SetState(State state) { state_.store(state, std::memory_order_release); }
   // Requests are being ended (stop pending, halted or closed); nothing continues.
-  bool Ending() const { return stopping_ || GetState() != State::IDLE; }
+  [[gnu::always_inline]] bool Ending() const
+  {
+    return stopping_ || GetState() != State::IDLE;
+  }
 
   EPNumber number_;
   Direction avail_direction_;

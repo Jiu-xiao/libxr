@@ -207,9 +207,12 @@ void EndpointPool::RequestService(bool in_isr)
           control_handler_.Run(current_isr, events & ~ENDPOINT_EVENT);
         if ((events & ENDPOINT_EVENT) == 0U) return;
         uint32_t bits = endpoint_pending_.exchange(0U, std::memory_order_acq_rel);
-        for (size_t i = 0; bits != 0U; ++i, bits >>= 1U)
-          if ((bits & 1U) != 0U && by_bit_[i] != nullptr)
-            by_bit_[i]->Service(current_isr);
+        while (bits != 0U)
+        {
+          const unsigned i = static_cast<unsigned>(__builtin_ctz(bits));
+          bits &= bits - 1U;
+          if (by_bit_[i] != nullptr) by_bit_[i]->Service(current_isr);
+        }
       });
 }
 
