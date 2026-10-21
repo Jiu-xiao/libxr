@@ -164,70 +164,50 @@ class SwdGeneralGPIO final : public Swd
   ErrorCode LineReset() override
   {
     InvalidateSelectCache();
-    // SWD 线复位：SWDIO = 1 持续 >= 50 个周期；此处使用 64 个周期。
-    // SWD line reset: SWDIO = 1 for >= 50 cycles; here use 64 cycles.
-    (void)SetSwdioDriveMode();
-    swdio_.Write(true);
-    for (uint32_t i = 0; i < LINE_RESET_CYCLES; ++i)
+    if (Delayed())
     {
-      GenOneClk();
+      LineResetImpl<true>();
+    }
+    else
+    {
+      LineResetImpl<false>();
     }
     return ErrorCode::OK;
   }
 
   ErrorCode EnterSwd() override
   {
-    ErrorCode ec = LineReset();
-    if (ec != ErrorCode::OK)
+    InvalidateSelectCache();
+    if (Delayed())
     {
-      return ec;
+      EnterSwdImpl<true>();
     }
-
-    WriteByteLSB(JTAG_TO_SWD_SEQ0);
-    WriteByteLSB(JTAG_TO_SWD_SEQ1);
-
-    ec = LineReset();
-    if (ec != ErrorCode::OK)
+    else
     {
-      return ec;
+      EnterSwdImpl<false>();
     }
-
-    swdio_.Write(false);
-    WriteByteLSB(0x00);
-
     return ErrorCode::OK;
   }
 
   ErrorCode Transfer(const SwdProtocol::Request& req,
                      SwdProtocol::Response& resp) override
   {
-    // 目标：当 half_period_loops_ == 0 时，整次 Transfer 走无延时路径，
-    // 避免每半周期 BusyLoop(0) 的空转判断开销。
-    if (half_period_loops_ == 0u)
-    {
-      return TransferWithoutDelay(req, resp);
-    }
-    else
-    {
-      return TransferWithDelay(req, resp);
-    }
+    // 每个入口只选一次路径，位级代码里不再判断延时次数是否为 0。
+    // Each entry point picks the path once; the bit-level code no longer checks whether
+    // the delay count is zero.
+    return Delayed() ? TransferImpl<true>(req, resp) : TransferImpl<false>(req, resp);
   }
 
   void IdleClocks(uint32_t cycles) override
   {
-    // CMSIS-DAP 空闲周期插入 / CMSIS-DAP idle cycles insertion.
-    // 空闲周期里 SWDIO 驱动为低：高电平会被目标当成起始位，下一个请求就对不齐。
-    // SWDIO is driven low during the idle cycles: a high level is taken by the target as
-    // a start bit and the next request would be misaligned.
-    (void)SetSwdioDriveMode();
-    swdio_.Write(false);
-
-    for (uint32_t i = 0; i < cycles; ++i)
+    if (Delayed())
     {
-      GenOneClk();
+      IdleClocksImpl<true>(cycles);
     }
-
-    swdio_.Write(false);
+    else
+    {
+      IdleClocksImpl<false>(cycles);
+    }
   }
 
   ErrorCode SeqWriteBits(uint32_t cycles, const uint8_t* data_lsb_first) override
@@ -242,24 +222,14 @@ class SwdGeneralGPIO final : public Swd
       return ErrorCode::ARG_ERR;
     }
 
-    (void)SetSwdioDriveMode();
-
-    // Keep legacy: start from SWCLK low and end low
-    swclk_.Write(false);
-
-    for (uint32_t i = 0; i < cycles; ++i)
+    if (Delayed())
     {
-      const bool BIT = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
-      swdio_.Write(BIT);
-
-      // 匹配 DAP_Transfer 请求路径：每个 bit 只产生一个完整低-高时钟周期，
-      // 不在每 bit 末尾额外插入无定时低脉冲。
-      // Match the DAP_Transfer request path: one bit owns one complete
-      // low-high clock cycle. Do not add an un-timed low pulse after every bit.
-      GenOneClk();
+      SeqWriteBitsImpl<true>(cycles, data_lsb_first);
     }
-    swclk_.Write(false);
-
+    else
+    {
+      SeqWriteBitsImpl<false>(cycles, data_lsb_first);
+    }
     return ErrorCode::OK;
   }
 
@@ -278,40 +248,14 @@ class SwdGeneralGPIO final : public Swd
     const uint32_t BYTES = (cycles + 7u) / 8u;
     Memory::FastSet(out_lsb_first, 0, BYTES);
 
-    (void)SetSwdioSampleMode();
-
-    // start from low, end low
-    swclk_.Write(false);
-
-    for (uint32_t i = 0; i < cycles; ++i)
+    if (Delayed())
     {
-      // Use the updated read phase (CMSIS-style)
-      bool bit = false;
-      if (half_period_loops_ == 0u)
-      {
-        swclk_.Write(false);
-        bit = swdio_.Read();
-        swclk_.Write(true);
-      }
-      else
-      {
-        swclk_.Write(false);
-        DelayHalf();
-        bit = swdio_.Read();
-        swclk_.Write(true);
-        DelayHalf();
-      }
-
-      if (bit)
-      {
-        out_lsb_first[i / 8u] =
-            static_cast<uint8_t>(out_lsb_first[i / 8u] | (1u << (i & 7u)));
-      }
-
-      // keep legacy end-low for next bit
-      swclk_.Write(false);
+      SeqReadBitsImpl<true>(cycles, out_lsb_first);
     }
-
+    else
+    {
+      SeqReadBitsImpl<false>(cycles, out_lsb_first);
+    }
     return ErrorCode::OK;
   }
 
@@ -380,37 +324,39 @@ class SwdGeneralGPIO final : public Swd
     return ErrorCode::OK;
   }
 
-  // 位级辅助函数强制内联：-Os 下编译器不内联它们，每一位都变成一次函数调用，在带 Flash
-  // 等待周期的 MCU 上 SWD 位速率下降一半以上。
-  // The bit-level helpers are forced inline: under -Os the compiler keeps them out of
-  // line, every bit becomes a call, and on MCUs with flash wait states the SWD bit rate
-  // drops by more than half.
-  [[gnu::always_inline]] inline void DelayHalf() { BusyLoop(half_period_loops_); }
+  /// SetClockHz 只在无延时路径时把延时次数设为 0 / SetClockHz sets the delay count to
+  /// 0 only for the path without delay.
+  bool Delayed() const { return half_period_loops_ != 0u; }
 
+  // 位级辅助函数以 kDelay 区分有无延时，同一份源码生成两条路径；强制内联：-Os 下编译器
+  // 不内联它们，每一位都变成一次函数调用，在带 Flash 等待周期的 MCU 上 SWD 位速率下降
+  // 一半以上。
+  // The bit-level helpers take kDelay, so one source yields both paths. They are forced
+  // inline: under -Os the compiler keeps them out of line, every bit becomes a call, and
+  // on MCUs with flash wait states the SWD bit rate drops by more than half.
+  template <bool kDelay>
+  [[gnu::always_inline]] inline void DelayHalf()
+  {
+    if constexpr (kDelay)
+    {
+      BusyLoop(half_period_loops_);
+    }
+  }
+
+  template <bool kDelay>
   [[gnu::always_inline]] inline void GenOneClk()
   {
     swclk_.Write(false);
-    DelayHalf();
+    DelayHalf<kDelay>();
     swclk_.Write(true);
-    DelayHalf();
+    DelayHalf<kDelay>();
   }
 
-  [[gnu::always_inline]] inline void GenOneClkWithoutDelay()
-  {
-    swclk_.Write(false);
-    swclk_.Write(true);
-  }
-
+  template <bool kDelay>
   [[gnu::always_inline]] inline void WriteBit(bool bit)
   {
     swdio_.Write(bit);
-    GenOneClk();
-  }
-
-  [[gnu::always_inline]] inline void WriteBitWithoutDelay(bool bit)
-  {
-    swdio_.Write(bit);
-    GenOneClkWithoutDelay();
+    GenOneClk<kDelay>();
   }
 
   // 按字节收发的函数都展开成 8 位，不留逐位循环：循环的跳转目标落在哪里随代码布局变化，
@@ -421,78 +367,54 @@ class SwdGeneralGPIO final : public Swd
   // (for example the 64-bit prefetch lines of the STM32F1) a target straddling a line
   // costs every bit a few cycles, so the same source runs at different speeds depending
   // on where it is placed.
+  template <bool kDelay>
   inline void WriteByteLSB(uint8_t b)
   {
-    WriteBit((b & 0x01u) != 0u);
-    WriteBit((b & 0x02u) != 0u);
-    WriteBit((b & 0x04u) != 0u);
-    WriteBit((b & 0x08u) != 0u);
-    WriteBit((b & 0x10u) != 0u);
-    WriteBit((b & 0x20u) != 0u);
-    WriteBit((b & 0x40u) != 0u);
-    WriteBit((b & 0x80u) != 0u);
+    WriteBit<kDelay>((b & 0x01u) != 0u);
+    WriteBit<kDelay>((b & 0x02u) != 0u);
+    WriteBit<kDelay>((b & 0x04u) != 0u);
+    WriteBit<kDelay>((b & 0x08u) != 0u);
+    WriteBit<kDelay>((b & 0x10u) != 0u);
+    WriteBit<kDelay>((b & 0x20u) != 0u);
+    WriteBit<kDelay>((b & 0x40u) != 0u);
+    WriteBit<kDelay>((b & 0x80u) != 0u);
   }
 
-  inline void WriteByteLSBWithoutDelay(uint8_t b)
-  {
-    WriteBitWithoutDelay((b & 0x01u) != 0u);
-    WriteBitWithoutDelay((b & 0x02u) != 0u);
-    WriteBitWithoutDelay((b & 0x04u) != 0u);
-    WriteBitWithoutDelay((b & 0x08u) != 0u);
-    WriteBitWithoutDelay((b & 0x10u) != 0u);
-    WriteBitWithoutDelay((b & 0x20u) != 0u);
-    WriteBitWithoutDelay((b & 0x40u) != 0u);
-    WriteBitWithoutDelay((b & 0x80u) != 0u);
-  }
-
+  template <bool kDelay>
   [[gnu::always_inline]] inline bool ReadBitAndClock()
   {
     swclk_.Write(false);
-    DelayHalf();
+    DelayHalf<kDelay>();
     const bool BIT = swdio_.Read();
     swclk_.Write(true);
-    DelayHalf();
+    DelayHalf<kDelay>();
     return BIT;
   }
 
-  [[gnu::always_inline]] inline bool ReadBitAndClockWithoutDelay()
-  {
-    swclk_.Write(false);
-    const bool BIT = swdio_.Read();
-    swclk_.Write(true);
-    return BIT;
-  }
-
+  template <bool kDelay>
   inline uint8_t ReadByteLSB()
   {
     uint8_t v = 0u;
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x01u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x02u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x04u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x08u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x10u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x20u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x40u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClock() ? 0x80u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x01u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x02u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x04u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x08u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x10u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x20u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x40u : 0u);
+    v |= static_cast<uint8_t>(ReadBitAndClock<kDelay>() ? 0x80u : 0u);
     return v;
   }
 
-  inline uint8_t ReadByteLSBWithoutDelay()
-  {
-    uint8_t v = 0u;
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x01u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x02u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x04u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x08u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x10u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x20u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x40u : 0u);
-    v |= static_cast<uint8_t>(ReadBitAndClockWithoutDelay() ? 0x80u : 0u);
-    return v;
-  }
-
+  /**
+   * @brief 忙等 loops 次延时循环 / Busy-wait for loops delay iterations.
+   * @param loops 循环次数，必须 >= 1：只有带延时的路径调用它，SetClockHz 只在无延时
+   *        路径时产生 0 / Iteration count, must be >= 1: only the delayed path calls it,
+   *        and SetClockHz produces 0 only for the path without delay.
+   */
   [[gnu::always_inline]] static inline void BusyLoop(uint32_t loops)
   {
+    DEV_ASSERT(loops >= 1u);
 #if defined(__thumb2__)
     // Thumb-2：两条 16 位指令的循环，.balign 8 让它落在同一个 64 位取指行里，含它的函数段
     // 也因此按 8 字节对齐，每次迭代的周期数不再随代码布局变化（编译器生成的循环可能跨行，
@@ -502,10 +424,6 @@ class SwdGeneralGPIO final : public Swd
     // the cycles per iteration no longer depend on code layout (a compiler-generated loop
     // may straddle a line and wait for an extra fetch on every iteration). The alignment
     // nops run once, before the loop.
-    if (loops == 0u)
-    {
-      return;
-    }
     asm volatile(
         ".balign 8\n"
         "1:\n\t"
@@ -528,9 +446,94 @@ class SwdGeneralGPIO final : public Swd
 #endif
   }
 
- private:
-  ErrorCode TransferWithDelay(const SwdProtocol::Request& req,
-                              SwdProtocol::Response& resp)
+  template <bool kDelay>
+  void LineResetImpl()
+  {
+    // SWD 线复位：SWDIO = 1 持续 >= 50 个周期；此处使用 64 个周期。
+    // SWD line reset: SWDIO = 1 for >= 50 cycles; here use 64 cycles.
+    (void)SetSwdioDriveMode();
+    swdio_.Write(true);
+    for (uint32_t i = 0; i < LINE_RESET_CYCLES; ++i)
+    {
+      GenOneClk<kDelay>();
+    }
+  }
+
+  template <bool kDelay>
+  void EnterSwdImpl()
+  {
+    LineResetImpl<kDelay>();
+    WriteByteLSB<kDelay>(JTAG_TO_SWD_SEQ0);
+    WriteByteLSB<kDelay>(JTAG_TO_SWD_SEQ1);
+    LineResetImpl<kDelay>();
+    swdio_.Write(false);
+    WriteByteLSB<kDelay>(0x00);
+  }
+
+  template <bool kDelay>
+  void IdleClocksImpl(uint32_t cycles)
+  {
+    // CMSIS-DAP 空闲周期插入 / CMSIS-DAP idle cycles insertion.
+    // 空闲周期里 SWDIO 驱动为低：高电平会被目标当成起始位，下一个请求就对不齐。
+    // SWDIO is driven low during the idle cycles: a high level is taken by the target as
+    // a start bit and the next request would be misaligned.
+    (void)SetSwdioDriveMode();
+    swdio_.Write(false);
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      GenOneClk<kDelay>();
+    }
+
+    swdio_.Write(false);
+  }
+
+  template <bool kDelay>
+  void SeqWriteBitsImpl(uint32_t cycles, const uint8_t* data_lsb_first)
+  {
+    (void)SetSwdioDriveMode();
+
+    // Keep legacy: start from SWCLK low and end low
+    swclk_.Write(false);
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      const bool BIT = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
+      swdio_.Write(BIT);
+
+      // 匹配 DAP_Transfer 请求路径：每个 bit 只产生一个完整低-高时钟周期，
+      // 不在每 bit 末尾额外插入无定时低脉冲。
+      // Match the DAP_Transfer request path: one bit owns one complete
+      // low-high clock cycle. Do not add an un-timed low pulse after every bit.
+      GenOneClk<kDelay>();
+    }
+    swclk_.Write(false);
+  }
+
+  template <bool kDelay>
+  void SeqReadBitsImpl(uint32_t cycles, uint8_t* out_lsb_first)
+  {
+    (void)SetSwdioSampleMode();
+
+    // start from low, end low
+    swclk_.Write(false);
+
+    for (uint32_t i = 0; i < cycles; ++i)
+    {
+      // Use the updated read phase (CMSIS-style)
+      if (ReadBitAndClock<kDelay>())
+      {
+        out_lsb_first[i / 8u] =
+            static_cast<uint8_t>(out_lsb_first[i / 8u] | (1u << (i & 7u)));
+      }
+
+      // keep legacy end-low for next bit
+      swclk_.Write(false);
+    }
+  }
+
+  template <bool kDelay>
+  ErrorCode TransferImpl(const SwdProtocol::Request& req, SwdProtocol::Response& resp)
   {
     resp.ack = SwdProtocol::Ack::PROTOCOL;
     resp.rdata = 0u;
@@ -539,16 +542,16 @@ class SwdGeneralGPIO final : public Swd
     const uint8_t REQUEST_BYTE = SwdProtocol::MakeRequest(req);
 
     (void)SetSwdioDriveMode();
-    WriteByteLSB(REQUEST_BYTE);
+    WriteByteLSB<kDelay>(REQUEST_BYTE);
 
     (void)SetSwdioSampleMode();
-    GenOneClk();  // turnaround Host -> Target
+    GenOneClk<kDelay>();  // turnaround Host -> Target
 
     // ACK: CMSIS SW_READ_BIT phase (sample in low phase)
     uint8_t ack_raw = 0u;
     for (uint32_t i = 0; i < ACK_BITS; ++i)
     {
-      if (ReadBitAndClock())
+      if (ReadBitAndClock<kDelay>())
       {
         ack_raw |= static_cast<uint8_t>(1u << i);
       }
@@ -557,7 +560,7 @@ class SwdGeneralGPIO final : public Swd
 
     if (resp.ack != SwdProtocol::Ack::OK)
     {
-      GenOneClk();  // turnaround Target -> Host (skip data)
+      GenOneClk<kDelay>();  // turnaround Target -> Host (skip data)
       (void)SetSwdioDriveMode();
       swdio_.Write(true);
       swclk_.Write(false);
@@ -569,34 +572,34 @@ class SwdGeneralGPIO final : public Swd
       uint32_t data = 0u;
       for (uint32_t byte = 0; byte < 4u; ++byte)
       {
-        const uint32_t B = ReadByteLSB();
+        const uint32_t B = ReadByteLSB<kDelay>();
         data |= (B << (8u * byte));
       }
 
-      const bool PARITY_BIT = ReadBitAndClock();
+      const bool PARITY_BIT = ReadBitAndClock<kDelay>();
       resp.rdata = data;
       resp.parity_ok = (static_cast<uint8_t>(PARITY_BIT) == Parity32(data));
 
       (void)SetSwdioDriveMode();
       swdio_.Write(true);
-      GenOneClk();
+      GenOneClk<kDelay>();
 
       swclk_.Write(false);
     }
     else
     {
       (void)SetSwdioDriveMode();
-      GenOneClk();
+      GenOneClk<kDelay>();
 
       const uint32_t DATA = req.wdata;
       for (uint32_t byte = 0; byte < 4u; ++byte)
       {
         const uint8_t B = static_cast<uint8_t>((DATA >> (8u * byte)) & 0xFFu);
-        WriteByteLSB(B);
+        WriteByteLSB<kDelay>(B);
       }
 
       const bool PARITY_BIT = (Parity32(DATA) & 0x1u) != 0u;
-      WriteBit(PARITY_BIT);
+      WriteBit<kDelay>(PARITY_BIT);
 
       // 写数据相之后 SWDIO 保持低电平再补几个时钟，让目标完成（可能是 posted 的）写入，
       // 否则同一批次里紧随 AP 写的下一个请求会在错误的相位采到 ACK。
@@ -606,90 +609,7 @@ class SwdGeneralGPIO final : public Swd
       swdio_.Write(false);
       for (uint32_t k = 0; k < WRITE_TRAILING_IDLE_CLOCKS; ++k)
       {
-        GenOneClk();
-      }
-
-      swdio_.Write(true);
-      swclk_.Write(false);
-    }
-
-    return ErrorCode::OK;
-  }
-
-  ErrorCode TransferWithoutDelay(const SwdProtocol::Request& req,
-                                 SwdProtocol::Response& resp)
-  {
-    resp.ack = SwdProtocol::Ack::PROTOCOL;
-    resp.rdata = 0u;
-    resp.parity_ok = true;
-
-    const uint8_t REQUEST_BYTE = SwdProtocol::MakeRequest(req);
-
-    (void)SetSwdioDriveMode();
-    WriteByteLSBWithoutDelay(REQUEST_BYTE);
-
-    (void)SetSwdioSampleMode();
-    GenOneClkWithoutDelay();  // turnaround Host -> Target
-
-    // ACK: CMSIS SW_READ_BIT phase (sample in low phase)
-    uint8_t ack_raw = 0u;
-    for (uint32_t i = 0; i < ACK_BITS; ++i)
-    {
-      if (ReadBitAndClockWithoutDelay())
-      {
-        ack_raw |= static_cast<uint8_t>(1u << i);
-      }
-    }
-    resp.ack = SwdProtocol::DecodeAck(static_cast<uint8_t>(ack_raw & 0x7u));
-
-    if (resp.ack != SwdProtocol::Ack::OK)
-    {
-      GenOneClkWithoutDelay();
-      (void)SetSwdioDriveMode();
-      swdio_.Write(true);
-      swclk_.Write(false);
-      return ErrorCode::OK;
-    }
-
-    if (req.rnw)
-    {
-      uint32_t data = 0u;
-      for (uint32_t byte = 0; byte < 4u; ++byte)
-      {
-        const uint32_t B = ReadByteLSBWithoutDelay();
-        data |= (B << (8u * byte));
-      }
-
-      const bool PARITY_BIT = ReadBitAndClockWithoutDelay();
-      resp.rdata = data;
-      resp.parity_ok = (static_cast<uint8_t>(PARITY_BIT) == Parity32(data));
-
-      (void)SetSwdioDriveMode();
-      swdio_.Write(true);
-      GenOneClkWithoutDelay();
-
-      swclk_.Write(false);
-    }
-    else
-    {
-      (void)SetSwdioDriveMode();
-      GenOneClkWithoutDelay();
-
-      const uint32_t DATA = req.wdata;
-      for (uint32_t byte = 0; byte < 4u; ++byte)
-      {
-        const uint8_t B = static_cast<uint8_t>((DATA >> (8u * byte)) & 0xFFu);
-        WriteByteLSBWithoutDelay(B);
-      }
-
-      const bool PARITY_BIT = (Parity32(DATA) & 0x1u) != 0u;
-      WriteBitWithoutDelay(PARITY_BIT);
-
-      // 同 Transfer() 的写数据相尾部空闲时钟 / Same trailing idle clocks as Transfer().
-      swdio_.Write(false);
-      for (uint32_t k = 0; k < WRITE_TRAILING_IDLE_CLOCKS; ++k)
-      {
-        GenOneClkWithoutDelay();
+        GenOneClk<kDelay>();
       }
 
       swdio_.Write(true);
