@@ -170,20 +170,19 @@ class SwdGeneralGPIO final : public Swd
     // 都乘以 hz 比较，避免周期取整 / Compare after multiplying by hz, so the period is
     // never rounded.
     const uint64_t PERIOD_X10_HZ = static_cast<uint64_t>(cpu_hz) * 10u;
-    const uint64_t HZ = hz;
-    if (static_cast<uint64_t>(timing.fast_cycles_x10) * HZ >= PERIOD_X10_HZ)
+    const uint64_t REQ_HZ = hz;
+    if (static_cast<uint64_t>(timing.fast_cycles_x10) * REQ_HZ >= PERIOD_X10_HZ)
     {
       return 0u;
     }
-    const uint64_t A_HZ = static_cast<uint64_t>(timing.intercept_cycles_x10) * HZ;
+    const uint64_t A_HZ = static_cast<uint64_t>(timing.intercept_cycles_x10) * REQ_HZ;
     if (PERIOD_X10_HZ <= A_HZ)
     {
       return 1u;
     }
-    const uint64_t B_HZ =
-        static_cast<uint64_t>(timing.step_cycles_x10 == 0u ? 1u
-                                                           : timing.step_cycles_x10) *
-        HZ;
+    const uint64_t STEP_X10 =
+        (timing.step_cycles_x10 == 0u) ? 1u : timing.step_cycles_x10;
+    const uint64_t B_HZ = STEP_X10 * REQ_HZ;
     const uint64_t N = (PERIOD_X10_HZ - A_HZ + B_HZ - 1u) / B_HZ;
     if (N < 1u)
     {
