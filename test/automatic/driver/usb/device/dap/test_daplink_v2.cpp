@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -614,6 +615,68 @@ void TestVendorCommandsInBatch()
   }
 }
 
+/// WaitForWork waits for what the next Step(0) would do, without doing it: nothing
+/// pending times out; a queued command, an unbind wake-up and a freed response slot each
+/// return OK, and Step(0) then does that work.
+void TestWaitForWork()
+{
+  {
+    DapFixture f;
+    f.dap.BindEndpoints(f.pool, 0, false);
+    Run(f);
+    TEST_ASSERT(f.dap.WaitForWork(0) == ErrorCode::TIMEOUT);
+
+    // A queued command: WaitForWork does not execute it, Step(0) does.
+    f.out.HostSends({INFO, PACKET_SIZE_ID});
+    TEST_ASSERT(f.dap.WaitForWork(0) == ErrorCode::OK);
+    TEST_ASSERT(!f.in.active);
+    TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
+    TEST_ASSERT(f.in.active && f.in.Last().data[0] == INFO);
+    f.in.Complete();
+    Run(f);
+    TEST_ASSERT(f.dap.WaitForWork(0) == ErrorCode::TIMEOUT);
+
+    // An unbind posts a wake-up with no command: Step(0) then applies the session end.
+    f.dap.UnbindEndpoints(f.pool, false);
+    TEST_ASSERT(f.dap.WaitForWork(0) == ErrorCode::OK);
+    TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
+  }
+  {
+    // A seventh command with both IN slots and all four staging slots taken: Step(0)
+    // times out holding it, WaitForWork blocks until the host takes a response, then
+    // Step(0) executes it.
+    DapFixture f;
+    f.dap.BindEndpoints(f.pool, 0, false);
+    for (unsigned i = 0; i < 7; ++i)
+    {
+      Send(f, {INFO, PACKET_SIZE_ID});
+    }
+    TEST_ASSERT(f.in.starts.size() == 1);
+    TEST_ASSERT(f.dap.Step(0) == ErrorCode::TIMEOUT);
+    TEST_ASSERT(f.dap.WaitForWork(0) == ErrorCode::TIMEOUT);
+
+    std::atomic<bool> returned{false};
+    ErrorCode result = ErrorCode::FAILED;
+    std::thread waiter(
+        [&]()
+        {
+          result = f.dap.WaitForWork(2000);
+          returned.store(true);
+        });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    TEST_ASSERT(!returned.load());
+    f.in.Complete();
+    waiter.join();
+    TEST_ASSERT(result == ErrorCode::OK);
+    TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
+
+    size_t bytes = 0;
+    unsigned tails = 0;
+    Drain(f, bytes, tails);
+    TEST_ASSERT(f.in.sent.size() == 7U);
+  }
+}
+
 /// A batch whose responses do not fit the response buffer answers DAP_ERROR, also when a
 /// delay ran first.
 void TestBatchOverflowAnswersError()
@@ -883,6 +946,7 @@ int main()
   TestTransferAbortHasNoResponse();
   TestQueueAndExecuteAnswerPerPacket();
   TestVendorCommandsInBatch();
+  TestWaitForWork();
   TestBatchOverflowAnswersError();
   TestRebindDuringBatchThenDelay();
   TestHeldCommandDroppedAfterRebind();

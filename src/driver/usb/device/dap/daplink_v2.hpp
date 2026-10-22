@@ -327,6 +327,50 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
+  /**
+   * @brief 等到下一次 Step(0) 有事可做，不执行、不消耗唤醒。
+   *        Wait until the next Step(0) has work to do, without executing anything and
+   *        without consuming the wake-up.
+   *
+   * 没有持有命令时，等到有命令排队或解绑发出唤醒；持有一条在等响应槽的命令时，
+   * 等到有槽空出或会话结束。等到的信号量计数会还回去，所以随后的 Step(0) 看到同样的
+   * 工作；多出的一次唤醒由 Step 吸收。应用可以在锁外等待、只在执行时持锁：
+   * if (dap.WaitForWork(t) == OK) { lock; dap.Step(0); }。只能由调用 Step 的线程调用，
+   * 且不能与 Step 同时调用。
+   * With no command held, wait until a command is queued or an unbind posts its
+   * wake-up; with a command held that waits for a response slot, wait until a slot is
+   * free or the session ended. The semaphore count it waited for is given back, so the
+   * following Step(0) sees the same work; a spare wake-up is absorbed by Step. This lets
+   * the application wait outside a lock and hold it only to execute:
+   * if (dap.WaitForWork(t) == OK) { lock; dap.Step(0); }. Call it only from the thread
+   * that calls Step, never at the same time as Step.
+   *
+   * @param timeout_ms 最长等待时间；0 为不等待 / Longest wait; 0 does not wait
+   * @return OK 有工作；TIMEOUT 期限内没有 / OK when there is work; TIMEOUT when none
+   *         came in time
+   */
+  ErrorCode WaitForWork(uint32_t timeout_ms)
+  {
+    LibXR::Semaphore* sem = &cmd_sem_;
+    if (cur_cmd_ != SLOT_NONE)
+    {
+      // 持有命令：响应位置已就绪或会话已结束时，Step(0) 马上有事做。
+      // Holding a command: Step(0) has work at once when a response place is ready or
+      // the session ended.
+      if (cur_resp_ != SLOT_NONE || cur_in_.Valid() || !StepStillBound())
+      {
+        return ErrorCode::OK;
+      }
+      sem = &slot_sem_;
+    }
+    if (sem->Wait(timeout_ms) != ErrorCode::OK)
+    {
+      return ErrorCode::TIMEOUT;
+    }
+    sem->Post();
+    return ErrorCode::OK;
+  }
+
  protected:
   /**
    * @brief Bind endpoint resources
