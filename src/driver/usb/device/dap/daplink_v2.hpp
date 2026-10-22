@@ -171,11 +171,35 @@ class DapLinkV2Class : public DeviceClass
   using CommandHook = bool (*)(void* ctx, const uint8_t* req, uint16_t req_len,
                                uint8_t* resp, uint16_t resp_cap, uint16_t& out_len);
 
-  /// 注册命令钩子，ctx 原样传回。 / Register the command hook; ctx is passed through.
-  void SetCommandHook(CommandHook hook, void* ctx = nullptr)
+  /// 厂商命令长度：req 指向一条厂商命令（0x80..0x9F），avail 是从它开始已有的字节数；
+  /// 能确定这条命令的完整长度时写入 len 并返回 true。只做解析，不阻塞：它也在 USB
+  /// owner 上下文（可能是中断）里判断收包是否完整时调用。
+  /// Vendor command length: req points at one vendor command (0x80..0x9F) and avail is
+  /// the number of bytes present from there; when the whole length of that command is
+  /// known, write it to len and return true. Parsing only, never blocking: it is also
+  /// called in the USB owner context (possibly an interrupt) to decide whether a received
+  /// command is complete.
+  using CommandLengthHook = bool (*)(void* ctx, const uint8_t* req, uint16_t avail,
+                                     uint16_t& len);
+
+  /**
+   * @brief 注册命令钩子，ctx 原样传回 / Register the command hook; ctx is passed
+   *        through.
+   *
+   * 给出 length 时，DAP_ExecuteCommands / DAP_QueueCommands 里也可以包含厂商命令
+   * （0x80..0x9F）：length 给出每条厂商命令的长度，hook 执行它，与 CMSIS-DAP 参考实现
+   * 一样。不给 length 时，含厂商命令的批次回 DAP_ERROR。
+   * With length, DAP_ExecuteCommands / DAP_QueueCommands may also contain vendor
+   * commands (0x80..0x9F): length gives each vendor command's length and hook executes
+   * it, as in the CMSIS-DAP reference implementation. Without length a batch that
+   * contains a vendor command answers DAP_ERROR.
+   */
+  void SetCommandHook(CommandHook hook, void* ctx = nullptr,
+                      CommandLengthHook length = nullptr)
   {
     command_hook_ = hook;
     command_hook_ctx_ = ctx;
+    command_length_hook_ = length;
   }
 
   /**
@@ -1306,10 +1330,27 @@ class DapLinkV2Class : public DeviceClass
       // Reject nested queue/execute in queued stream.
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::QUEUE_COMMANDS):
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::EXECUTE_COMMANDS):
-      default:
         return false;
+      default:
+        if (!IsVendorCommand(CMD) || command_length_hook_ == nullptr)
+        {
+          return false;
+        }
+        {
+          uint16_t len = 0u;
+          if (!command_length_hook_(command_hook_ctx_, req, avail, len) || len == 0u ||
+              len > avail)
+          {
+            return false;
+          }
+          cmd_len = len;
+          return true;
+        }
     }
   }
+
+  /// 厂商命令 ID 范围 / Vendor command id range.
+  static constexpr bool IsVendorCommand(uint8_t id) { return id >= 0x80u && id <= 0x9Fu; }
 
   /**
    * @brief 依次执行请求里的 count 条命令，响应拼成 [0x7F, count, 各条响应...]
@@ -1422,9 +1463,14 @@ class DapLinkV2Class : public DeviceClass
     UNKNOWN,    ///< 无法由内容确定长度 / Length cannot be derived from the content
   };
 
-  /// 已识别的、可由内容确定长度的命令 / Commands whose length follows from the content
-  static bool IsScannableCommand(uint8_t id)
+  /// 已识别的、可由内容确定长度的命令（厂商命令需要注册长度钩子） / Commands whose
+  /// length follows from the content (vendor commands need a length hook)
+  bool IsScannableCommand(uint8_t id) const
   {
+    if (IsVendorCommand(id))
+    {
+      return command_length_hook_ != nullptr;
+    }
     switch (id)
     {
       case ToU8(LibXR::USB::DapLinkV2Def::CommandId::INFO):
@@ -4505,7 +4551,9 @@ class DapLinkV2Class : public DeviceClass
   std::atomic<bool> transfer_abort_{false};  ///< DAP_TransferAbort 标志 / Abort flag
 
   CommandHook command_hook_ = nullptr;  ///< 命令钩子 / Command hook
-  void* command_hook_ctx_ = nullptr;    ///< 钩子上下文 / Hook context
+  CommandLengthHook command_length_hook_ =
+      nullptr;                        ///< 厂商命令长度钩子 / Vendor command length hook
+  void* command_hook_ctx_ = nullptr;  ///< 钩子上下文 / Hook context
 
  private:
   SwdPort& swd_;  ///< SWD link

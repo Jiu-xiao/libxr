@@ -548,6 +548,72 @@ void TestQueueAndExecuteAnswerPerPacket()
   f.in.Complete();
 }
 
+/// Test vendor command 0x81 [0x81, x] answers [0x81, x + 1]; its length is 2.
+constexpr uint8_t VENDOR_ID = 0x81;
+
+bool VendorHook(void*, const uint8_t* req, uint16_t req_len, uint8_t* resp,
+                uint16_t resp_cap, uint16_t& out_len)
+{
+  if (req_len < 2u || req[0] != VENDOR_ID || resp_cap < 2u) return false;
+  resp[0] = VENDOR_ID;
+  resp[1] = static_cast<uint8_t>(req[1] + 1u);
+  out_len = 2u;
+  return true;
+}
+
+uint16_t g_vendor_len = 2u;
+
+bool VendorLength(void*, const uint8_t* req, uint16_t, uint16_t& len)
+{
+  if (req[0] != VENDOR_ID) return false;
+  len = g_vendor_len;
+  return true;
+}
+
+/// DAP_ExecuteCommands and DAP_QueueCommands run vendor commands in the batch when the
+/// command hook gives their length, as DAP_ProcessVendorCommand does in the CMSIS-DAP
+/// reference: [0x7F, count, responses...]. Without a length, or with a length of 0 or
+/// past the request, the batch answers [0x7F, 0xFF] (DAP_ERROR).
+void TestVendorCommandsInBatch()
+{
+  const uint8_t EXECUTE = static_cast<uint8_t>(CommandId::EXECUTE_COMMANDS);
+  const uint8_t QUEUE = static_cast<uint8_t>(CommandId::QUEUE_COMMANDS);
+  const std::vector<uint8_t> REPLY = {EXECUTE,   3,    INFO, 1, 0x04,
+                                      VENDOR_ID, 0x11, INFO, 1, 0x04};
+  for (const uint8_t ID : {EXECUTE, QUEUE})
+  {
+    DapFixture f;
+    f.dap.BindEndpoints(f.pool, 0, false);
+
+    // Command hook without a length: the batch cannot be sized.
+    f.dap.SetCommandHook(&VendorHook, nullptr);
+    Send(f, {ID, 3, INFO, PACKET_COUNT_ID, VENDOR_ID, 0x10, INFO, PACKET_COUNT_ID});
+    TEST_ASSERT(f.in.active);
+    TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({EXECUTE, 0xFF}));
+    f.in.Complete();
+
+    f.dap.SetCommandHook(&VendorHook, nullptr, &VendorLength);
+    g_vendor_len = 2u;
+    Send(f, {ID, 3, INFO, PACKET_COUNT_ID, VENDOR_ID, 0x10, INFO, PACKET_COUNT_ID});
+    TEST_ASSERT(f.in.active);
+    TEST_ASSERT(f.in.Last().data == REPLY);
+    f.in.Complete();
+
+    // A length past the request, or zero, is an error.
+    g_vendor_len = 9u;
+    Send(f, {ID, 3, INFO, PACKET_COUNT_ID, VENDOR_ID, 0x10, INFO, PACKET_COUNT_ID});
+    TEST_ASSERT(f.in.active);
+    TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({EXECUTE, 0xFF}));
+    f.in.Complete();
+    g_vendor_len = 0u;
+    Send(f, {ID, 1, VENDOR_ID, 0x10});
+    TEST_ASSERT(f.in.active);
+    TEST_ASSERT(f.in.Last().data == std::vector<uint8_t>({EXECUTE, 0xFF}));
+    f.in.Complete();
+    g_vendor_len = 2u;
+  }
+}
+
 /// A batch whose responses do not fit the response buffer answers DAP_ERROR, also when a
 /// delay ran first.
 void TestBatchOverflowAnswersError()
@@ -816,6 +882,7 @@ int main()
   TestZeroPaddedTransferIsDropped();
   TestTransferAbortHasNoResponse();
   TestQueueAndExecuteAnswerPerPacket();
+  TestVendorCommandsInBatch();
   TestBatchOverflowAnswersError();
   TestRebindDuringBatchThenDelay();
   TestHeldCommandDroppedAfterRebind();
