@@ -2,8 +2,9 @@
 
 #include "esp_memory_utils.h"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
-    CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED &&                                              \
+    ((defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2) || \
+     (defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3))
 
 #include <algorithm>
 #include <cstring>

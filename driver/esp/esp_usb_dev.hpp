@@ -12,8 +12,9 @@
 #include "usb/core/ep_pool.hpp"
 #include "usb/device/dev_core.hpp"
 
-#if (SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
-     CONFIG_IDF_TARGET_ESP32S3) ||                                  \
+#if (SOC_USB_OTG_SUPPORTED &&                                                \
+     ((defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2) ||   \
+      (defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3))) || \
     defined(__DOXYGEN__)
 
 namespace LibXR
@@ -22,14 +23,15 @@ namespace LibXR
 class ESP32USBEndpoint;
 
 /**
- * @brief ESP32-S3 USB OTG 设备核心实现 / ESP32-S3 USB OTG device-core implementation
+ * @brief ESP32-S2/S3 USB OTG 设备核心实现 / ESP32-S2/S3 USB OTG device-core
+ * implementation
  */
 class ESP32USBDevice : public USB::EndpointPool,
                        public USB::DeviceCore<USB::FullSpeedCapabilities>
 {
  public:
   /**
-   * @brief ESP32-S3 USB endpoint 配置项 / ESP32-S3 USB endpoint configuration entry
+   * @brief ESP32-S2/S3 USB endpoint 配置项 / ESP32-S2/S3 USB endpoint configuration entry
    */
   struct EPConfig
   {
@@ -71,7 +73,7 @@ class ESP32USBDevice : public USB::EndpointPool,
   };
 
   /**
-   * @brief 构造 ESP32-S3 USB device core / Construct the ESP32-S3 USB device core
+   * @brief 构造 ESP32-S2/S3 USB device core / Construct the ESP32-S2/S3 USB device core
    *
    * @param ep_cfgs endpoint 构造配置列表 / Endpoint construction config list
    * @param packet_size EP0 包长配置 / EP0 packet-size configuration

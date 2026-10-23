@@ -2,8 +2,9 @@
 
 #include "usb/core/ep.hpp"
 
-#if (SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
-     CONFIG_IDF_TARGET_ESP32S3) ||                                  \
+#if (SOC_USB_OTG_SUPPORTED &&                                                \
+     ((defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2) ||   \
+      (defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3))) || \
     defined(__DOXYGEN__)
 
 namespace LibXR
@@ -12,7 +13,7 @@ namespace LibXR
 class ESP32USBDevice;
 
 /**
- * @brief ESP32-S3 USB endpoint implementation
+ * @brief ESP32-S2/S3 USB endpoint implementation
  */
 class ESP32USBEndpoint : public USB::Endpoint
 {

@@ -1,14 +1,21 @@
 #include "esp_usb_dev.hpp"
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
-    CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED &&                                              \
+    ((defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2) || \
+     (defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3))
 
 #include <cstring>
 #include <new>
 
+#if CONFIG_IDF_TARGET_ESP32S2
+#include "esp32s2/rom/usb/cdc_acm.h"
+#include "esp32s2/rom/usb/usb_dc.h"
+#include "esp32s2/rom/usb/usb_device.h"
+#else
 #include "esp32s3/rom/usb/cdc_acm.h"
 #include "esp32s3/rom/usb/usb_dc.h"
 #include "esp32s3/rom/usb/usb_device.h"
+#endif
 #include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_private/usb_phy.h"
@@ -965,8 +972,9 @@ bool ESP32USBDevice::EnsureRxFifo(uint16_t packet_size)
 
 #endif
 
-#if SOC_USB_OTG_SUPPORTED && defined(CONFIG_IDF_TARGET_ESP32S3) && \
-    CONFIG_IDF_TARGET_ESP32S3
+#if SOC_USB_OTG_SUPPORTED &&                                              \
+    ((defined(CONFIG_IDF_TARGET_ESP32S2) && CONFIG_IDF_TARGET_ESP32S2) || \
+     (defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3))
 void LibXR::ESP32USBDevice::OnControllerReset()
 {
   ResetDeviceState();
