@@ -517,6 +517,11 @@ class WritePort
    *       Capacity() may first await a timed-out BLOCK's retirement, then submit and
    *       await its own completion; each wait uses the original timeout. A retirement
    *       timeout submits no new data; a completion timeout leaves queued data intact.
+   * @warning 两种超时都返回 TIMEOUT，调用者无法区分本次数据是否已排队：超时后重发
+   *          可能重复，视作已发送可能丢失。
+   *          Both timeouts return TIMEOUT, so the caller cannot tell whether this
+   *          call's data was queued: resending after a timeout may duplicate it, and
+   *          treating it as sent may lose it.
    * @note 完成方已认领本次 BLOCK 时，超时方须等信号量交接并返回实际完成结果；
    *       因此调用可能超过指定时间。超时返回后，旧请求不会再访问该调用的信号量。
    *       If completion is already claimed, the caller waits for the semaphore handoff
