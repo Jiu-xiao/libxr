@@ -327,6 +327,38 @@ class DapLinkV2Class : public DeviceClass
     return ErrorCode::OK;
   }
 
+  /// 会话复位闸门：返回 false 时，USB 绑定/解绑不复位 SWD 与 DAP 状态。
+  /// Session reset gate: when it returns false, a USB bind/unbind does not reset the SWD
+  /// and DAP state.
+  using SessionResetGate = bool (*)(void* ctx);
+
+  /**
+   * @brief 注册会话复位闸门，ctx 原样传回 / Register the session reset gate; ctx is
+   *        passed through.
+   *
+   * USB 绑定或解绑后，Step 线程本来会关闭 SWD、复位 DAP
+   * 状态（调试端口、时钟、引脚影子）。 探针被 USB
+   * 以外的传输（ExecuteExternal）占用时，这会打断那个会话。闸门在 Step 线程里、
+   * 复位之前调用；返回 false 时只记下新的会话并清掉解绑发出的中止标志，SWD 与 DAP
+   * 状态保持 不变。不注册闸门时总是复位。绑定变化前收到的 USB 命令照样丢弃，与闸门无关。
+   * After a USB bind or unbind the Step thread closes SWD and resets the DAP state
+   * (debug port, clock, pin shadow). When a transport other than USB (ExecuteExternal)
+   * owns the probe, that breaks its session. The gate is called in the Step thread
+   * before the reset; when it returns false, only the new session is recorded and the
+   * abort flag the unbind raised is cleared, and the SWD and DAP state stay as they are.
+   * Without a gate the state is always reset. A USB command received before the binding
+   * changed is dropped regardless of the gate.
+   *
+   * @note 解绑在 USB 上下文里置中止标志，正在执行的传输可能因此提前结束一次。
+   *       The unbind raises the abort flag in the USB context, so a transfer that is
+   *       running at that moment may still end early once.
+   */
+  void SetSessionResetGate(SessionResetGate gate, void* ctx = nullptr)
+  {
+    session_reset_gate_ = gate;
+    session_reset_gate_ctx_ = ctx;
+  }
+
   /**
    * @brief 等到下一次 Step(0) 有事可做，不执行、不消耗唤醒。
    *        Wait until the next Step(0) has work to do, without executing anything and
@@ -1089,6 +1121,15 @@ class DapLinkV2Class : public DeviceClass
       return;
     }
     session_epoch_ = epoch;
+
+    if (session_reset_gate_ != nullptr && !session_reset_gate_(session_reset_gate_ctx_))
+    {
+      // 别的传输占着探针：不碰 SWD 与 DAP 状态，只清掉解绑发出的中止。
+      // Another transport owns the probe: leave SWD and the DAP state alone, only clear
+      // the abort the unbind raised.
+      transfer_abort_.store(false, std::memory_order_release);
+      return;
+    }
 
     swd_.Close();
     if constexpr (JTAG_ENABLED)
@@ -4598,6 +4639,8 @@ class DapLinkV2Class : public DeviceClass
   CommandLengthHook command_length_hook_ =
       nullptr;                        ///< 厂商命令长度钩子 / Vendor command length hook
   void* command_hook_ctx_ = nullptr;  ///< 钩子上下文 / Hook context
+  SessionResetGate session_reset_gate_ = nullptr;  ///< 会话复位闸门 / Session reset gate
+  void* session_reset_gate_ctx_ = nullptr;         ///< 闸门上下文 / Gate context
 
  private:
   SwdPort& swd_;  ///< SWD link

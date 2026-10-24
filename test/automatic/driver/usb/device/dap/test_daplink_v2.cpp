@@ -677,6 +677,92 @@ void TestWaitForWork()
   }
 }
 
+/// Session reset gate. Without a gate, or with one that returns true, a USB unbind
+/// makes the Step thread close SWD and reset the DAP state. A gate that returns false
+/// keeps SWD open, the debug port and the clock, so a session that another transport
+/// runs through ExecuteExternal goes on working. A USB command received before the
+/// binding changed is dropped either way.
+bool g_gate_allows_reset = true;
+bool ResetGate(void*) { return g_gate_allows_reset; }
+
+/// Connect SWD and set a 4 MHz clock through ExecuteExternal, as a second transport does.
+void ConnectThroughExternal(DapFixture& f)
+{
+  uint8_t resp[64] = {};
+  uint16_t len = 0;
+  const uint8_t CONNECT[] = {static_cast<uint8_t>(CommandId::CONNECT), 1};
+  TEST_ASSERT(f.dap.ExecuteExternal(CONNECT, sizeof(CONNECT), resp, sizeof(resp), len) ==
+              ErrorCode::OK);
+  TEST_ASSERT(len == 2 && resp[1] == 1);  // DAP_Connect: SWD
+  const uint8_t CLOCK[] = {static_cast<uint8_t>(CommandId::SWJ_CLOCK), 0x00, 0x09, 0x3D,
+                           0x00};  // 4'000'000 Hz
+  TEST_ASSERT(f.dap.ExecuteExternal(CLOCK, sizeof(CLOCK), resp, sizeof(resp), len) ==
+              ErrorCode::OK);
+  TEST_ASSERT(f.swd.clock_hz == 4'000'000u);
+}
+
+/// DAP_Transfer reading DP IDCODE through ExecuteExternal: true when it is answered OK.
+bool ExternalDpReadOk(DapFixture& f)
+{
+  uint8_t resp[64] = {};
+  uint16_t len = 0;
+  const uint8_t READ[] = {static_cast<uint8_t>(CommandId::TRANSFER), 0, 1, 0x02};
+  if (f.dap.ExecuteExternal(READ, sizeof(READ), resp, sizeof(resp), len) != ErrorCode::OK)
+    return false;
+  return len >= 3 && resp[1] == 1 && resp[2] == 0x01;  // one transfer, ACK OK
+}
+
+void TestSessionResetGate()
+{
+  for (const int MODE : {0, 1, 2})  // 0: no gate, 1: gate true, 2: gate false
+  {
+    DapFixture f;
+    f.dap.BindEndpoints(f.pool, 0, false);
+    Run(f);
+    if (MODE != 0)
+    {
+      g_gate_allows_reset = (MODE == 1);
+      f.dap.SetSessionResetGate(&ResetGate, nullptr);
+    }
+    ConnectThroughExternal(f);
+    TEST_ASSERT(ExternalDpReadOk(f));
+    const unsigned CLOSES = f.swd.closes;
+
+    // The host closes the USB device: unbind, then the Step thread's wake-up.
+    f.dap.UnbindEndpoints(f.pool, false);
+    TEST_ASSERT(f.dap.Step(0) == ErrorCode::OK);
+    if (MODE == 2)
+    {
+      TEST_ASSERT(f.swd.closes == CLOSES);
+      TEST_ASSERT(f.swd.clock_hz == 4'000'000u);
+      TEST_ASSERT(ExternalDpReadOk(f));
+    }
+    else
+    {
+      TEST_ASSERT(f.swd.closes == CLOSES + 1u);
+      TEST_ASSERT(f.swd.clock_hz == 1'000'000u);
+    }
+    g_gate_allows_reset = true;
+  }
+
+  // A USB command from before the rebind is dropped even when the gate keeps the state.
+  DapFixture f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  g_gate_allows_reset = false;
+  f.dap.SetSessionResetGate(&ResetGate, nullptr);
+  for (unsigned i = 0; i < 6; ++i)
+  {
+    Send(f, {INFO, PACKET_SIZE_ID});
+  }
+  f.out.HostSends({static_cast<uint8_t>(CommandId::SWJ_SEQUENCE), 8, 0xFF});
+  TEST_ASSERT(f.dap.Step(0) == ErrorCode::TIMEOUT);
+  f.dap.UnbindEndpoints(f.pool, false);
+  f.dap.BindEndpoints(f.pool, 0, false);
+  Run(f);
+  TEST_ASSERT(f.swd.sequences == 0);
+  g_gate_allows_reset = true;
+}
+
 /// A batch whose responses do not fit the response buffer answers DAP_ERROR, also when a
 /// delay ran first.
 void TestBatchOverflowAnswersError()
@@ -947,6 +1033,7 @@ int main()
   TestQueueAndExecuteAnswerPerPacket();
   TestVendorCommandsInBatch();
   TestWaitForWork();
+  TestSessionResetGate();
   TestBatchOverflowAnswersError();
   TestRebindDuringBatchThenDelay();
   TestHeldCommandDroppedAfterRebind();
