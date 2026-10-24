@@ -906,6 +906,45 @@ void TestHostAboveAdvertisedPacketCountThreaded()
   TEST_ASSERT(order_ok);
 }
 
+/// With an advertised count of 2, the host sends before the DAP thread runs at all. The
+/// OUT endpoint accepts at least three packets, then stops arming a receive (the host
+/// sees NAK); every accepted command is answered in order once Step runs, and the OUT
+/// endpoint is armed again afterwards.
+void TestThirdCommandBeforeStepCount2()
+{
+  DapFixtureCount2 f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  constexpr unsigned LIMIT = 16;
+  unsigned accepted = 0;
+  while (accepted < LIMIT && f.out.active)
+  {
+    f.out.HostSends({INFO, (accepted % 2u == 0u) ? PACKET_COUNT_ID : PACKET_SIZE_ID});
+    ++accepted;
+  }
+  TEST_ASSERT(accepted >= 3u);
+  TEST_ASSERT(accepted < LIMIT);  // the endpoint NAKs before any command ran
+  TEST_ASSERT(!f.out.active);
+  std::vector<size_t> lengths;
+  for (unsigned guard = 0; guard < 4u * LIMIT && lengths.size() < accepted; ++guard)
+  {
+    while (f.dap.Step(0) == ErrorCode::OK)
+    {
+    }
+    if (f.in.active)
+    {
+      lengths.push_back(f.in.Last().length);
+      f.in.Complete();
+    }
+  }
+  TEST_ASSERT(lengths.size() == accepted);
+  for (unsigned i = 0; i < accepted; ++i)
+  {
+    TEST_ASSERT(lengths[i] == ((i % 2u == 0u) ? 3U : 4U));
+  }
+  TEST_ASSERT(!f.in.active);
+  TEST_ASSERT(f.out.active);  // armed again once command slots came back
+}
+
 /// A batch whose responses do not fit the response buffer answers DAP_ERROR, also when a
 /// delay ran first.
 void TestBatchOverflowAnswersError()
@@ -1179,6 +1218,7 @@ int main()
   TestSessionResetGate();
   TestHostAboveAdvertisedPacketCount();
   TestHostAboveAdvertisedPacketCountThreaded();
+  TestThirdCommandBeforeStepCount2();
   TestBatchOverflowAnswersError();
   TestRebindDuringBatchThenDelay();
   TestHeldCommandDroppedAfterRebind();
