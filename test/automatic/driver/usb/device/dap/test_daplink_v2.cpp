@@ -763,6 +763,149 @@ void TestSessionResetGate()
   g_gate_allows_reset = true;
 }
 
+/// A DAP v2 class that advertises two packets in flight, for hosts that keep more.
+using DapV2Count2 = DapLinkV2Class<FakeSwd, 512u, 2u, 1024u>;
+
+class TestDap2Count2 : public DapV2Count2
+{
+ public:
+  using DapV2Count2::BindEndpoints;
+  using DapV2Count2::DapV2Count2;
+  using DapV2Count2::OnService;
+  using DapV2Count2::UnbindEndpoints;
+};
+
+struct DapFixtureCount2
+{
+  Block<2048> in_storage, out_storage;
+  EndpointPool pool{4};
+  MockEndpoint in{Number::EP1, Direction::IN, in_storage.Raw()};
+  MockEndpoint out{Number::EP2, Direction::OUT, out_storage.Raw()};
+  FakeSwd swd;
+  TestDap2Count2 dap;
+  DeviceComposition composition;
+  Callback<uint32_t> handler;
+
+  DapFixtureCount2()
+      : swd(),
+        dap(Number::EP1, Number::EP2, swd),
+        composition(pool, {&TEST_LANGUAGE}, {{&dap}})
+  {
+    TEST_ASSERT(pool.Put(&in) == ErrorCode::OK);
+    TEST_ASSERT(pool.Put(&out) == ErrorCode::OK);
+    handler = Callback<uint32_t>::Create(
+        [](bool in_isr, DeviceClass* self, uint32_t events)
+        {
+          if ((events & EndpointPool::CLASS_EVENT) != 0U) self->OnService(in_isr);
+        },
+        static_cast<DeviceClass*>(&dap));
+    pool.SetControlHandler(handler);
+  }
+};
+
+/// A host may keep more commands in flight than DAP_Info packet count advertises. The
+/// class must hold the extra ones off (the OUT endpoint NAKs: the mock lets the host send
+/// only while a receive is armed) and answer every command it received, in order: none
+/// may be dropped, overwritten or answered twice. Commands alternate DAP_Info packet
+/// count (3-byte answer) and packet size (4-byte answer), so the lengths on the wire show
+/// the order.
+void TestHostAboveAdvertisedPacketCount()
+{
+  for (unsigned depth = 3; depth <= 6; ++depth)
+  {
+    DapFixtureCount2 f;
+    f.dap.BindEndpoints(f.pool, 0, false);
+    constexpr unsigned TOTAL = 40;
+    unsigned sent = 0;
+    unsigned answered = 0;
+    std::vector<size_t> lengths;
+    unsigned spins = 0;
+    while (answered < TOTAL && spins++ < 10000)
+    {
+      // The host sends as long as it may (depth) and the device accepts (armed OUT).
+      while (sent < TOTAL && sent - answered < depth && f.out.active)
+      {
+        const uint8_t id = (sent % 2u == 0u) ? PACKET_COUNT_ID : PACKET_SIZE_ID;
+        f.out.HostSends({INFO, id});
+        ++sent;
+      }
+      // The DAP thread runs what it has.
+      while (f.dap.Step(0) == ErrorCode::OK)
+      {
+      }
+      // The host reads one response.
+      if (f.in.active)
+      {
+        lengths.push_back(f.in.Last().length);
+        f.in.Complete();
+        ++answered;
+      }
+    }
+    TEST_ASSERT(answered == TOTAL);
+    TEST_ASSERT(lengths.size() == TOTAL);
+    for (unsigned i = 0; i < TOTAL; ++i)
+    {
+      TEST_ASSERT(lengths[i] == ((i % 2u == 0u) ? 3U : 4U));
+    }
+    TEST_ASSERT(!f.in.active);
+  }
+}
+
+/// The same with the DAP thread running concurrently and the traffic of a memory read
+/// loop: a DAP_Transfer TAR write (3-byte answer) alternating with a 128-word
+/// DAP_TransferBlock read (516-byte answer), the host keeping 4 in flight against an
+/// advertised count of 2.
+void TestHostAboveAdvertisedPacketCountThreaded()
+{
+  DapFixtureCount2 f;
+  f.dap.BindEndpoints(f.pool, 0, false);
+  std::atomic<bool> stop{false};
+  std::thread dap_thread(
+      [&]()
+      {
+        while (!stop.load())
+        {
+          (void)f.dap.Step(1);
+        }
+      });
+  constexpr unsigned TOTAL = 2000;
+  constexpr unsigned DEPTH = 4;
+  const std::vector<uint8_t> TAR = {
+      static_cast<uint8_t>(CommandId::TRANSFER), 0, 1, 0x05, 0x00, 0x00, 0x00, 0x20};
+  const std::vector<uint8_t> BLOCK = {static_cast<uint8_t>(CommandId::TRANSFER_BLOCK), 0,
+                                      128, 0, 0x0F};
+  unsigned sent = 0;
+  unsigned answered = 0;
+  bool order_ok = true;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+  while (answered < TOTAL && std::chrono::steady_clock::now() < deadline)
+  {
+    if (sent < TOTAL && sent - answered < DEPTH && f.out.active)
+    {
+      f.out.HostSends(sent % 2u == 0u ? TAR : BLOCK);
+      ++sent;
+      continue;
+    }
+    if (f.in.active)
+    {
+      const size_t want = (answered % 2u == 0u) ? 3U : 516U;
+      if (f.in.Last().length != want) order_ok = false;
+      f.in.Complete();
+      ++answered;
+      continue;
+    }
+    std::this_thread::yield();
+  }
+  stop.store(true);
+  dap_thread.join();
+  if (answered != TOTAL || !order_ok)
+  {
+    std::fprintf(stderr, "sent=%u answered=%u order_ok=%d\n", sent, answered, order_ok);
+  }
+  TEST_ASSERT(answered == TOTAL);
+  TEST_ASSERT(order_ok);
+}
+
 /// A batch whose responses do not fit the response buffer answers DAP_ERROR, also when a
 /// delay ran first.
 void TestBatchOverflowAnswersError()
@@ -1034,6 +1177,8 @@ int main()
   TestVendorCommandsInBatch();
   TestWaitForWork();
   TestSessionResetGate();
+  TestHostAboveAdvertisedPacketCount();
+  TestHostAboveAdvertisedPacketCountThreaded();
   TestBatchOverflowAnswersError();
   TestRebindDuringBatchThenDelay();
   TestHeldCommandDroppedAfterRebind();
